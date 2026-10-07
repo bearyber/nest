@@ -1,0 +1,163 @@
+.screen {
+  display: grid;
+  place-items: center;
+  height: 100%;
+  padding: var(--space-6);
+  overflow-y: auto;
+}
+
+.card {
+  display: grid;
+  gap: var(--space-3);
+  width: 520px;
+  max-width: 100%;
+  padding: var(--space-6);
+  border: var(--hairline) solid var(--separator);
+  border-radius: 12px;
+  background: var(--sheet-bg);
+  box-shadow: var(--shadow-sheet);
+}
+
+.card h1 {
+  margin: 0;
+  font-size: 20px;
+  font-weight: 600;
+  text-wrap: balance;
+}
+
+.card p {
+  margin: 0;
+  color: var(--text-secondary);
+  max-width: 55ch;
+}
+
+.dots {
+  display: flex;
+  gap: 6px;
+  margin: 0 0 var(--space-2);
+  padding: 0;
+  list-style: none;
+}
+
+.dot,
+.dotOn {
+  width: 18px;
+  height: 4px;
+  border-radius: 2px;
+  background: var(--separator);
+}
+
+.dotOn {
+  background: var(--accent);
+}
+
+.bigIcon {
+  width: 44px;
+  height: 44px;
+  color: var(--folder);
+}
+
+.buttons,
+.nav {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+}
+
+.nav {
+  justify-content: space-between;
+  margin-top: var(--space-2);
+}
+
+.picked {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2);
+  padding: var(--space-2) var(--space-3);
+  border: var(--hairline) solid var(--separator);
+  border-radius: 8px;
+  background: var(--card-bg);
+}
+
+.folderIcon {
+  flex: none;
+  color: var(--folder);
+}
+
+.mono {
+  font-family: var(--font-mono);
+  font-size: 13px;
+  overflow-wrap: anywhere;
+}
+
+.found {
+  padding: 1px 8px;
+  border-radius: 10px;
+  background: var(--accent-soft);
+  color: var(--accent);
+  font-size: 11px;
+  font-weight: 600;
+}
+
+.list {
+  display: grid;
+  gap: var(--space-2);
+  max-height: 260px;
+  overflow-y: auto;
+}
+
+.check {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--space-2);
+}
+
+.check input {
+  margin: 3px 0 0;
+  accent-color: var(--accent);
+}
+
+.sub {
+  font-size: var(--text-small);
+  color: var(--text-secondary);
+}
+
+.spaceRow {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+.input {
+  flex: 1;
+  min-width: 0;
+  height: 30px;
+  padding: 0 10px;
+  border: var(--hairline) solid var(--control-border);
+  border-radius: var(--radius-control);
+  background: var(--control-bg);
+  user-select: text;
+  -webkit-user-select: text;
+}
+
+.error {
+  color: var(--error) !important;
+  font-size: var(--text-small);
+}
+
+/* Job-code letter for this computer. */
+.letterRow {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--space-3);
+}
+
+.letter {
+  flex: none;
+  width: 56px;
+  font-family: var(--font-mono);
+  font-size: 18px;
+  text-align: center;
+}

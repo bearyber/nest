@@ -1,0 +1,167 @@
+.row {
+  display: grid;
+  grid-template-columns: 112px minmax(0, 1fr);
+  gap: var(--space-3);
+  align-items: start;
+}
+
+.label {
+  padding-top: 5px;
+  text-align: right;
+  color: var(--text-secondary);
+}
+
+.required {
+  color: var(--text-tertiary);
+}
+
+.control {
+  min-width: 0;
+}
+
+.input,
+.textarea,
+.select {
+  width: 100%;
+  height: 30px;
+  padding: 0 10px;
+  border: var(--hairline) solid var(--control-border);
+  border-bottom-color: color-mix(in srgb, var(--control-border) 60%, var(--text) 40%);
+  border-radius: var(--radius-control);
+  background: var(--control-bg);
+  user-select: text;
+  -webkit-user-select: text;
+}
+
+.textarea {
+  height: auto;
+  min-height: 52px;
+  padding: 6px 10px;
+  resize: vertical;
+}
+
+.input:focus-visible,
+.textarea:focus-visible,
+.select:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 0;
+}
+
+.inline {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+.date {
+  max-width: 180px;
+}
+
+.check {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding-top: 5px;
+}
+
+.check input {
+  margin: 0;
+  accent-color: var(--accent);
+}
+
+.chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  padding-top: 1px;
+}
+
+.chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  height: 28px;
+  padding: 0 12px;
+  border: var(--hairline) solid var(--control-border);
+  border-radius: 14px;
+  background: var(--control-bg);
+  font-variant-numeric: tabular-nums;
+}
+
+.chip:hover {
+  background: var(--control-hover);
+}
+
+.chip[aria-pressed="true"] {
+  border-color: var(--accent);
+  background: var(--accent-soft);
+  color: var(--accent);
+  font-weight: 600;
+}
+
+.chip svg {
+  width: 12px;
+  height: 12px;
+}
+
+.error {
+  margin-top: var(--space-1);
+  font-size: var(--text-small);
+  color: var(--error);
+}
+
+.client {
+  position: relative;
+}
+
+.clientInputs {
+  display: grid;
+  grid-template-columns: 1fr 76px;
+  gap: var(--space-2);
+}
+
+.code {
+  font-family: var(--font-mono);
+  text-transform: uppercase;
+}
+
+.suggestions {
+  position: absolute;
+  z-index: 4;
+  top: calc(100% + 4px);
+  left: 0;
+  right: 84px;
+  margin: 0;
+  padding: var(--space-1);
+  list-style: none;
+  border: var(--hairline) solid var(--separator);
+  border-radius: 8px;
+  background: var(--popover-bg);
+  box-shadow: var(--shadow-popover);
+}
+
+.suggestions li {
+  padding: 5px var(--space-2);
+  border-radius: 5px;
+}
+
+.activeSuggestion {
+  background: var(--accent);
+  color: #fff;
+}
+
+.suggestionCode {
+  font-family: var(--font-mono);
+  opacity: 0.7;
+}
+
+/* Label above the control, for narrow places (the template editor's preview). */
+.stacked {
+  grid-template-columns: minmax(0, 1fr);
+  gap: 4px;
+}
+
+.stacked .label {
+  padding-top: 0;
+  text-align: left;
+}

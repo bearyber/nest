@@ -1,0 +1,103 @@
+.button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  height: 30px;
+  padding: 0 12px;
+  border: var(--hairline) solid var(--control-border);
+  border-radius: var(--radius-control);
+  background: var(--control-bg);
+  color: var(--text);
+  box-shadow: 0 1px 0 rgba(0, 0, 0, 0.04);
+  white-space: nowrap;
+}
+
+.button:hover:not(:disabled) {
+  background: var(--control-hover);
+}
+
+.button:disabled {
+  opacity: 0.45;
+}
+
+.primary {
+  min-width: 96px;
+  border-color: transparent;
+  background: var(--accent);
+  color: #fff;
+  font-weight: 600;
+}
+
+.primary:hover:not(:disabled) {
+  background: var(--accent);
+  filter: brightness(1.08);
+}
+
+.iconButton {
+  display: inline-grid;
+  place-items: center;
+  width: 26px;
+  height: 26px;
+  padding: 0;
+  border: var(--hairline) solid transparent;
+  border-radius: var(--radius-control);
+  background: transparent;
+  color: var(--text-secondary);
+}
+
+.iconButton:hover {
+  border-color: var(--separator);
+  background: var(--control-hover);
+  color: var(--text);
+}
+
+.iconButton svg {
+  width: 14px;
+  height: 14px;
+}
+
+.segmented {
+  display: inline-flex;
+  overflow: hidden;
+  border: var(--hairline) solid var(--control-border);
+  border-radius: var(--radius-control);
+  background: var(--control-bg);
+}
+
+.segmented button {
+  height: 28px;
+  padding: 0 14px;
+  border: none;
+  background: transparent;
+}
+
+.segmented button + button {
+  border-left: var(--hairline) solid var(--control-border);
+}
+
+.segmented button[aria-pressed="true"] {
+  background: var(--accent-soft);
+  color: var(--accent);
+  font-weight: 600;
+}
+
+/* Full width with equal halves (e.g. Active | Done in the details panel). */
+.block {
+  display: flex;
+  width: 100%;
+}
+
+.block button {
+  flex: 1;
+}
+
+.segmented button:disabled {
+  opacity: 0.5;
+}
+
+.kbd {
+  font-size: var(--text-small);
+  font-weight: 400;
+  opacity: 0.8;
+}

@@ -1,0 +1,117 @@
+.preview {
+  display: grid;
+  gap: var(--space-2);
+}
+
+.head {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+.title {
+  margin: 0;
+  font-size: var(--text-small);
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--text-tertiary);
+}
+
+.count {
+  font-size: var(--text-small);
+  color: var(--text-tertiary);
+  font-variant-numeric: tabular-nums;
+}
+
+.collapse {
+  margin-left: auto;
+}
+
+.box {
+  max-height: 240px;
+  overflow: auto;
+  padding: 6px;
+  border: var(--hairline) solid var(--separator);
+  border-radius: 8px;
+  background: var(--card-bg);
+}
+
+.list {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.list .list {
+  padding-left: 16px;
+}
+
+.row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  height: 24px;
+  padding: 0 6px;
+  border-radius: 4px;
+}
+
+.row:hover {
+  background: var(--control-hover);
+}
+
+.twisty {
+  flex: none;
+  width: 12px;
+  height: 12px;
+  color: var(--text-tertiary);
+  transition: transform var(--motion);
+}
+
+.open {
+  transform: rotate(90deg);
+}
+
+.folderIcon,
+.fileIcon {
+  flex: none;
+  width: 16px;
+  height: 16px;
+}
+
+.folderIcon {
+  color: var(--folder);
+}
+
+.fileIcon {
+  color: var(--text-tertiary);
+}
+
+.name {
+  font-family: var(--font-mono);
+  font-size: 12.5px;
+  white-space: nowrap;
+  user-select: text;
+  -webkit-user-select: text;
+}
+
+.root .name {
+  font-weight: 600;
+}
+
+/* In a column of its own (the template editor): grow, and cut long names instead of
+   scrolling sideways. */
+.tall {
+  max-height: none;
+  overflow-x: hidden;
+}
+
+.tall .row {
+  min-width: 0;
+}
+
+.tall .name {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}

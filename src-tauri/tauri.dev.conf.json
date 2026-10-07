@@ -1,0 +1,17 @@
+{
+  "app": {
+    "windows": [
+      {
+        "label": "main",
+        "title": "Nest",
+        "width": 1100,
+        "height": 700,
+        "minWidth": 900,
+        "minHeight": 560,
+        "center": true,
+        "transparent": true,
+        "dataDirectory": "com.intrvl.nest/dev-webview"
+      }
+    ]
+  }
+}

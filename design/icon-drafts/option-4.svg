@@ -1,0 +1,14 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024" width="1024" height="1024">
+  <title>Nest, option 4: tab monogram</title>
+  <defs>
+    <linearGradient id="o4-bg" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#2a2c31"/>
+      <stop offset="1" stop-color="#16171a"/>
+    </linearGradient>
+  </defs>
+  <rect x="100" y="100" width="824" height="824" rx="185" fill="url(#o4-bg)"/>
+  <!-- N drawn as a folder-tab profile turned on its side: rise, slant, rise -->
+  <polyline points="312,799 312,300 712,724 712,225" fill="none" stroke="#ece9e2" stroke-width="150" stroke-linejoin="round" stroke-linecap="butt"/>
+  <!-- the raised tab end, in accent -->
+  <line x1="712" y1="225" x2="712" y2="390" stroke="#0a84ff" stroke-width="150" stroke-linecap="butt"/>
+</svg>

@@ -1,0 +1,25 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024" width="1024" height="1024">
+  <title>Nest, option 6: N on a graded folder</title>
+  <defs>
+    <linearGradient id="o6-bg" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#2a2c31"/>
+      <stop offset="1" stop-color="#16171a"/>
+    </linearGradient>
+    <clipPath id="o6-tab">
+      <rect x="212" y="232" width="330" height="200" rx="48"/>
+    </clipPath>
+  </defs>
+  <rect x="100" y="100" width="824" height="824" rx="185" fill="url(#o6-bg)"/>
+  <!-- back panel -->
+  <rect x="212" y="312" width="600" height="458" rx="56" fill="#4a4d54"/>
+  <!-- tab with three muted channel stripes -->
+  <g clip-path="url(#o6-tab)">
+    <rect x="212" y="232" width="110" height="200" fill="#d0625b"/>
+    <rect x="322" y="232" width="110" height="200" fill="#5aa57d"/>
+    <rect x="432" y="232" width="110" height="200" fill="#5a88d2"/>
+  </g>
+  <!-- folder front -->
+  <rect x="212" y="372" width="600" height="398" rx="56" fill="#ece9e2"/>
+  <!-- charcoal N on the front, same geometry as option 4 at 48% -->
+  <polyline points="416,709 416,469 608,673 608,433" fill="none" stroke="#1d1e22" stroke-width="72" stroke-linejoin="round" stroke-linecap="butt"/>
+</svg>

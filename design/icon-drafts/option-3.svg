@@ -1,0 +1,23 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024" width="1024" height="1024">
+  <title>Nest, option 3: graded folder</title>
+  <defs>
+    <linearGradient id="o3-bg" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#2a2c31"/>
+      <stop offset="1" stop-color="#16171a"/>
+    </linearGradient>
+    <clipPath id="o3-tab">
+      <rect x="212" y="232" width="330" height="200" rx="48"/>
+    </clipPath>
+  </defs>
+  <rect x="100" y="100" width="824" height="824" rx="185" fill="url(#o3-bg)"/>
+  <!-- back panel -->
+  <rect x="212" y="312" width="600" height="458" rx="56" fill="#4a4d54"/>
+  <!-- tab carrying three grading tones (lift / gamma / gain as R G B) -->
+  <g clip-path="url(#o3-tab)">
+    <rect x="212" y="232" width="110" height="200" fill="#e5484d"/>
+    <rect x="322" y="232" width="110" height="200" fill="#30a46c"/>
+    <rect x="432" y="232" width="110" height="200" fill="#3e7bfa"/>
+  </g>
+  <!-- front panel -->
+  <rect x="212" y="372" width="600" height="398" rx="56" fill="#ece9e2"/>
+</svg>

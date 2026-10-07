@@ -1,0 +1,42 @@
+{
+  "schema": 1,
+  "id": "blank",
+  "version": 4,
+  "name": "Blank",
+  "description": "Just a project folder and a notes file",
+  "fields": [
+    {
+      "key": "client",
+      "label": "Billed to",
+      "type": "client",
+      "required": true
+    },
+    {
+      "key": "name",
+      "label": "Project name",
+      "type": "text",
+      "required": true,
+      "max": 60
+    },
+    {
+      "key": "start",
+      "label": "Start date",
+      "type": "date",
+      "required": true,
+      "default": "today"
+    },
+    {
+      "key": "notes",
+      "label": "Description",
+      "type": "longtext"
+    }
+  ],
+  "folderName": "{start|yymmdd}_{name|caps}",
+  "files": [
+    {
+      "from": "starter/NOTES.md",
+      "to": "NOTES.md",
+      "fill": true
+    }
+  ]
+}

@@ -1,0 +1,861 @@
+/* Template editor: a sheet filling the whole Settings window (like a macOS sheet; no gap
+   showing the page behind it). Tokens only (build spec §8). */
+
+.scrim {
+  position: fixed;
+  inset: 0;
+  z-index: 20;
+  display: grid;
+  background: var(--backdrop);
+}
+
+.sheet {
+  display: grid;
+  grid-template-rows: auto auto minmax(0, 1fr) auto;
+  min-height: 0;
+  background: var(--sheet-bg);
+  overflow: hidden;
+}
+
+.head,
+.foot {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2);
+  padding: var(--space-3) var(--space-4);
+}
+
+.head {
+  border-bottom: var(--hairline) solid var(--separator);
+}
+
+.foot {
+  border-top: var(--hairline) solid var(--separator);
+  background: var(--footer-bg);
+}
+
+.title {
+  flex: 1;
+  margin: 0;
+  font-size: var(--text-title);
+  font-weight: 600;
+}
+
+/* Step tabs: they look like buttons (they are); the current one is highlighted. */
+.steps {
+  display: flex;
+  padding: 2px;
+  border: var(--hairline) solid var(--control-border);
+  border-radius: 8px;
+  background: var(--control-bg);
+}
+
+.step {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  height: 28px;
+  padding: 0 var(--space-3);
+  border: none;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--text);
+}
+
+.step:hover {
+  background: var(--control-hover);
+}
+
+.step[aria-current="step"] {
+  background: var(--accent);
+  color: #fff;
+  font-weight: 600;
+}
+
+.stepNum {
+  opacity: 0.6;
+  font-variant-numeric: tabular-nums;
+}
+
+.body,
+.bodyWide {
+  display: grid;
+  min-height: 0;
+}
+
+.body {
+  grid-template-columns: minmax(0, 1fr) minmax(0, 320px);
+}
+
+.bodyWide {
+  grid-template-columns: minmax(0, 1fr);
+}
+
+.main,
+.side {
+  display: grid;
+  align-content: start;
+  gap: var(--space-4);
+  min-width: 0;
+  padding: var(--space-4);
+  overflow-y: auto;
+}
+
+.side {
+  gap: var(--space-2);
+  border-left: var(--hairline) solid var(--separator);
+  background: var(--card-bg);
+}
+
+.sideTitle,
+.label {
+  margin: 0;
+  font-size: var(--text-small);
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--text-tertiary);
+}
+
+.hint,
+.hintInline {
+  margin: 0;
+  font-size: var(--text-small);
+  color: var(--text-secondary);
+}
+
+.footMsg {
+  flex: 1;
+  min-width: 0;
+}
+
+.problem {
+  color: var(--error);
+  font-size: var(--text-small);
+}
+
+.section {
+  display: grid;
+  gap: var(--space-2);
+  justify-items: stretch;
+}
+
+.input {
+  height: 30px;
+  min-width: 0;
+  padding: 0 10px;
+  border: var(--hairline) solid var(--control-border);
+  border-radius: var(--radius-control);
+  background: var(--control-bg);
+  user-select: text;
+  -webkit-user-select: text;
+}
+
+.mono {
+  font-family: var(--font-mono);
+  font-size: 13px;
+}
+
+.linkButton {
+  border-color: transparent;
+  background: transparent;
+  box-shadow: none;
+  color: var(--accent);
+  padding: 0 var(--space-1);
+}
+
+/* ── Name blocks ── */
+
+.chips {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+.chipGroup {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+.chip {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+  min-height: 28px;
+  padding: 0 2px 0 var(--space-3);
+  border-radius: var(--radius-control);
+  background: var(--accent-soft);
+}
+
+.chip select {
+  height: 22px;
+  border: none;
+  background: transparent;
+  font-size: var(--text-small);
+}
+
+.sep {
+  font-family: var(--font-mono);
+  color: var(--text-tertiary);
+}
+
+.auto {
+  color: var(--text-secondary);
+  font-style: italic;
+}
+
+.addPart {
+  height: 28px;
+  border: var(--hairline) dashed var(--control-border);
+  border-radius: var(--radius-control);
+  background: transparent;
+  color: var(--text-secondary);
+}
+
+.x,
+.more {
+  flex: none;
+  width: 22px;
+  height: 22px;
+  border: none;
+  border-radius: 4px;
+  background: transparent;
+  color: var(--text-tertiary);
+  line-height: 1;
+}
+
+.x:hover,
+.more:hover {
+  background: var(--control-hover);
+  color: var(--text);
+}
+
+.x:disabled {
+  opacity: 0.35;
+}
+
+/* ── Question cards ── */
+
+.cards {
+  display: grid;
+  gap: var(--space-2);
+}
+
+.card {
+  position: relative;
+  display: grid;
+  gap: var(--space-2);
+  padding: var(--space-3);
+  border: var(--hairline) solid var(--separator);
+  border-radius: 8px;
+  background: var(--control-bg);
+  touch-action: none;
+}
+
+.cardTop {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+.qLabel {
+  flex: 1;
+  font-weight: 600;
+}
+
+.typeSelect {
+  height: 30px;
+  border: var(--hairline) solid var(--control-border);
+  border-radius: var(--radius-control);
+  background: var(--control-bg);
+}
+
+.lock {
+  font-size: var(--text-small);
+  color: var(--text-tertiary);
+}
+
+/* "Required" on each question line. */
+.reqSwitch {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+  font-size: var(--text-small);
+  color: var(--text-secondary);
+  white-space: nowrap;
+}
+
+.reqSwitch input {
+  margin: 0;
+  accent-color: var(--accent);
+}
+
+.reqSwitch:has(input:disabled) {
+  opacity: 0.4;
+}
+
+/* A question's details, under its line once ▸ is clicked. */
+.cardMore {
+  display: grid;
+  gap: var(--space-2);
+  padding-left: calc(12px + var(--space-2));
+}
+
+/* Template name + description, above the steps. */
+.basics {
+  flex-basis: 100%;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1.4fr);
+  gap: var(--space-2) var(--space-3);
+}
+
+.basics label {
+  display: grid;
+  gap: 2px;
+  font-size: var(--text-small);
+  color: var(--text-secondary);
+}
+
+/* Folder name step: the big live example and the answers you can click to add. */
+.bigExample {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding: var(--space-3);
+  border-radius: 8px;
+  background: var(--control-bg);
+  border: var(--hairline) solid var(--separator);
+  font-size: var(--text-title);
+  overflow-wrap: anywhere;
+}
+
+.addChip {
+  min-height: 26px;
+  padding: 0 var(--space-3);
+  border: var(--hairline) dashed var(--control-border);
+  border-radius: 13px;
+  background: transparent;
+  color: var(--text);
+  font-size: var(--text-small);
+}
+
+.addChip:hover {
+  background: var(--control-hover);
+}
+
+.disclosure {
+  justify-self: start;
+  border: none;
+  background: transparent;
+  padding: 0;
+  color: var(--text-secondary);
+  font-size: var(--text-small);
+}
+
+.handle {
+  flex: none;
+  width: 12px;
+  color: var(--text-tertiary);
+  font-size: 11px;
+  letter-spacing: -2px;
+  cursor: grab;
+  opacity: 0.5;
+}
+
+.card:hover .handle,
+.row:hover .handle,
+.rowSelected .handle {
+  opacity: 1;
+}
+
+.extras,
+.options,
+.useds {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-1) var(--space-3);
+}
+
+.options {
+  gap: var(--space-1);
+}
+
+.olabel {
+  font-size: var(--text-small);
+  color: var(--text-secondary);
+  margin-right: var(--space-1);
+}
+
+.option {
+  display: inline-flex;
+  align-items: center;
+}
+
+.optionOn,
+.optionOff {
+  height: 24px;
+  padding: 0 var(--space-2);
+  border: var(--hairline) solid var(--control-border);
+  border-radius: 12px;
+  background: var(--control-bg);
+  font-size: var(--text-small);
+}
+
+.optionOn {
+  border-color: var(--accent);
+  background: var(--accent);
+  color: #fff;
+}
+
+.addOption {
+  width: 120px;
+  height: 26px;
+  font-size: var(--text-small);
+}
+
+.used {
+  padding: 1px 8px;
+  border-radius: 10px;
+  background: var(--accent-soft);
+  color: var(--accent);
+  font-size: 11px;
+}
+
+.check {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  font-size: var(--text-small);
+  color: var(--text-secondary);
+}
+
+.check input {
+  margin: 0;
+  accent-color: var(--accent);
+}
+
+.confirm {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2);
+  padding: var(--space-2) var(--space-3);
+  border-radius: var(--radius-control);
+  background: var(--error-bg);
+  font-size: var(--text-small);
+}
+
+.confirm span {
+  flex: 1 1 200px;
+}
+
+.form {
+  display: grid;
+  gap: var(--space-3);
+  padding: var(--space-3);
+  border: var(--hairline) solid var(--separator);
+  border-radius: 8px;
+  background: var(--sheet-bg);
+}
+
+/* ── Folder tree ── */
+
+.toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+.toolSep {
+  width: 1px;
+  height: 20px;
+  margin: 0 var(--space-1);
+  background: var(--separator);
+}
+
+.tree {
+  padding: var(--space-1);
+  border: var(--hairline) solid var(--separator);
+  border-radius: 8px;
+  background: var(--control-bg);
+}
+
+.row {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  min-height: var(--row-height);
+  padding-right: var(--space-1);
+  border-radius: var(--radius-control);
+  user-select: none;
+  -webkit-user-select: none;
+  touch-action: none;
+}
+
+.row:hover {
+  background: var(--control-hover);
+}
+
+.row:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: -2px;
+}
+
+.rowSelected {
+  background: var(--accent-soft);
+}
+
+.rootRow:hover,
+.fileRow:hover {
+  background: transparent;
+}
+
+.rowName {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.rowName em {
+  font-family: var(--font-ui);
+  font-style: normal;
+  font-size: var(--text-small);
+  color: var(--text-tertiary);
+  margin-left: var(--space-1);
+}
+
+.folderIcon {
+  flex: none;
+  color: var(--folder);
+}
+
+.fileIcon {
+  flex: none;
+  color: var(--text-tertiary);
+}
+
+.fileRow {
+  color: var(--text-secondary);
+}
+
+.badge {
+  flex: none;
+  padding: 1px 6px;
+  border-radius: 4px;
+  background: var(--accent-soft);
+  color: var(--accent);
+  font-size: 11px;
+  white-space: nowrap;
+}
+
+.more {
+  opacity: 0;
+}
+
+.row:hover .more,
+.rowSelected .more,
+.row:focus-within .more {
+  opacity: 1;
+}
+
+.renameInput {
+  flex: 1;
+  height: 24px;
+  font-family: var(--font-mono);
+  font-size: 13px;
+}
+
+.empty {
+  margin: 0;
+  padding: var(--space-2) var(--space-6);
+  color: var(--text-tertiary);
+}
+
+/* Dragging: the moved item fades; a line or outline shows where it lands. */
+.dragging {
+  opacity: 0.4;
+}
+
+.dropInside {
+  background: var(--accent-soft);
+  box-shadow: inset 0 0 0 2px var(--accent);
+}
+
+.dropBefore::before,
+.dropAfter::after {
+  content: "";
+  position: absolute;
+  left: var(--space-2);
+  right: var(--space-2);
+  height: 2px;
+  border-radius: 1px;
+  background: var(--accent);
+}
+
+.dropBefore::before {
+  top: -1px;
+}
+
+.dropAfter::after {
+  bottom: -1px;
+}
+
+/* ── Folders step: tree + a panel for the selected folder ── */
+
+.folders {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 300px);
+  gap: var(--space-4);
+  align-items: start;
+}
+
+.rowBetween {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-2);
+}
+
+.grip {
+  flex: none;
+  width: 14px;
+  color: transparent;
+  font-size: 14px;
+  line-height: 1;
+  text-align: center;
+  cursor: grab;
+}
+
+.row:hover .grip,
+.rowSelected .grip,
+.row:focus-visible .grip {
+  color: var(--text-tertiary);
+}
+
+.rowNameShrink {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.tag {
+  flex: none;
+  padding: 0 6px;
+  border-radius: 4px;
+  background: var(--accent-soft);
+  color: var(--accent);
+  font-size: 11px;
+  line-height: 18px;
+  white-space: nowrap;
+}
+
+.madeRow {
+  color: var(--text-secondary);
+  cursor: default;
+}
+
+.folderIconMuted {
+  flex: none;
+  color: var(--folder);
+  opacity: 0.45;
+}
+
+.panel {
+  position: sticky;
+  top: 0;
+  display: grid;
+  gap: var(--space-4);
+  padding: var(--space-4);
+  border: var(--hairline) solid var(--separator);
+  border-radius: 8px;
+  background: var(--card-bg);
+}
+
+.panelEmpty {
+  margin: 0;
+  color: var(--text-secondary);
+  font-size: var(--text-small);
+}
+
+.fieldset {
+  display: grid;
+  gap: var(--space-2);
+  margin: 0;
+  padding: 0;
+  border: none;
+  min-width: 0;
+}
+
+.fieldset legend {
+  margin-bottom: var(--space-2);
+  padding: 0;
+}
+
+.radioGroup {
+  display: grid;
+  gap: var(--space-2);
+}
+
+.radio {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--space-2);
+}
+
+.radio input {
+  flex: none;
+  margin: 2px 0 0;
+  accent-color: var(--accent);
+}
+
+.panelActions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+}
+
+/* Always-visible example: what a project from this template is called. */
+.exampleBar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-1) var(--space-2);
+  padding: var(--space-2) var(--space-4);
+  border-bottom: var(--hairline) solid var(--separator);
+  background: var(--card-bg);
+}
+
+.exampleLabel {
+  font-size: var(--text-small);
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--text-tertiary);
+}
+
+.exampleName {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.exampleCode {
+  padding: 0 var(--space-2);
+  border-left: var(--hairline) solid var(--separator);
+  color: var(--text-secondary);
+  font-size: var(--text-small);
+}
+
+.exampleNote {
+  flex-basis: 100%;
+  font-size: var(--text-small);
+  color: var(--text-tertiary);
+}
+
+.choiceRow {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2) var(--space-4);
+}
+
+/* ── Motion: short and quiet (--motion is 0 when the OS asks for reduced motion). ── */
+
+@keyframes fadeIn {
+  from {
+    opacity: 0;
+  }
+}
+
+@keyframes rise {
+  from {
+    opacity: 0;
+    transform: translateY(12px) scale(0.985);
+  }
+}
+
+@keyframes slideIn {
+  from {
+    opacity: 0;
+    transform: translateX(8px);
+  }
+}
+
+@keyframes pop {
+  from {
+    opacity: 0;
+    transform: translateY(-4px);
+  }
+}
+
+.scrim {
+  animation: fadeIn var(--motion) both;
+}
+
+.sheet {
+  animation: rise 250ms cubic-bezier(0.2, 0.8, 0.2, 1) both;
+}
+
+.main {
+  animation: slideIn var(--motion) both;
+}
+
+.row,
+.card {
+  animation: pop var(--motion) both;
+}
+
+.step,
+.row,
+.optionOn,
+.optionOff,
+.chip {
+  transition:
+    background-color var(--motion),
+    color var(--motion),
+    box-shadow var(--motion);
+}
+
+.panel > * {
+  animation: fadeIn var(--motion) both;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .scrim,
+  .sheet,
+  .main,
+  .row,
+  .card,
+  .panel > * {
+    animation: none;
+  }
+}
+
+/* Dropdowns look the same on Mac and Windows (base.css draws the arrow): give each its box. */
+.typeSelect,
+.addPart,
+.smallSelect {
+  padding-left: var(--space-2);
+}
+
+.smallSelect {
+  height: 26px;
+  border: var(--hairline) solid var(--control-border);
+  border-radius: var(--radius-control);
+  background-color: var(--control-bg);
+  color: var(--text);
+}
+
+/* The see-through dropdown inside a name block: a tighter arrow. */
+.chip select {
+  padding-left: var(--space-1);
+  padding-right: 18px !important;
+  background-position: right 3px center !important;
+}

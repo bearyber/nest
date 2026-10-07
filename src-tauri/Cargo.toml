@@ -1,0 +1,46 @@
+[package]
+name = "nest"
+version = "0.4.1"
+description = "Nest by INTRVL"
+authors = ["INTRVL"]
+edition = "2021"
+
+[lib]
+# `_lib` suffix avoids a lib/bin name clash on Windows (cargo#8519).
+name = "nest_lib"
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+tauri = { version = "2", features = ["macos-private-api"] }
+tauri-plugin-single-instance = "2"
+tauri-plugin-window-state = "2"
+tauri-plugin-opener = "2"
+tauri-plugin-dialog = "2"
+window-vibrancy = "0.6"
+serde = { version = "1", features = ["derive"] }
+serde_json = { version = "1", features = ["preserve_order"] }
+unicode-normalization = "0.1"
+uuid = { version = "1", features = ["v4"] }
+rusqlite = { version = "0.37", features = ["bundled"] }
+tauri-plugin-clipboard-manager = "2"
+tauri-plugin-updater = "2"
+tauri-plugin-log = "2"
+tauri-plugin-autostart = "2"
+log = "0.4"
+zip = { version = "2", default-features = false, features = ["deflate"] }
+trash = "5"
+chrono = { version = "0.4", default-features = false, features = ["clock", "std"] }
+
+[dev-dependencies]
+tempfile = "3"
+
+# Thin LTO + default codegen units: much faster release builds (CI and local), with a
+# near-identical app. Nest is disk/UI bound, so the last few % of CPU speed don't matter.
+[profile.release]
+lto = "thin"
+opt-level = 3
+panic = "abort"
+strip = true

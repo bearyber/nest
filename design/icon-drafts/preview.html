@@ -1,0 +1,284 @@
+<title>Nest Icon Drafts</title>
+<style>
+  :root {
+    --bg: #f4f4f2;
+    --surface: #ffffff;
+    --ink: #1b1c1f;
+    --ink-soft: #5d6068;
+    --line: #dcdcd8;
+    --stage-light: #ecebe7;
+    --stage-dark: #1e1f23;
+    --stage-label-light: #6b6e75;
+    --stage-label-dark: #a3a6ad;
+    --focus: #0a84ff;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      color-scheme: dark;
+      --bg: #141518;
+      --surface: #1c1d21;
+      --ink: #ecebe7;
+      --ink-soft: #a3a6ad;
+      --line: #2e3035;
+    }
+  }
+  :root[data-theme="dark"] {
+    color-scheme: dark;
+    --bg: #141518;
+    --surface: #1c1d21;
+    --ink: #ecebe7;
+    --ink-soft: #a3a6ad;
+    --line: #2e3035;
+  }
+  body {
+    background: var(--bg);
+    color: var(--ink);
+    font: 15px/1.5 -apple-system, BlinkMacSystemFont, "Segoe UI Variable Text", "Segoe UI", system-ui, sans-serif;
+  }
+  .wrap {
+    max-width: 1120px;
+    margin: 0 auto;
+    padding-inline: 16px;
+    padding-block: 40px 64px;
+    display: grid;
+    gap: 32px;
+  }
+  header { display: grid; gap: 6px; max-width: 65ch; }
+  h1 { margin: 0; font-size: 26px; font-weight: 650; letter-spacing: -0.01em; text-wrap: balance; }
+  header p { margin: 0; color: var(--ink-soft); }
+  .group {
+    margin: 8px 0 -16px;
+    font-size: 12px;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    color: var(--ink-soft);
+  }
+  .option {
+    background: var(--surface);
+    border: 1px solid var(--line);
+    border-radius: 14px;
+    padding: 20px;
+    display: grid;
+    gap: 16px;
+  }
+  .option-head { display: grid; gap: 2px; }
+  .option-head h2 { margin: 0; font-size: 17px; font-weight: 650; }
+  .option-head p { margin: 0; color: var(--ink-soft); max-width: 65ch; }
+  .stages { display: flex; flex-wrap: wrap; gap: 12px; }
+  .stage {
+    flex: 1 1 320px;
+    border-radius: 10px;
+    border: 1px solid var(--line);
+    padding: 20px;
+    display: grid;
+    gap: 16px;
+    justify-items: center;
+  }
+  .stage.light { background: var(--stage-light); --label: var(--stage-label-light); }
+  .stage.dark { background: var(--stage-dark); --label: var(--stage-label-dark); }
+  .stage-label {
+    justify-self: start;
+    font-size: 11px;
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    color: var(--label);
+  }
+  .big { width: 256px; height: 256px; max-width: 100%; }
+  .sizes { display: flex; align-items: flex-end; gap: 20px; }
+  .sizes figure { margin: 0; display: grid; justify-items: center; gap: 6px; }
+  .sizes figcaption { font-size: 11px; color: var(--label); font-variant-numeric: tabular-nums; }
+  .s64 { width: 64px; height: 64px; }
+  .s32 { width: 32px; height: 32px; }
+  .s16 { width: 16px; height: 16px; }
+  .note { color: var(--ink-soft); font-size: 13px; max-width: 65ch; margin: 0; }
+  .sprite { position: absolute; width: 0; height: 0; overflow: hidden; }
+</style>
+
+<svg class="sprite" aria-hidden="true" focusable="false" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <linearGradient id="o1-bg" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#2c2e33"/><stop offset="1" stop-color="#17181b"/>
+    </linearGradient>
+    <linearGradient id="o2-bg" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#f5f3ef"/><stop offset="1" stop-color="#e5e1d9"/>
+    </linearGradient>
+    <linearGradient id="o3-bg" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#2a2c31"/><stop offset="1" stop-color="#16171a"/>
+    </linearGradient>
+    <clipPath id="o3-tab"><rect x="212" y="232" width="330" height="200" rx="48"/></clipPath>
+    <linearGradient id="o4-bg" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#2a2c31"/><stop offset="1" stop-color="#16171a"/>
+    </linearGradient>
+    <clipPath id="o6-tab"><rect x="212" y="232" width="330" height="200" rx="48"/></clipPath>
+    <mask id="o7-n" maskUnits="userSpaceOnUse" x="0" y="0" width="1024" height="1024">
+      <polyline points="312,799 312,300 712,724 712,225" fill="none" stroke="#ffffff" stroke-width="150" stroke-linejoin="round" stroke-linecap="butt"/>
+    </mask>
+  </defs>
+  <symbol id="icon-5" viewBox="0 0 1024 1024">
+    <rect x="100" y="100" width="824" height="824" rx="185" fill="url(#o4-bg)"/>
+    <polyline points="312,799 312,300 712,724 712,225" fill="none" stroke="#ece9e2" stroke-width="150" stroke-linejoin="round" stroke-linecap="butt"/>
+    <line x1="712" y1="225" x2="712" y2="295" stroke="#d0625b" stroke-width="150"/>
+    <line x1="712" y1="295" x2="712" y2="365" stroke="#5aa57d" stroke-width="150"/>
+    <line x1="712" y1="365" x2="712" y2="435" stroke="#5a88d2" stroke-width="150"/>
+  </symbol>
+  <symbol id="icon-6" viewBox="0 0 1024 1024">
+    <rect x="100" y="100" width="824" height="824" rx="185" fill="url(#o4-bg)"/>
+    <rect x="212" y="312" width="600" height="458" rx="56" fill="#4a4d54"/>
+    <g clip-path="url(#o6-tab)">
+      <rect x="212" y="232" width="110" height="200" fill="#d0625b"/>
+      <rect x="322" y="232" width="110" height="200" fill="#5aa57d"/>
+      <rect x="432" y="232" width="110" height="200" fill="#5a88d2"/>
+    </g>
+    <rect x="212" y="372" width="600" height="398" rx="56" fill="#ece9e2"/>
+    <polyline points="416,709 416,469 608,673 608,433" fill="none" stroke="#1d1e22" stroke-width="72" stroke-linejoin="round" stroke-linecap="butt"/>
+  </symbol>
+  <symbol id="icon-7" viewBox="0 0 1024 1024">
+    <rect x="100" y="100" width="824" height="824" rx="185" fill="url(#o4-bg)"/>
+    <g mask="url(#o7-n)">
+      <rect x="100" y="100" width="287" height="824" fill="#d0625b"/>
+      <rect x="387" y="100" width="250" height="824" fill="#5aa57d"/>
+      <rect x="637" y="100" width="287" height="824" fill="#5a88d2"/>
+    </g>
+  </symbol>
+  <symbol id="icon-1" viewBox="0 0 1024 1024">
+    <rect x="100" y="100" width="824" height="824" rx="185" fill="url(#o1-bg)"/>
+    <rect x="212" y="262" width="240" height="120" rx="40" fill="#ebe7df"/>
+    <rect x="212" y="322" width="600" height="440" rx="56" fill="#ebe7df"/>
+    <rect x="292" y="382" width="170" height="90" rx="30" fill="#2b2d31"/>
+    <rect x="292" y="426" width="440" height="276" rx="40" fill="#2b2d31"/>
+    <rect x="372" y="476" width="110" height="60" rx="20" fill="#f5a524"/>
+    <rect x="372" y="506" width="280" height="136" rx="28" fill="#f5a524"/>
+  </symbol>
+  <symbol id="icon-2" viewBox="0 0 1024 1024">
+    <rect x="100" y="100" width="824" height="824" rx="185" fill="url(#o2-bg)"/>
+    <path d="M212 382 A300 300 0 0 0 812 382" fill="none" stroke="#222327" stroke-width="80" stroke-linecap="round"/>
+    <path d="M322 382 A190 190 0 0 0 702 382" fill="none" stroke="#222327" stroke-width="80" stroke-linecap="round"/>
+    <ellipse cx="512" cy="392" rx="76" ry="90" fill="#2b5cff"/>
+  </symbol>
+  <symbol id="icon-3" viewBox="0 0 1024 1024">
+    <rect x="100" y="100" width="824" height="824" rx="185" fill="url(#o3-bg)"/>
+    <rect x="212" y="312" width="600" height="458" rx="56" fill="#4a4d54"/>
+    <g clip-path="url(#o3-tab)">
+      <rect x="212" y="232" width="110" height="200" fill="#e5484d"/>
+      <rect x="322" y="232" width="110" height="200" fill="#30a46c"/>
+      <rect x="432" y="232" width="110" height="200" fill="#3e7bfa"/>
+    </g>
+    <rect x="212" y="372" width="600" height="398" rx="56" fill="#ece9e2"/>
+  </symbol>
+  <symbol id="icon-4" viewBox="0 0 1024 1024">
+    <rect x="100" y="100" width="824" height="824" rx="185" fill="url(#o4-bg)"/>
+    <polyline points="312,799 312,300 712,724 712,225" fill="none" stroke="#ece9e2" stroke-width="150" stroke-linejoin="round" stroke-linecap="butt"/>
+    <line x1="712" y1="225" x2="712" y2="390" stroke="#0a84ff" stroke-width="150" stroke-linecap="butt"/>
+  </symbol>
+</svg>
+
+<main class="wrap">
+  <header>
+    <h1>Nest icon drafts</h1>
+    <p>Drafts for the Nest by INTRVL app icon. Options 5 to 7 blend option 3's channel-striped folder with option 4's N; the first round follows for reference. Each is shown at 256px, then at 64, 32 and 16px, on a light and a dark desktop. The 16 and 32px sizes are what Windows shows in the taskbar and Explorer.</p>
+  </header>
+
+  <h2 class="group">Mix of 3 + 4</h2>
+
+  <section class="option" id="option-5">
+    <div class="option-head">
+      <h2>Option 5</h2>
+      <p>Graded tab end: the off-white N from option 4, with its raised right end split into red, green and blue bands.</p>
+    </div>
+    <div class="stages" data-icon="5"></div>
+  </section>
+
+  <section class="option" id="option-6">
+    <div class="option-head">
+      <h2>Option 6</h2>
+      <p>N on the folder: option 3's folder with the channel-striped tab, and a charcoal N set on the folder front.</p>
+    </div>
+    <div class="stages" data-icon="6"></div>
+  </section>
+
+  <section class="option" id="option-7">
+    <div class="option-head">
+      <h2>Option 7</h2>
+      <p>Three-channel N: each stroke of the N carries one muted channel tone, so the letter is the red, green and blue.</p>
+    </div>
+    <div class="stages" data-icon="7"></div>
+  </section>
+
+  <h2 class="group">First round</h2>
+
+  <section class="option" id="option-1">
+    <div class="option-head">
+      <h2>Option 1</h2>
+      <p>Nested folders: three folders set one inside the next, with the innermost job folder in amber.</p>
+    </div>
+    <div class="stages" data-icon="1"></div>
+  </section>
+
+  <section class="option" id="option-2">
+    <div class="option-head">
+      <h2>Option 2</h2>
+      <p>Bowl and egg: two concentric arcs cradle a single cobalt egg on warm off-white.</p>
+    </div>
+    <div class="stages" data-icon="2"></div>
+  </section>
+
+  <section class="option" id="option-3">
+    <div class="option-head">
+      <h2>Option 3</h2>
+      <p>Graded folder: a plain folder whose tab carries red, green and blue tones, the colorist's three channels.</p>
+    </div>
+    <div class="stages" data-icon="3"></div>
+  </section>
+
+  <section class="option" id="option-4">
+    <div class="option-head">
+      <h2>Option 4</h2>
+      <p>Tab monogram: an N drawn as a folder-tab profile turned on its side, with the raised tab end in blue.</p>
+    </div>
+    <div class="stages" data-icon="4"></div>
+  </section>
+
+  <p class="note">On a high-density screen the 16 and 32px previews are drawn with twice the pixels, so they look slightly sharper than on a standard 1080p monitor.</p>
+</main>
+
+<script>
+  (function () {
+    var NS = "http://www.w3.org/2000/svg";
+    function icon(n, cls) {
+      var svg = document.createElementNS(NS, "svg");
+      svg.setAttribute("viewBox", "0 0 1024 1024");
+      svg.setAttribute("class", cls);
+      svg.setAttribute("role", "img");
+      svg.setAttribute("aria-label", "Option " + n);
+      var use = document.createElementNS(NS, "use");
+      use.setAttribute("href", "#icon-" + n);
+      svg.appendChild(use);
+      return svg;
+    }
+    document.querySelectorAll(".stages").forEach(function (row) {
+      var n = row.getAttribute("data-icon");
+      [["light", "On light"], ["dark", "On dark"]].forEach(function (t) {
+        var stage = document.createElement("div");
+        stage.className = "stage " + t[0];
+        var label = document.createElement("span");
+        label.className = "stage-label";
+        label.textContent = t[1];
+        stage.appendChild(label);
+        stage.appendChild(icon(n, "big"));
+        var sizes = document.createElement("div");
+        sizes.className = "sizes";
+        [64, 32, 16].forEach(function (s) {
+          var fig = document.createElement("figure");
+          fig.appendChild(icon(n, "s" + s));
+          var cap = document.createElement("figcaption");
+          cap.textContent = s + "px";
+          fig.appendChild(cap);
+          sizes.appendChild(fig);
+        });
+        stage.appendChild(sizes);
+        row.appendChild(stage);
+      });
+    });
+  })();
+</script>

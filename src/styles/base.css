@@ -1,0 +1,89 @@
+/* Native-feel resets: build spec §8 behaviour rules. */
+
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
+html,
+body,
+#root {
+  height: 100%;
+  margin: 0;
+  overflow: hidden;
+  overscroll-behavior: none;
+}
+
+body {
+  font-family: var(--font-ui);
+  font-size: var(--text-body);
+  line-height: var(--line-body);
+  color: var(--text);
+  /* Transparent so Mica / vibrancy shows through. */
+  background: transparent;
+  user-select: none;
+  -webkit-user-select: none;
+  cursor: default;
+  -webkit-font-smoothing: antialiased;
+}
+
+/* Material unavailable (e.g. Windows 10) → solid window. */
+:root[data-material="none"] body {
+  background: var(--bg-solid);
+}
+
+button,
+input,
+select,
+textarea {
+  font: inherit;
+  color: inherit;
+  cursor: default;
+}
+
+/* Windows draws the dropdown list itself with a light background; without explicit
+   colours the options inherit the dark theme's white text and vanish. */
+option {
+  background: var(--popover-bg);
+  color: var(--text);
+}
+
+:focus {
+  outline: none;
+}
+
+:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+
+.selectable {
+  user-select: text;
+  -webkit-user-select: text;
+}
+
+/* Same look on both OSes (Bernard, 2026-10-03): macOS WebKit otherwise draws its own text
+   fields and ignores most styling on dropdowns, so Settings looked different on the Mac.
+   Checkboxes and radio buttons keep the system look. */
+input:not([type="checkbox"]):not([type="radio"]):not([type="range"]):not([type="date"]),
+textarea,
+select {
+  -webkit-appearance: none;
+  appearance: none;
+}
+
+/* Dropdowns: our own arrow (the system one goes with `appearance: none`). */
+select {
+  background-image: var(--chevron) !important;
+  background-repeat: no-repeat !important;
+  background-position: right 9px center !important;
+  background-size: 10px 6px !important;
+  padding-right: 26px !important;
+}
+
+/* WebKit gives search fields rounded ends and its own clear button. */
+input[type="search"]::-webkit-search-decoration,
+input[type="search"]::-webkit-search-cancel-button {
+  -webkit-appearance: none;
+}

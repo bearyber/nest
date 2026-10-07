@@ -1,0 +1,23 @@
+# secrets
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+
+# private notes: a separate private repo (bearyber/nest-private) cloned into private/
+private/
+
+# claude (per-machine)
+.claude/settings.local.json
+.claude/.sweep_count
+
+# build
+node_modules/
+dist/
+target/
+src-tauri/gen/
+
+# os
+.DS_Store
+Thumbs.db

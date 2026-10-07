@@ -1,0 +1,25 @@
+{
+  "schema": 1,
+  "id": "video",
+  "version": 1,
+  "name": "Video",
+  "description": "Shoots, edits and finishing, with an export folder per format",
+  "fields": [
+    { "key": "client", "label": "Billed to", "type": "client", "required": true },
+    { "key": "name", "label": "Project name", "type": "text", "required": true, "max": 60 },
+    { "key": "start", "label": "Start date", "type": "date", "required": true, "default": "today" },
+    { "key": "formats", "label": "Formats", "type": "multi", "options": ["16x9", "9x16", "1x1", "4x5"], "default": ["16x9"] },
+    { "key": "graphics", "label": "Has graphics", "type": "bool", "default": false },
+    { "key": "notes", "label": "Description", "type": "longtext" }
+  ],
+  "folderName": "{start|yymmdd}_{name|caps}",
+  "tree": [
+    "01_BRIEF",
+    "02_FOOTAGE",
+    "03_AUDIO",
+    "04_PROJECT",
+    { "name": "05_EXPORTS/{item}", "each": "formats" },
+    { "name": "06_GRAPHICS", "when": "graphics" }
+  ],
+  "files": [{ "from": "starter/NOTES.md", "to": "NOTES.md", "fill": true }]
+}

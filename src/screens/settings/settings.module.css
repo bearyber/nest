@@ -1,0 +1,592 @@
+.window {
+  display: grid;
+  grid-template-columns: 180px minmax(0, 1fr);
+  height: 100%;
+}
+
+/* Left navigation stays see-through over the window material. */
+.nav {
+  display: grid;
+  align-content: start;
+  gap: 1px;
+  padding: var(--space-4) var(--space-2);
+  border-right: var(--hairline) solid var(--separator);
+}
+
+.navTitle {
+  margin: 0 0 var(--space-2);
+  padding: 0 var(--space-3);
+  font-size: var(--text-title);
+  font-weight: 600;
+}
+
+.navItem {
+  position: relative;
+  height: var(--row-height);
+  padding: 0 var(--space-3);
+  border: none;
+  border-radius: var(--radius-control);
+  background: transparent;
+  text-align: left;
+}
+
+.navItem:hover {
+  background: var(--control-hover);
+}
+
+.navItem[aria-current="page"] {
+  background: var(--control-hover);
+  font-weight: 600;
+}
+
+.navItem[aria-current="page"]::before {
+  content: "";
+  position: absolute;
+  left: 0;
+  top: 50%;
+  width: 3px;
+  height: 16px;
+  border-radius: 2px;
+  background: var(--accent);
+  transform: translateY(-50%);
+}
+
+.content {
+  display: grid;
+  align-content: start;
+  gap: var(--space-4);
+  min-width: 0;
+  padding: var(--space-4) var(--space-6) var(--space-6);
+  overflow-y: auto;
+  background: var(--pane-bg);
+}
+
+.title {
+  margin: 0;
+  font-size: var(--text-title);
+  font-weight: 600;
+}
+
+.banner,
+.note {
+  padding: var(--space-2) var(--space-3);
+  border-radius: var(--radius-control);
+  font-size: var(--text-small);
+}
+
+.banner {
+  background: var(--error-bg);
+  color: var(--error);
+}
+
+.note {
+  background: var(--accent-soft);
+}
+
+/* A titled group of settings. */
+.section {
+  display: grid;
+  gap: var(--space-2);
+}
+
+.sectionTitle {
+  margin: 0;
+  font-size: var(--text-small);
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--text-tertiary);
+}
+
+.hint {
+  margin: 0;
+  font-size: var(--text-small);
+  color: var(--text-secondary);
+  max-width: 60ch;
+}
+
+.card {
+  display: grid;
+  border: var(--hairline) solid var(--separator);
+  border-radius: 8px;
+  background: var(--card-bg);
+}
+
+.row {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  min-height: 44px;
+  padding: var(--space-2) var(--space-3);
+}
+
+.row + .row {
+  border-top: var(--hairline) solid var(--separator);
+}
+
+.grow {
+  flex: 1;
+  min-width: 0;
+}
+
+.mono {
+  font-family: var(--font-mono);
+  font-size: 13px;
+  overflow-wrap: anywhere;
+  user-select: text;
+  -webkit-user-select: text;
+}
+
+.name {
+  font-weight: 600;
+}
+
+.sub {
+  font-size: var(--text-small);
+  color: var(--text-secondary);
+}
+
+.pill {
+  flex: none;
+  padding: 1px 8px;
+  border-radius: 10px;
+  background: var(--accent-soft);
+  color: var(--accent);
+  font-size: 11px;
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.pillMuted {
+  flex: none;
+  padding: 1px 8px;
+  border: var(--hairline) solid var(--separator);
+  border-radius: 10px;
+  color: var(--text-secondary);
+  font-size: 11px;
+  white-space: nowrap;
+}
+
+.actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+}
+
+.input,
+.select {
+  height: 30px;
+  padding: 0 10px;
+  border: var(--hairline) solid var(--control-border);
+  border-radius: var(--radius-control);
+  background: var(--control-bg);
+}
+
+.input {
+  user-select: text;
+  -webkit-user-select: text;
+}
+
+.formRow {
+  display: grid;
+  grid-template-columns: 150px minmax(0, 1fr);
+  gap: var(--space-3);
+  align-items: center;
+}
+
+.formRow > label,
+.formRow > .label {
+  color: var(--text-secondary);
+  text-align: right;
+}
+
+.check {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  white-space: nowrap;
+}
+
+.check input {
+  margin: 0;
+  accent-color: var(--accent);
+}
+
+.folderIcon {
+  flex: none;
+  color: var(--folder);
+}
+
+.preview {
+  display: grid;
+  gap: 4px;
+  padding: var(--space-3);
+  border-radius: 8px;
+  background: var(--card-bg);
+  border: var(--hairline) solid var(--separator);
+}
+
+/* Job codes: a big example code, each part captioned. */
+.codeHero {
+  justify-items: start;
+  gap: var(--space-3);
+  padding: var(--space-4);
+}
+
+.codeParts {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-start;
+  gap: 2px;
+}
+
+.codePart,
+.codeSep {
+  display: grid;
+  justify-items: center;
+  gap: 4px;
+}
+
+.codePart b,
+.codeSep b {
+  font-family: var(--font-mono);
+  font-size: 30px;
+  line-height: 38px;
+  font-weight: 600;
+}
+
+.codePart b {
+  padding: 0 4px;
+  border-bottom: 3px solid var(--accent);
+}
+
+.codePart small {
+  font-size: var(--text-small);
+  color: var(--text-secondary);
+  white-space: nowrap;
+}
+
+/* auto-fit (not auto-fill): a single choice fills the row instead of sitting in a narrow box. */
+.choices {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+  gap: var(--space-2);
+}
+
+.choice {
+  position: relative;
+  display: grid;
+  gap: 2px;
+  padding: var(--space-2) var(--space-3);
+  border: var(--hairline) solid var(--control-border);
+  border-radius: 8px;
+  background: var(--control-bg);
+}
+
+.choice input {
+  position: absolute;
+  opacity: 0;
+  pointer-events: none;
+}
+
+.choice:has(input:checked) {
+  border-color: var(--accent);
+  background: var(--accent-soft);
+  box-shadow: inset 0 0 0 1px var(--accent);
+}
+
+.choice:has(input:focus-visible) {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+
+.choice b {
+  font-size: 15px;
+}
+
+.choice small {
+  font-size: var(--text-small);
+  color: var(--text-secondary);
+}
+
+/* One setting inside a card: name, control, explanation. */
+.field {
+  display: grid;
+  gap: var(--space-2);
+  justify-items: start;
+  padding: var(--space-3) var(--space-4);
+}
+
+.field + .field {
+  border-top: var(--hairline) solid var(--separator);
+}
+
+.codeInput {
+  width: 90px;
+  font-family: var(--font-mono);
+  font-size: 15px;
+  text-align: center;
+  text-transform: uppercase;
+}
+
+.problem {
+  margin: 0;
+  font-size: var(--text-small);
+  color: var(--error);
+}
+
+.advanced summary {
+  width: fit-content;
+  color: var(--text-secondary);
+  cursor: default;
+}
+
+.advanced[open] summary {
+  margin-bottom: var(--space-2);
+}
+
+.advanced .input {
+  width: 100%;
+}
+
+.inserts {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+}
+
+/* Templates: list, then what the selected one makes. */
+/* clip (not hidden): rounds the corners without letting the list shrink to nothing when the
+   window is short (a scroll container would get a zero minimum height in the grid). */
+.tlist {
+  overflow: clip;
+}
+
+.titem {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 2px var(--space-2);
+  padding: var(--space-2) var(--space-3);
+  border: none;
+  background: transparent;
+  color: inherit;
+  text-align: left;
+}
+
+.titem + .titem {
+  border-top: var(--hairline) solid var(--separator);
+}
+
+.titem:hover {
+  background: var(--control-hover);
+}
+
+.titem[aria-selected="true"] {
+  background: var(--accent-soft);
+}
+
+.tname {
+  font-weight: 600;
+}
+
+.tdesc {
+  grid-column: 1;
+  overflow: hidden;
+  font-size: var(--text-small);
+  color: var(--text-secondary);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.titem > .pill,
+.titem > .pillMuted {
+  grid-row: 1;
+  grid-column: 2;
+  justify-self: end;
+}
+
+.tflag {
+  grid-column: 2;
+  justify-self: end;
+  font-size: 11px;
+  color: var(--text-tertiary);
+}
+
+.tmore {
+  padding: var(--space-2) var(--space-3);
+  border: none;
+  border-top: var(--hairline) solid var(--separator);
+  background: transparent;
+  color: var(--accent);
+  text-align: left;
+  font-size: var(--text-small);
+}
+
+.detail {
+  gap: var(--space-3);
+  padding: var(--space-4);
+}
+
+.detailHead,
+.rowBetween {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-2);
+}
+
+.detailTitle {
+  margin: 0;
+  font-size: var(--text-title);
+  font-weight: 600;
+}
+
+.example {
+  padding: var(--space-1) var(--space-3);
+  border: var(--hairline) solid var(--separator);
+  border-radius: var(--radius-control);
+  background: var(--control-bg);
+  overflow-wrap: anywhere;
+}
+
+.qs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-1);
+}
+
+.q {
+  padding: 1px 8px;
+  border-radius: 10px;
+  background: var(--control-hover);
+  font-size: var(--text-small);
+}
+
+.linkButton {
+  border-color: transparent;
+  background: transparent;
+  box-shadow: none;
+  color: var(--accent);
+}
+
+/* Template details ease in when another template is picked. */
+@keyframes detailIn {
+  from {
+    opacity: 0;
+    transform: translateY(4px);
+  }
+}
+
+.detail {
+  animation: detailIn var(--motion) both;
+}
+
+.titem {
+  transition: background-color var(--motion);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .detail {
+    animation: none;
+  }
+}
+
+/* Devices tab. */
+.how {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: var(--space-2);
+}
+
+.how > div {
+  display: grid;
+  gap: 2px;
+  padding: var(--space-3);
+  border: var(--hairline) solid var(--separator);
+  border-radius: 8px;
+  background: var(--card-bg);
+}
+
+.how b {
+  font-size: var(--text-small);
+}
+
+.how span {
+  font-size: var(--text-small);
+  color: var(--text-secondary);
+}
+
+.dev {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  gap: var(--space-3);
+  align-items: center;
+  padding: var(--space-3) var(--space-4);
+}
+
+.dev + .dev {
+  border-top: var(--hairline) solid var(--separator);
+}
+
+.devDotFresh,
+.devDotStale,
+.devDotOff {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+}
+
+.devDotFresh {
+  background: #30b158;
+}
+
+.devDotStale {
+  background: var(--folder);
+}
+
+.devDotOff {
+  background: var(--text-tertiary);
+}
+
+.linkish {
+  padding: 0;
+  border: none;
+  background: transparent;
+  color: var(--accent);
+  font-size: var(--text-small);
+}
+
+@media (max-width: 700px) {
+  .how {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
+.confirmRow {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2);
+  margin-top: var(--space-2);
+}
+
+/* Remove a folder you added yourself (Devices). */
+.choiceRemove {
+  position: absolute;
+  top: 4px;
+  right: 4px;
+  width: 22px;
+  height: 22px;
+  border: none;
+  border-radius: 4px;
+  background: transparent;
+  color: var(--text-tertiary);
+  font-size: 15px;
+  line-height: 1;
+}
+
+.choiceRemove:hover {
+  background: var(--control-hover);
+  color: var(--text);
+}

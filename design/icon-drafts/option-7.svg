@@ -1,0 +1,19 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024" width="1024" height="1024">
+  <title>Nest, option 7: three-channel N</title>
+  <defs>
+    <linearGradient id="o7-bg" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#2a2c31"/>
+      <stop offset="1" stop-color="#16171a"/>
+    </linearGradient>
+    <mask id="o7-n" maskUnits="userSpaceOnUse" x="0" y="0" width="1024" height="1024">
+      <polyline points="312,799 312,300 712,724 712,225" fill="none" stroke="#ffffff" stroke-width="150" stroke-linejoin="round" stroke-linecap="butt"/>
+    </mask>
+  </defs>
+  <rect x="100" y="100" width="824" height="824" rx="185" fill="url(#o7-bg)"/>
+  <!-- one channel per stroke: split at the stems' inner edges -->
+  <g mask="url(#o7-n)">
+    <rect x="100" y="100" width="287" height="824" fill="#d0625b"/>
+    <rect x="387" y="100" width="250" height="824" fill="#5aa57d"/>
+    <rect x="637" y="100" width="287" height="824" fill="#5a88d2"/>
+  </g>
+</svg>

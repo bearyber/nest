@@ -1,0 +1,180 @@
+# Start a release from main:  gh workflow run release.yml
+# (or GitHub → Actions → Release → Run workflow). The version comes from tauri.conf.json, so
+# bump it first (tauri.conf.json, package.json, src-tauri/Cargo.toml), commit and push to main.
+# GitHub builds the Windows installer and the Mac universal .dmg, signs the update files and
+# publishes them with latest.json to the public repo bearyber/nest-releases as v<version>.
+# Installed copies update from there. The tag v<version> is then added to this repo too.
+#
+# Why from main and not from a tag: GitHub only shares the build cache within a branch. Every
+# tag counted as new, so each release compiled from zero. Runs on main reuse the last cache.
+#
+# "Build only" (publish = false) builds and runs the gate without releasing anything: handy to
+# test this file or warm the cache.
+#
+# Three things run at the same time, so a release takes as long as the slowest build:
+#   create-release: a hidden draft release in nest-releases (fails in seconds if something's off)
+#   gate:           fmt, clippy, all tests (Windows)
+#   build:          Windows + Mac build and upload into the draft
+# publish: only when the gate AND both builds succeeded does the draft go public (and only
+#          with latest.json present), so installed apps never see a failing or half-finished release
+#
+# Windows speedup: linking uses rust-lld instead of Microsoft's slower link.exe. (A Dev Drive
+# mounted on src-tauri/target was tried and removed: rust-cache couldn't read the mount, so
+# Windows never got its cache.)
+name: Release
+
+on:
+  workflow_dispatch:
+    inputs:
+      publish:
+        description: "Publish the release (off = build and test only)"
+        type: boolean
+        default: true
+
+# Never two releases at once.
+concurrency:
+  group: release
+  cancel-in-progress: false
+
+env:
+  RELEASES_REPO: bearyber/nest-releases
+
+jobs:
+  create-release:
+    if: ${{ inputs.publish }}
+    runs-on: ubuntu-latest
+    outputs:
+      release_id: ${{ steps.draft.outputs.id }}
+      tag: ${{ steps.version.outputs.tag }}
+    steps:
+      - uses: actions/checkout@v5
+      - id: version
+        run: |
+          if [ "$GITHUB_REF" != "refs/heads/main" ]; then
+            echo "::error::Releases only run from main (this run is on $GITHUB_REF_NAME)."
+            exit 1
+          fi
+          conf=$(jq -r .version src-tauri/tauri.conf.json)
+          pkg=$(jq -r .version package.json)
+          cargo=$(grep -m1 '^version' src-tauri/Cargo.toml | cut -d'"' -f2)
+          if [ "$conf" != "$pkg" ] || [ "$conf" != "$cargo" ]; then
+            echo "::error::Versions don't match: tauri.conf.json $conf, package.json $pkg, Cargo.toml $cargo"
+            exit 1
+          fi
+          echo "Releasing v$conf"
+          echo "tag=v$conf" >> "$GITHUB_OUTPUT"
+      - id: draft
+        env:
+          GH_TOKEN: ${{ secrets.RELEASES_TOKEN }}
+          TAG: ${{ steps.version.outputs.tag }}
+        run: |
+          # Never overwrite a version that's already out.
+          if gh api "repos/$RELEASES_REPO/releases/tags/$TAG" > /dev/null 2>&1; then
+            echo "::error::$TAG is already published in nest-releases. Bump the version and run again."
+            exit 1
+          fi
+          # Drafts can't be looked up by tag, so keep the id straight from the create reply.
+          id=$(gh api "repos/$RELEASES_REPO/releases" \
+            -f tag_name="$TAG" -f target_commitish=main -f name="Nest $TAG" \
+            -f body="Windows: Nest_*_x64-setup.exe · Mac: Nest_*_universal.dmg. Installed copies update themselves." \
+            -F draft=true --jq .id)
+          if [ -z "$id" ]; then echo "::error::Couldn't create the draft release"; exit 1; fi
+          echo "Draft release id: $id"
+          echo "id=$id" >> "$GITHUB_OUTPUT"
+
+  gate:
+    runs-on: windows-latest
+    env:
+      CARGO_TARGET_X86_64_PC_WINDOWS_MSVC_LINKER: rust-lld.exe
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 24
+          cache: npm
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+      - uses: swatinem/rust-cache@v2
+        with:
+          workspaces: "./src-tauri -> target"
+          key: gate
+      - run: npm ci
+      - name: Gate (CLAUDE.md)
+        shell: bash
+        run: |
+          cargo fmt --check --manifest-path src-tauri/Cargo.toml
+          cargo clippy --manifest-path src-tauri/Cargo.toml -- -D warnings
+          cargo test --manifest-path src-tauri/Cargo.toml
+          npm run typecheck && npm run lint && npm test
+
+  build:
+    needs: create-release
+    # Also runs for "build only", where create-release is skipped.
+    if: ${{ !cancelled() && (needs.create-release.result == 'success' || needs.create-release.result == 'skipped') }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - platform: windows-latest
+            args: ""
+          - platform: macos-latest
+            args: "--target universal-apple-darwin"
+    runs-on: ${{ matrix.platform }}
+    env:
+      CARGO_TARGET_X86_64_PC_WINDOWS_MSVC_LINKER: rust-lld.exe
+
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 24
+          cache: npm
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.platform == 'macos-latest' && 'aarch64-apple-darwin,x86_64-apple-darwin' || '' }}
+
+      - uses: swatinem/rust-cache@v2
+        with:
+          workspaces: "./src-tauri -> target"
+
+      - run: npm ci
+
+      - uses: tauri-apps/tauri-action@v0
+        env:
+          GITHUB_TOKEN: ${{ secrets.RELEASES_TOKEN }}
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+        with:
+          owner: bearyber
+          repo: nest-releases
+          # Empty for "build only": tauri-action then builds without uploading anything.
+          releaseId: ${{ needs.create-release.outputs.release_id }}
+          includeUpdaterJson: true
+          args: ${{ matrix.args }}
+
+  publish:
+    needs: [create-release, gate, build]
+    if: ${{ inputs.publish }}
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - env:
+          GH_TOKEN: ${{ secrets.RELEASES_TOKEN }}
+          ID: ${{ needs.create-release.outputs.release_id }}
+        run: |
+          # Refuse to publish a release without the update manifest (it would break updates).
+          names=$(gh api "repos/$RELEASES_REPO/releases/$ID/assets" --jq '.[].name')
+          echo "$names"
+          echo "$names" | grep -qx "latest.json" || { echo "::error::latest.json missing, not publishing"; exit 1; }
+          gh api -X PATCH "repos/$RELEASES_REPO/releases/$ID" -F draft=false -f make_latest=true --jq '.html_url'
+      - name: Tag this repo with the released version
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ needs.create-release.outputs.tag }}
+        run: |
+          gh api "repos/$GITHUB_REPOSITORY/git/refs" -f ref="refs/tags/$TAG" -f sha="$GITHUB_SHA" > /dev/null \
+            || echo "::warning::Couldn't add tag $TAG here (already exists?). The release itself is out."

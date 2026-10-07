@@ -1,0 +1,90 @@
+.picker {
+  position: relative;
+  margin-left: auto;
+  min-width: 0;
+}
+
+.trigger {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  max-width: 100%;
+  height: 30px;
+  padding: 0 10px 0 12px;
+  border: var(--hairline) solid var(--control-border);
+  border-radius: var(--radius-control);
+  background: var(--control-bg);
+  white-space: nowrap;
+}
+
+.trigger:hover {
+  background: var(--control-hover);
+}
+
+.name {
+  font-weight: 600;
+}
+
+.hint {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  color: var(--text-tertiary);
+  font-family: var(--font-mono);
+  font-size: var(--text-small);
+}
+
+.chevron {
+  flex: none;
+  width: 12px;
+  height: 12px;
+  margin-left: 2px;
+  color: var(--text-secondary);
+}
+
+.menu {
+  position: absolute;
+  z-index: 5;
+  top: calc(100% + 4px);
+  right: 0;
+  width: 320px;
+  max-height: 360px;
+  overflow: auto;
+  margin: 0;
+  padding: var(--space-1);
+  list-style: none;
+  border: var(--hairline) solid var(--separator);
+  border-radius: 8px;
+  background: var(--popover-bg);
+  box-shadow: var(--shadow-popover);
+}
+
+.menu li {
+  display: grid;
+  gap: 1px;
+  padding: 6px 10px;
+  border-radius: 5px;
+}
+
+.active {
+  background: var(--accent);
+  color: #fff;
+}
+
+.optionName {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.tick {
+  width: 12px;
+  height: 12px;
+}
+
+.optionSub {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: var(--text-small);
+  opacity: 0.7;
+}

@@ -1,0 +1,138 @@
+.table {
+  display: grid;
+  height: 100%;
+  grid-template-rows: auto minmax(0, 1fr);
+  min-height: 0;
+  --cols: 28px minmax(84px, 110px) minmax(0, 2fr) minmax(0, 1fr) 104px;
+}
+
+.header,
+.row {
+  display: grid;
+  grid-template-columns: var(--cols);
+  align-items: center;
+  gap: var(--space-2);
+  padding: 0 var(--space-3);
+}
+
+.header {
+  height: 28px;
+  border-bottom: var(--hairline) solid var(--separator);
+}
+
+.headerCell {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  min-width: 0;
+  padding: 0;
+  border: none;
+  background: none;
+  color: var(--text-secondary);
+  font-size: var(--text-small);
+  font-weight: 600;
+  text-align: left;
+}
+
+.headerCell:hover {
+  color: var(--text);
+}
+
+.sortAsc,
+.sortDesc {
+  width: 10px;
+  height: 10px;
+}
+
+.sortAsc {
+  transform: rotate(180deg);
+}
+
+.body {
+  overflow-y: auto;
+  padding: var(--space-1) var(--space-2);
+}
+
+.row {
+  height: var(--row-height);
+  border-radius: var(--radius-control);
+}
+
+.row:hover {
+  background: var(--control-hover);
+}
+
+.row[aria-selected="true"] {
+  background: var(--accent-soft);
+}
+
+.offline {
+  opacity: 0.5;
+}
+
+.statusCell {
+  display: grid;
+  place-items: center;
+}
+
+.dotActive,
+.dotDone {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+}
+
+.dotActive {
+  background: var(--accent);
+}
+
+.dotDone {
+  border: 1.5px solid var(--text-tertiary);
+}
+
+.code {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  min-width: 0;
+  font-family: var(--font-mono);
+  font-size: 13px;
+  white-space: nowrap;
+}
+
+.warn {
+  display: inline-grid;
+  color: #d9822b;
+}
+
+.warn svg {
+  width: 13px;
+  height: 13px;
+}
+
+.title,
+.muted {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.title {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+.muted {
+  color: var(--text-secondary);
+}
+
+.pill {
+  flex: none;
+  padding: 0 6px;
+  border: var(--hairline) solid var(--separator);
+  border-radius: 8px;
+  font-size: 11px;
+  color: var(--text-secondary);
+}

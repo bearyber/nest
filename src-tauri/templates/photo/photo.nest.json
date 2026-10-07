@@ -1,0 +1,16 @@
+{
+  "schema": 1,
+  "id": "photo",
+  "version": 1,
+  "name": "Photo shoot",
+  "description": "From raw files to final delivery",
+  "fields": [
+    { "key": "client", "label": "Billed to", "type": "client", "required": true },
+    { "key": "name", "label": "Project name", "type": "text", "required": true, "max": 60 },
+    { "key": "start", "label": "Start date", "type": "date", "required": true, "default": "today" },
+    { "key": "notes", "label": "Description", "type": "longtext" }
+  ],
+  "folderName": "{start|yymmdd}_{name|caps}",
+  "tree": ["01_BRIEF", "02_RAW", "03_SELECTS", "04_EDITS", "05_DELIVERY"],
+  "files": [{ "from": "starter/NOTES.md", "to": "NOTES.md", "fill": true }]
+}

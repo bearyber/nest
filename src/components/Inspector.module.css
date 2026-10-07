@@ -1,0 +1,203 @@
+.inspector {
+  display: grid;
+  align-content: start;
+  gap: var(--space-4);
+  min-width: 0;
+  padding: var(--space-4);
+  border-left: var(--hairline) solid var(--separator);
+  background: var(--pane-bg);
+  overflow-y: auto;
+}
+
+.emptyPane {
+  align-content: center;
+}
+
+.empty {
+  margin: 0;
+  font-size: var(--text-small);
+  color: var(--text-tertiary);
+  text-align: center;
+}
+
+.head {
+  display: grid;
+  gap: 2px;
+}
+
+.codeRow {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+.code {
+  font-family: var(--font-mono);
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--accent);
+  user-select: text;
+  -webkit-user-select: text;
+}
+
+.title {
+  margin: 0;
+  font-size: var(--text-title);
+  font-weight: 600;
+  overflow-wrap: anywhere;
+  user-select: text;
+  -webkit-user-select: text;
+}
+
+.pill {
+  padding: 0 6px;
+  border: var(--hairline) solid var(--separator);
+  border-radius: 8px;
+  font-size: 11px;
+  color: var(--text-secondary);
+}
+
+.alert {
+  display: flex;
+  gap: var(--space-2);
+  padding: var(--space-2) var(--space-3);
+  border-radius: var(--radius-control);
+  background: var(--error-bg);
+  font-size: var(--text-small);
+}
+
+.alert svg {
+  flex: none;
+  width: 14px;
+  height: 14px;
+  margin-top: 2px;
+  color: var(--error);
+}
+
+.alertDetail {
+  margin-top: 2px;
+  font-family: var(--font-mono);
+  color: var(--text-secondary);
+  overflow-wrap: anywhere;
+}
+
+.section {
+  display: grid;
+  gap: var(--space-2);
+}
+
+.note {
+  margin: 0;
+  font-size: var(--text-small);
+  color: var(--text-tertiary);
+}
+
+.details {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  gap: 6px var(--space-3);
+  margin: 0;
+}
+
+.pair {
+  display: contents;
+}
+
+.details dt {
+  color: var(--text-secondary);
+}
+
+.details dd {
+  margin: 0;
+  overflow-wrap: anywhere;
+  white-space: pre-wrap;
+  user-select: text;
+  -webkit-user-select: text;
+}
+
+.mono {
+  font-family: var(--font-mono);
+  font-size: 12.5px;
+}
+
+.sub {
+  margin: 0;
+  font-size: var(--text-small);
+  font-weight: 600;
+  color: var(--text-secondary);
+}
+
+.subRow {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-2);
+  margin-bottom: -4px;
+}
+
+.path {
+  display: flex;
+  align-items: flex-start;
+  gap: 6px;
+  font-family: var(--font-mono);
+  font-size: 12px;
+  overflow-wrap: break-word;
+  user-select: text;
+  -webkit-user-select: text;
+}
+
+.folder {
+  flex: none;
+  margin-top: 1px;
+  color: var(--folder);
+}
+
+/* Two equal buttons that fill the panel width. */
+.actions {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: var(--space-2);
+}
+
+.actions button {
+  min-width: 0;
+}
+
+/* Devices: a project that lives on another computer. */
+.lives {
+  display: grid;
+  gap: 2px;
+  padding: var(--space-2) var(--space-3);
+  border: var(--hairline) solid var(--separator);
+  border-radius: 8px;
+  background: var(--card-bg);
+  font-size: var(--text-small);
+  color: var(--text-secondary);
+}
+
+.lives b {
+  font-size: var(--text-body);
+  color: var(--text);
+}
+
+/* Devices: a change waiting for the other computer, or one it refused. */
+.waiting {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2);
+  padding: var(--space-2) var(--space-3);
+  border-radius: 8px;
+  background: var(--accent-soft);
+  font-size: var(--text-small);
+}
+
+.waiting span {
+  flex: 1 1 160px;
+}
+
+.problemNote {
+  margin: 0;
+  font-size: var(--text-small);
+  color: var(--error);
+}

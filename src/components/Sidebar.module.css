@@ -1,0 +1,130 @@
+.sidebar {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+  min-width: 0;
+  padding: var(--space-3) var(--space-2);
+  border-right: var(--hairline) solid var(--separator);
+  overflow-y: auto;
+}
+
+.section {
+  display: grid;
+  gap: 1px;
+}
+
+.heading {
+  margin: 0 0 var(--space-1);
+  padding: 0 var(--space-2);
+  font-size: var(--text-small);
+  font-weight: 600;
+  color: var(--text-secondary);
+}
+
+.item {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  height: var(--row-height);
+  padding: 0 var(--space-2) 0 var(--space-3);
+  border: none;
+  border-radius: var(--radius-control);
+  background: transparent;
+  color: var(--text);
+  text-align: left;
+}
+
+.item:hover {
+  background: var(--control-hover);
+}
+
+/* Windows 11 / macOS style: quiet fill plus a short accent bar, not a solid block. */
+.item[aria-current="true"] {
+  background: var(--control-hover);
+  font-weight: 600;
+}
+
+.item[aria-current="true"]::before {
+  content: "";
+  position: absolute;
+  left: 0;
+  top: 50%;
+  width: 3px;
+  height: 16px;
+  border-radius: 2px;
+  background: var(--accent);
+  transform: translateY(-50%);
+}
+
+.label {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.count {
+  font-size: var(--text-small);
+  color: var(--text-tertiary);
+  font-variant-numeric: tabular-nums;
+}
+
+/* Pinned to the bottom of the sidebar (spec §3.1). */
+.settings {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  margin-top: auto;
+  height: var(--row-height);
+  padding: 0 var(--space-3);
+  border: none;
+  border-radius: var(--radius-control);
+  background: transparent;
+  color: var(--text-secondary);
+  text-align: left;
+}
+
+.settings:hover {
+  background: var(--control-hover);
+  color: var(--text);
+}
+
+.settings svg {
+  width: 15px;
+  height: 15px;
+}
+
+.dotActive,
+.dotDone {
+  flex: none;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+}
+
+.dotActive {
+  background: var(--accent);
+}
+
+.dotDone {
+  border: 1.5px solid var(--text-tertiary);
+}
+
+/* Devices: how fresh another computer's list is (green: updated in the last day). */
+.dotFresh,
+.dotStale {
+  flex: none;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+}
+
+.dotFresh {
+  background: #30b158;
+}
+
+.dotStale {
+  background: var(--folder);
+}

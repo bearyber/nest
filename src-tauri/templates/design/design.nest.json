@@ -1,0 +1,25 @@
+{
+  "schema": 1,
+  "id": "design",
+  "version": 1,
+  "name": "Design",
+  "description": "Brand, print and digital design",
+  "fields": [
+    { "key": "client", "label": "Billed to", "type": "client", "required": true },
+    { "key": "name", "label": "Project name", "type": "text", "required": true, "max": 60 },
+    { "key": "start", "label": "Start date", "type": "date", "required": true, "default": "today" },
+    { "key": "print", "label": "Includes print", "type": "bool", "default": false },
+    { "key": "notes", "label": "Description", "type": "longtext" }
+  ],
+  "folderName": "{start|yymmdd}_{name|caps}",
+  "tree": [
+    "01_BRIEF",
+    "02_REFERENCE",
+    "03_ASSETS/FONTS",
+    "03_ASSETS/IMAGES",
+    "04_WORKING",
+    "05_EXPORTS/DIGITAL",
+    { "name": "05_EXPORTS/PRINT", "when": "print" }
+  ],
+  "files": [{ "from": "starter/NOTES.md", "to": "NOTES.md", "fill": true }]
+}

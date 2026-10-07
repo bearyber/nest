@@ -1,0 +1,126 @@
+/* Design tokens: build spec §8. Platform set on <html data-platform="mac|win">. */
+
+:root {
+  /* Native controls (dropdown popups, date pickers, scrollbars) follow the OS theme. */
+  color-scheme: light dark;
+
+  /* Accent: fallback until the OS accent is read (M3). */
+  --accent: #0a84ff;
+
+  --space-1: 4px;
+  --space-2: 8px;
+  --space-3: 12px;
+  --space-4: 16px;
+  --space-6: 24px;
+
+  --radius-control: 6px;
+  --radius-sheet: 10px;
+  --hairline: 1px;
+
+  --motion: 180ms ease-out;
+
+  /* Light */
+  --text: rgba(0, 0, 0, 0.85);
+  --text-secondary: rgba(0, 0, 0, 0.5);
+  --text-tertiary: rgba(0, 0, 0, 0.4);
+  --separator: rgba(0, 0, 0, 0.1);
+  --bg-solid: #f3f3f3;
+  --pane-bg: rgba(255, 255, 255, 0.6);
+  --sheet-bg: #ffffff;
+  --card-bg: #f6f7f9;
+  --footer-bg: #f6f7f9;
+  --popover-bg: #ffffff;
+  --chevron: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='6' viewBox='0 0 10 6'%3E%3Cpath d='M1 1l4 4 4-4' fill='none' stroke='%23000' stroke-opacity='.55' stroke-width='1.5' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
+  --backdrop: rgba(20, 24, 32, 0.22);
+  --control-bg: #ffffff;
+  --control-hover: #f2f4f7;
+  --control-border: #cfd4db;
+  --accent-soft: rgba(10, 132, 255, 0.12);
+  --folder: #d9a33b;
+  --shadow-sheet: 0 24px 60px rgba(20, 24, 32, 0.22), 0 2px 6px rgba(20, 24, 32, 0.08);
+  --shadow-popover: 0 8px 28px rgba(20, 24, 32, 0.2);
+  /* Errors only: the one non-accent colour besides status (spec §8). */
+  --error: #d70015;
+  --error-bg: rgba(215, 0, 21, 0.08);
+}
+
+/* Dark: follows the system unless Settings → Appearance says otherwise (data-theme on <html>). */
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    color-scheme: dark;
+    --text: rgba(255, 255, 255, 0.88);
+    --text-secondary: rgba(255, 255, 255, 0.6);
+    --text-tertiary: rgba(255, 255, 255, 0.45);
+    --separator: rgba(255, 255, 255, 0.12);
+    --bg-solid: #202020;
+    --pane-bg: rgba(30, 30, 30, 0.55);
+    --sheet-bg: #2a2b2e;
+    --card-bg: #232427;
+    --footer-bg: #232427;
+    --popover-bg: #34363a;
+    --chevron: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='6' viewBox='0 0 10 6'%3E%3Cpath d='M1 1l4 4 4-4' fill='none' stroke='%23fff' stroke-opacity='.6' stroke-width='1.5' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
+    --backdrop: rgba(0, 0, 0, 0.45);
+    --control-bg: #323438;
+    --control-hover: #3a3c41;
+    --control-border: #484b51;
+    --accent-soft: rgba(10, 132, 255, 0.2);
+    --shadow-sheet: 0 24px 60px rgba(0, 0, 0, 0.55), 0 2px 6px rgba(0, 0, 0, 0.3);
+    --shadow-popover: 0 8px 28px rgba(0, 0, 0, 0.5);
+    --error: #ff6961;
+    --error-bg: rgba(255, 105, 97, 0.12);
+  }
+}
+
+:root[data-theme="dark"] {
+  color-scheme: dark;
+  --text: rgba(255, 255, 255, 0.88);
+  --text-secondary: rgba(255, 255, 255, 0.6);
+  --text-tertiary: rgba(255, 255, 255, 0.45);
+  --separator: rgba(255, 255, 255, 0.12);
+  --bg-solid: #202020;
+  --pane-bg: rgba(30, 30, 30, 0.55);
+  --sheet-bg: #2a2b2e;
+  --card-bg: #232427;
+  --footer-bg: #232427;
+  --popover-bg: #34363a;
+  --chevron: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='6' viewBox='0 0 10 6'%3E%3Cpath d='M1 1l4 4 4-4' fill='none' stroke='%23fff' stroke-opacity='.6' stroke-width='1.5' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
+  --backdrop: rgba(0, 0, 0, 0.45);
+  --control-bg: #323438;
+  --control-hover: #3a3c41;
+  --control-border: #484b51;
+  --accent-soft: rgba(10, 132, 255, 0.2);
+  --shadow-sheet: 0 24px 60px rgba(0, 0, 0, 0.55), 0 2px 6px rgba(0, 0, 0, 0.3);
+  --shadow-popover: 0 8px 28px rgba(0, 0, 0, 0.5);
+  --error: #ff6961;
+  --error-bg: rgba(255, 105, 97, 0.12);
+}
+
+:root[data-theme="light"] {
+  color-scheme: light;
+}
+
+:root[data-platform="mac"] {
+  --font-ui: -apple-system, "SF Pro Text", system-ui, sans-serif;
+  --font-mono: "SF Mono", ui-monospace, monospace;
+  --text-body: 13px;
+  --line-body: 18px;
+  --text-small: 11px;
+  --text-title: 15px;
+  --row-height: 28px;
+}
+
+:root[data-platform="win"] {
+  --font-ui: "Segoe UI Variable Text", "Segoe UI", system-ui, sans-serif;
+  --font-mono: "Cascadia Mono", Consolas, monospace;
+  --text-body: 14px;
+  --line-body: 20px;
+  --text-small: 12px;
+  --text-title: 16px;
+  --row-height: 32px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  :root {
+    --motion: 0ms linear;
+  }
+}
