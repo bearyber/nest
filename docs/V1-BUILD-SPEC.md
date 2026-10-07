@@ -32,7 +32,7 @@ Out (later milestones): drop-to-rename, export naming, Resolve/Premiere/AE proje
    - `plan_project(template, values) → Plan` is a pure function: it returns the exact list of folders and files to create and touches nothing.
    - `apply_plan(plan) → Result` executes it.
    - The New Project preview renders the Plan, so **the preview is always exactly what gets created.**
-3. **Never delete or overwrite user files.** The only deletion allowed in v1 is rollback of items created in the same failed `apply_plan` run, tracked in a list.
+3. **Never delete or overwrite user files.** The only deletion allowed in v1 is rollback of items created in the same failed `apply_plan` run, tracked in a list. *Exception (2026-10-02): your own templates may go to the Recycle Bin / Trash, always restorable (§12a #16). Never projects.*
 4. **The folder is the truth.** `.project.json` is canonical. SQLite is a cache that can be rebuilt from a rescan at any time.
 5. **Atomic writes** for every JSON file (write `*.tmp`, fsync, rename).
 6. **Paths are platform-native** in Rust (`PathBuf`). The UI only displays them.
