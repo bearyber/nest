@@ -1,9 +1,13 @@
 import { useState, type ReactNode } from "react";
+import { isMac } from "../lib/platform";
 import type { StatusFilter } from "../lib/search";
 import Icon from "./Icon";
+import { IconButton } from "./ui";
 import styles from "./Sidebar.module.css";
 
 interface Props {
+  /** Hide the sidebar (its button sits at the top, like other sidebars on Windows and Mac). */
+  onHide: () => void;
   spaces: string[];
   /** Projects per space for the current status filter; key "" = all spaces. */
   counts: Record<string, number>;
@@ -41,6 +45,7 @@ const STATUSES: { value: StatusFilter; label: string }[] = [
 
 /** Spaces and Status filters (build spec §3.1). The sidebar stays see-through over Mica. */
 export default function Sidebar({
+  onHide,
   spaces,
   counts,
   space,
@@ -67,6 +72,9 @@ export default function Sidebar({
 
   return (
     <nav className={styles.sidebar} aria-label="Filters">
+      <div className={styles.top}>
+        <IconButton icon="sidebar" label={`Hide sidebar (${isMac() ? "⌘B" : "Ctrl+B"})`} onClick={onHide} />
+      </div>
       <Section id="spaces" title="Spaces" collapsed={collapsed} onToggle={toggle}>
         {(open) => (
           <>

@@ -571,6 +571,7 @@ export default function Main() {
     <div className={styles.window} style={{ gridTemplateColumns: columns }}>
       {showSidebar && (
         <Sidebar
+          onHide={toggleSidebar}
           spaces={spaces}
           counts={counts}
           space={filters.space}
@@ -589,12 +590,14 @@ export default function Main() {
 
       <main className={styles.list}>
         <header className={styles.toolbar}>
-          <IconButton
-            icon="sidebar"
-            label={`${showSidebar ? "Hide" : "Show"} sidebar (${isMac() ? "⌘B" : "Ctrl+B"})`}
-            aria-pressed={showSidebar}
-            onClick={toggleSidebar}
-          />
+          {/* While the sidebar is hidden, its button waits here (it lives in the sidebar otherwise). */}
+          {!showSidebar && (
+            <IconButton
+              icon="sidebar"
+              label={`Show sidebar (${isMac() ? "⌘B" : "Ctrl+B"})`}
+              onClick={toggleSidebar}
+            />
+          )}
           <div className={styles.heading}>
             <h1>{heading}</h1>
             <span>

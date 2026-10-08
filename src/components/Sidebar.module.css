@@ -8,6 +8,12 @@
   overflow-y: auto;
 }
 
+/* Top row: the hide-sidebar button, at the left like in other apps. */
+.top {
+  display: flex;
+  margin: calc(-1 * var(--space-1)) 0 calc(-1 * var(--space-2));
+}
+
 .section {
   display: grid;
   gap: 1px;
