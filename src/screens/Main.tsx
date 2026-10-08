@@ -71,7 +71,26 @@ export default function Main() {
   const [filters, setFilters] = useState<Filters>({ space: null, status: "active", query: "", computer: null });
   const [sort, setSort] = useState<Sort>({ key: "created", dir: "desc" });
   const [selected, setSelected] = useState<string | null>(null);
-  const [showSidebar, setShowSidebar] = useState(true);
+  // The sidebar can be hidden (button at the top left, Ctrl/⌘+B); remembered per computer.
+  const [showSidebar, setShowSidebar] = useState(() => {
+    try {
+      return localStorage.getItem("nest.sidebarHidden") !== "1";
+    } catch {
+      return true;
+    }
+  });
+  const toggleSidebar = useCallback(
+    () =>
+      setShowSidebar((v) => {
+        try {
+          localStorage.setItem("nest.sidebarHidden", v ? "1" : "0");
+        } catch {
+          /* storage unavailable: just not remembered */
+        }
+        return !v;
+      }),
+    [],
+  );
   const [showInspector, setShowInspector] = useState(true);
   const [sheetOpen, setSheetOpen] = useState(false);
   const [toast, setToast] = useState<ToastData | null>(null);
@@ -433,11 +452,11 @@ export default function Main() {
       if (id === "new-project") setSheetOpen(true);
       else if (id === "rescan") rescan(true);
       else if (id === "search") searchRef.current?.focus();
-      else if (id === "toggle-sidebar") setShowSidebar((v) => !v);
+      else if (id === "toggle-sidebar") toggleSidebar();
       else if (id === "toggle-inspector") setShowInspector((v) => !v);
       else if (id === "check-updates") checkUpdates();
     },
-    [rescan, checkUpdates],
+    [rescan, checkUpdates, toggleSidebar],
   );
 
   useEffect(() => {
@@ -485,6 +504,11 @@ export default function Main() {
         if (!menuOwned) setShowInspector((v) => !v);
         return;
       }
+      if (cmd && !e.shiftKey && !e.altKey && key === "b") {
+        e.preventDefault();
+        if (!menuOwned) toggleSidebar();
+        return;
+      }
       if (typing) return;
       if (e.key === "Escape" && inSearch) {
         setFilters((f) => ({ ...f, query: "" }));
@@ -502,7 +526,7 @@ export default function Main() {
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [sheetOpen, rescan, moveSelection, selectedRow, open, fail]);
+  }, [sheetOpen, rescan, moveSelection, selectedRow, open, fail, toggleSidebar]);
 
   const closeSheet = useCallback(() => setSheetOpen(false), []);
   const dismissToast = useCallback(() => setToast(null), []);
@@ -565,6 +589,12 @@ export default function Main() {
 
       <main className={styles.list}>
         <header className={styles.toolbar}>
+          <IconButton
+            icon="sidebar"
+            label={`${showSidebar ? "Hide" : "Show"} sidebar (${isMac() ? "⌘B" : "Ctrl+B"})`}
+            aria-pressed={showSidebar}
+            onClick={toggleSidebar}
+          />
           <div className={styles.heading}>
             <h1>{heading}</h1>
             <span>
