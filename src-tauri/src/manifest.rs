@@ -66,9 +66,10 @@ pub fn update_status_with(
     let mut manifest = read_json_object(file)
         .map_err(|e| format!("The project file can't be read ({e}), so it was left untouched."))?;
     if manifest["id"].as_str() != Some(expected_id) {
-        return Err(
-            "This folder now holds a different project. Rescan (Ctrl+R) and try again.".into(),
-        );
+        return Err(format!(
+            "This folder now holds a different project. Refresh the list ({}) and try again.",
+            crate::error::refresh_keys()
+        ));
     }
     manifest["status"] = Json::String(status.to_string());
     // Archive (M5): "done since" drives the "ready to archive" suggestion.

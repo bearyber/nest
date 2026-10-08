@@ -36,6 +36,35 @@ impl From<TemplateError> for AppError {
 
 pub type AppResult<T> = Result<T, AppError>;
 
+// ── Words that differ between the two OSes, for messages (locked #1). ──
+
+/// "Finder" on a Mac, "Explorer" on Windows.
+pub fn file_manager() -> &'static str {
+    if cfg!(target_os = "macos") {
+        "Finder"
+    } else {
+        "Explorer"
+    }
+}
+
+/// "Trash" on a Mac, "Recycle Bin" on Windows.
+pub fn bin_name() -> &'static str {
+    if cfg!(target_os = "macos") {
+        "Trash"
+    } else {
+        "Recycle Bin"
+    }
+}
+
+/// The refresh shortcut: "⌘R" on a Mac, "Ctrl+R" on Windows.
+pub fn refresh_keys() -> &'static str {
+    if cfg!(target_os = "macos") {
+        "⌘R"
+    } else {
+        "Ctrl+R"
+    }
+}
+
 /// Short, readable reason for an io error.
 pub fn io_reason(e: &std::io::Error) -> String {
     use std::io::ErrorKind;

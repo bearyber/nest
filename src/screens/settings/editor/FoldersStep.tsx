@@ -314,7 +314,7 @@ export default function FoldersStep({ draft, nodes, folderName, onChange }: Prop
                 </span>
               ))}
               {ticks.length === 0 && (
-                <p className={styles.hint}>To make a folder optional, add a “Tick box” question in step 2 (like “Has graphics”).</p>
+                <p className={styles.hint}>To make a folder optional, add a “Yes / no” question in step 1, Questions (like “Has graphics”).</p>
               )}
             </fieldset>
 
@@ -322,7 +322,7 @@ export default function FoldersStep({ draft, nodes, folderName, onChange }: Prop
               <legend className={styles.label}>Folders inside, one for each choice</legend>
               {picks.length === 0 ? (
                 <p className={styles.hint}>
-                  Add a “Pick several” question in step 2 (like Formats: 16x9, 9x16…) to make a folder for each choice
+                  Add a “Pick several” question in step 1, Questions (like Formats: 16x9, 9x16…) to make a folder for each choice
                   picked.
                 </p>
               ) : (

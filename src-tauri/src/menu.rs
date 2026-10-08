@@ -42,7 +42,7 @@ pub fn build<R: Runtime>(app: &AppHandle<R>) -> tauri::Result<Menu<R>> {
     let file = SubmenuBuilder::new(app, "File")
         .item(&item(NEW_PROJECT, "New Project…", Some("CmdOrCtrl+N"))?)
         .separator()
-        .item(&item(RESCAN, "Rescan", Some("CmdOrCtrl+R"))?)
+        .item(&item(RESCAN, "Refresh List", Some("CmdOrCtrl+R"))?)
         .separator()
         .item(&PredefinedMenuItem::close_window(app, None)?)
         .build()?;

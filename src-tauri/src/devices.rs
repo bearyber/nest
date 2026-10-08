@@ -609,7 +609,11 @@ pub fn claim_allowed(updated_at: &str, now: chrono::DateTime<chrono::Utc>) -> Re
         Ok(t) if now.signed_duration_since(t) < chrono::Duration::hours(24) => Err(
             "That list was updated in the last day, so another computer is still using it. Only use this after reinstalling Nest on this computer.".into(),
         ),
-        _ => Ok(()),
+        Ok(_) => Ok(()),
+        // Unreadable or still syncing: it may be in use right now, so don't take it over.
+        Err(_) => Err(
+            "Nest can't tell when that list was last used (it may still be syncing). Try again in a few minutes.".into(),
+        ),
     }
 }
 

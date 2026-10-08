@@ -339,7 +339,9 @@ fn claiming_a_list_still_in_use_is_refused() {
         claim_allowed("2026-09-20T08:00:00+00:00", now).is_ok(),
         "two weeks old"
     );
-    assert!(claim_allowed("", now).is_ok(), "unknown time");
+    // Unreadable or still syncing: it may be in use, so it can't be taken over (audit W5).
+    assert!(claim_allowed("", now).is_err(), "unknown time");
+    assert!(claim_allowed("not a date", now).is_err());
 }
 
 fn req(id: &str, seq: u64, to: &str, project: &str, status: &str) -> StatusRequest {

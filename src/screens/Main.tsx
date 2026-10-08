@@ -107,7 +107,7 @@ export default function Main() {
             s.duplicates.length ? `duplicate codes: ${s.duplicates.join(", ")}` : "",
             s.offline.length ? `${s.offline.length} jobs folder offline` : "",
           ].filter(Boolean);
-          setToast({ message: `Rescanned · ${notes.join(" · ")}` });
+          setToast({ message: `List refreshed · ${notes.join(" · ")}` });
         })
         .catch((e) => manual && fail(e))
         .finally(() => {
@@ -581,7 +581,7 @@ export default function Main() {
           </label>
           <IconButton
             icon="refresh"
-            label={`Rescan (${isMac() ? "⌘R" : "Ctrl+R"})`}
+            label={`Refresh list (${isMac() ? "⌘R" : "Ctrl+R"})`}
             onClick={() => rescan(true)}
             className={scanning ? styles.spinning : undefined}
           />

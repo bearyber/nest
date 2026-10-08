@@ -393,13 +393,16 @@ fn read_capped(file: &Path, cap: u64) -> Result<String, String> {
     fs::read_to_string(file).map_err(|e| format!("Couldn't read {}: {e}", file.display()))
 }
 
+/// A new file, written and forced to disk (locked #6): the folder holding it is renamed into
+/// place right after, and a power cut must never leave an empty template behind.
 pub(crate) fn write_new(path: &Path, bytes: &[u8]) -> Result<(), String> {
     let mut f = OpenOptions::new()
         .write(true)
         .create_new(true)
         .open(path)
         .map_err(|e| e.to_string())?;
-    f.write_all(bytes).map_err(|e| e.to_string())
+    f.write_all(bytes).map_err(|e| e.to_string())?;
+    f.sync_all().map_err(|e| e.to_string())
 }
 
 // ───────────────────────── Export ─────────────────────────
@@ -548,5 +551,6 @@ pub fn delete(t: &Installed, user_dir: &Path) -> Result<(), String> {
     if dir == base || !dir.starts_with(&base) {
         return Err("That template isn't in your templates folder".into());
     }
-    trash::delete(&dir).map_err(|e| format!("Couldn't move it to the Recycle Bin / Trash: {e}"))
+    trash::delete(&dir)
+        .map_err(|e| format!("Couldn't move it to the {}: {e}", crate::error::bin_name()))
 }

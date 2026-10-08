@@ -16,7 +16,7 @@ use tauri_plugin_dialog::{DialogExt, MessageDialogButtons, MessageDialogKind};
 use tauri_plugin_opener::OpenerExt;
 
 use crate::commands::{lock, reload_templates, AppState};
-use crate::error::{io_reason, AppError, AppResult};
+use crate::error::{bin_name, io_reason, AppError, AppResult};
 use crate::index::scan_root;
 use crate::plan::Date;
 use crate::settings::{self, Settings};
@@ -491,14 +491,6 @@ pub fn duplicate_template(
     templates_changed(&app, &state)
 }
 
-fn bin_name() -> &'static str {
-    if cfg!(target_os = "macos") {
-        "Trash"
-    } else {
-        "Recycle Bin"
-    }
-}
-
 fn versions_phrase(n: usize) -> String {
     if n <= 1 {
         String::new()
@@ -857,6 +849,12 @@ pub fn complete_first_run(
     hidden_templates: Vec<String>,
     marker: String,
 ) -> AppResult<SettingsView> {
+    // Only once: afterwards this would wipe the jobs folders and spaces you set up.
+    if !state.first_run.load(Ordering::SeqCst) {
+        return Err(AppError::new(
+            "Nest is already set up. Change things in Settings instead.",
+        ));
+    }
     if !jobs_root.is_dir() {
         return Err(AppError::new(format!(
             "Folder not found: {}",
@@ -864,6 +862,9 @@ pub fn complete_first_run(
         )));
     }
     let v = edit(&app, &state, |s| {
+        if let Some(problem) = s.jobs_root_problem(&jobs_root) {
+            return Err(problem);
+        }
         let mut fresh = Settings {
             spaces: vec![],
             no_client_spaces: vec![],

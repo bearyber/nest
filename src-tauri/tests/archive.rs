@@ -186,6 +186,12 @@ fn unarchive_only_trusts_a_jobs_folder_of_this_computer() {
             "{from:?}"
         );
     }
+    // Never into another project's folder (it would vanish from the list).
+    let other = project(&s.jobs, "2609_OTHER", "other");
+    assert_eq!(
+        unarchive_root(Some(&other.to_string_lossy()), &roots, here),
+        Some(s.jobs.clone())
+    );
     // The first one missing: the next that's there.
     fs::remove_dir_all(&s.jobs).unwrap();
     assert_eq!(unarchive_root(None, &roots, here), Some(second));

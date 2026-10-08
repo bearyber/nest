@@ -79,7 +79,7 @@ Three panes. Minimum size 900×560. Remembers size/position.
 │              │ [Search ⌘K        ] [+ New]   │ VX-J07         │
 │ SPACES       │                               │ KIRA Summer Nights│
 │  Work     12 │ VX-J07  KIRA Summer Nights   ●   │                │
-│  Personal  3 │ VX-J06  NMIXX Luther      ●   │ Client  VX     │
+│  Personal  3 │ VX-J06  LUMA Daydream     ●   │ Client  VX     │
 │              │ BF-L02  Look dev test     ○   │ Type    MV     │
 │ STATUS       │                               │ Created 28 Sep │
 │  Active      │                               │ Template ...   │

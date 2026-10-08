@@ -17,8 +17,15 @@ use crate::manifest::{read_json_object, sync_dir, write_json_atomic};
 use crate::names::sanitize_segment;
 use crate::plan::MANIFEST_NAME;
 
-pub const OTHER_DRIVE: &str = "Your archive folder is on another drive, so Nest can't move the project there in one step. Drag the folder there yourself in Explorer or Finder; Nest will see it as archived.";
-pub const OTHER_DRIVE_BACK: &str = "The archive folder is on another drive than your jobs folder, so Nest can't move it back in one step. Drag the folder back yourself in Explorer or Finder.";
+/// The refusal for another drive, in this OS's words.
+pub fn other_drive(unarchive: bool) -> String {
+    let app = crate::error::file_manager();
+    if unarchive {
+        format!("The archive folder is on another drive than your jobs folder, so Nest can't move it back in one step. Drag the folder back yourself in {app}.")
+    } else {
+        format!("Your archive folder is on another drive, so Nest can't move the project there in one step. Drag the folder there yourself in {app}; Nest will see it as archived.")
+    }
+}
 
 /// A checked move: one folder, renamed into `to`.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -41,7 +48,8 @@ pub fn plan_move(from: &Path, dest_root: &Path, unarchive: bool) -> Result<MoveP
     let nfc: String = name.nfc().collect();
     if sanitize_segment(&name).as_deref() != Ok(nfc.as_str()) {
         return Err(format!(
-            "The folder name \"{name}\" has characters Nest doesn't move safely. Move it yourself in Explorer or Finder."
+            "The folder name \"{name}\" has characters Nest doesn't move safely. Move it yourself in {}.",
+            crate::error::file_manager()
         ));
     }
     if !from.is_dir() {
@@ -72,12 +80,7 @@ pub fn plan_move(from: &Path, dest_root: &Path, unarchive: bool) -> Result<MoveP
         ));
     }
     if !same_drive(from, dest_root) {
-        return Err(if unarchive {
-            OTHER_DRIVE_BACK
-        } else {
-            OTHER_DRIVE
-        }
-        .into());
+        return Err(other_drive(unarchive));
     }
     Ok(MovePlan {
         from: from.to_path_buf(),
@@ -106,12 +109,7 @@ pub fn move_error(e: &io::Error, unarchive: bool) -> String {
     // Windows codes: 17 = not the same device, 32 = sharing violation (a file is open).
     let windows_code = |code| cfg!(windows) && e.raw_os_error() == Some(code);
     if e.kind() == io::ErrorKind::CrossesDevices || windows_code(17) {
-        return if unarchive {
-            OTHER_DRIVE_BACK
-        } else {
-            OTHER_DRIVE
-        }
-        .into();
+        return other_drive(unarchive);
     }
     // Windows refuses to move a folder while a file in it is open; macOS never does, so there
     // "permission denied" really means permission.
@@ -145,6 +143,11 @@ pub fn unarchive_root(
         let Some(from) = real(from) else {
             return false;
         };
+        // Never into another project's folder: the scan doesn't look inside projects, so it
+        // would vanish from the list.
+        if from.join(MANIFEST_NAME).symlink_metadata().is_ok() {
+            return false;
+        }
         roots
             .iter()
             .filter_map(|r| real(r))
@@ -257,8 +260,9 @@ mod tests {
     #[test]
     fn move_errors_in_plain_words() {
         let e = io::Error::from(io::ErrorKind::CrossesDevices);
-        assert_eq!(move_error(&e, false), OTHER_DRIVE);
-        assert_eq!(move_error(&e, true), OTHER_DRIVE_BACK);
+        assert_eq!(move_error(&e, false), other_drive(false));
+        assert_eq!(move_error(&e, true), other_drive(true));
+        assert!(other_drive(false).contains(crate::error::file_manager()));
         let e = io::Error::from(io::ErrorKind::PermissionDenied);
         assert!(move_error(&e, false).contains("Close it and try again"));
         let e = io::Error::from(io::ErrorKind::NotFound);

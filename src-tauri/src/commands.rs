@@ -414,6 +414,10 @@ pub fn choose_jobs_root(
         )));
     }
     let mut settings = lock(&state.settings)?;
+    // Same rule as Settings → Add folder: never the archive folder, inside it, or around it.
+    if let Some(problem) = settings.jobs_root_problem(&path) {
+        return Err(AppError::new(problem));
+    }
     settings.jobs_roots.retain(|r| r != &path);
     settings.jobs_roots.insert(0, path.clone());
     settings::save(&state.config_dir, &settings)?;
@@ -642,9 +646,10 @@ pub fn archive_project(
             .map_err(|e| AppError::new(format!("The project file can't be read ({e})")))?;
         // The folder must still hold the project the list shows (it may have been swapped).
         if manifest["id"].as_str() != Some(id.as_str()) {
-            return Err(AppError::new(
-                "This folder now holds a different project. Rescan (Ctrl+R) and try again.",
-            ));
+            return Err(AppError::new(format!(
+                "This folder now holds a different project. Refresh the list ({}) and try again.",
+                crate::error::refresh_keys()
+            )));
         }
         let archived = is_archived(&settings, &path);
         let dest = if unarchive {
