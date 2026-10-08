@@ -1,10 +1,11 @@
 import { Fragment, useCallback, useEffect, useRef, useState } from "react";
+import { listen } from "@tauri-apps/api/event";
 import FieldInput from "../components/fields/FieldInput";
 import Icon from "../components/Icon";
 import PreviewTree from "../components/PreviewTree";
 import TemplatePicker from "../components/TemplatePicker";
 import { Button, IconButton, Kbd, Segmented } from "../components/ui";
-import { chooseJobsRoot, createProject, newProjectContext, planProject } from "../lib/commands";
+import { chooseJobsRoot, choosePersonalRoot, createProject, newProjectContext, planProject } from "../lib/commands";
 import { hasCommandKey, isMac } from "../lib/platform";
 import { defaultsFor } from "../lib/tree";
 import {
@@ -19,6 +20,12 @@ import {
 import styles from "./NewProjectSheet.module.css";
 
 const PREVIEW_DEBOUNCE_MS = 150;
+
+/** "D:\Jobs\260901_X" → "D:\Jobs" (either separator). */
+function parentOf(path: string): string {
+  const cut = Math.max(path.lastIndexOf("/"), path.lastIndexOf("\\"));
+  return cut > 0 ? path.slice(0, cut) : path;
+}
 
 interface Props {
   onClose: () => void;
@@ -61,9 +68,23 @@ export default function NewProjectSheet({ onClose, onCreated }: Props) {
       .catch((e) => setError(errorMessage(e)));
   }, [chooseTemplate]);
 
-  // New jobs folder: reload the context (rescans that folder); the preview effect re-plans.
+  // Settings changed while the sheet is open (e.g. a new Personal folder): reload what it shows.
+  useEffect(() => {
+    let unlisten: (() => void) | undefined;
+    listen("settings-changed", () => {
+      newProjectContext()
+        .then(setCtx)
+        .catch((e) => setError(errorMessage(e)));
+    })
+      .then((u) => (unlisten = u))
+      .catch(() => {});
+    return () => unlisten?.();
+  }, []);
+
+  // New jobs folder (or Personal folder, when that's the one shown): reload the context
+  // (rescans that folder); the preview effect re-plans.
   const changeLocation = () => {
-    chooseJobsRoot()
+    (personalShown ? choosePersonalRoot() : chooseJobsRoot())
       .then((picked) => (picked ? newProjectContext() : null))
       .then((c) => {
         if (c) {
@@ -74,10 +95,15 @@ export default function NewProjectSheet({ onClose, onCreated }: Props) {
       .catch((e) => setError(errorMessage(e)));
   };
 
-  const jobsRoot = ctx?.jobsRoot;
   // A no-client space (Personal) never has a client; elsewhere it's the tick box.
   const spaceHasNoClient = !!ctx?.noClientSpaces.includes(space);
   const noClient = noClientTicked || spaceHasNoClient;
+  // Personal and "No client" projects go to the Personal folder, if one is chosen (Settings).
+  // The folder shown is the one the Plan uses, so it always matches where Create puts it.
+  const personalShown = noClient && !!ctx?.personalRoot;
+  const planFolder = plan?.folderName ? parentOf(plan.root) : null;
+  const jobsRoot = planFolder ?? (personalShown ? ctx?.personalRoot : ctx?.jobsRoot);
+  const rootMissing = personalShown ? ctx?.personalMissing : ctx?.rootMissing;
 
   // Live preview: re-plan in Rust shortly after each change; ignore stale answers.
   useEffect(() => {
@@ -145,9 +171,9 @@ export default function NewProjectSheet({ onClose, onCreated }: Props) {
   const footHint =
     !ready && missing.length > 0 ? (
       missing[0]
-    ) : plan?.folderName && ctx?.jobsRoot ? (
+    ) : plan?.folderName && jobsRoot ? (
       <>
-        Creates <b>{plan.folderName}</b> in {ctx.jobsRoot}
+        Creates <b>{plan.folderName}</b> in {jobsRoot}
       </>
     ) : null;
 
@@ -168,9 +194,9 @@ export default function NewProjectSheet({ onClose, onCreated }: Props) {
         </header>
 
         <div className={styles.body}>
-          {ctx?.rootMissing && ctx.jobsRoot && (
+          {rootMissing && jobsRoot && (
             <div className={styles.banner} role="alert">
-              Jobs folder not found: {ctx.jobsRoot}
+              {personalShown ? "Personal folder" : "Jobs folder"} not found: {jobsRoot}
             </div>
           )}
 
@@ -240,10 +266,11 @@ export default function NewProjectSheet({ onClose, onCreated }: Props) {
                   <div className={styles.row}>
                     <span className={styles.label}>Location</span>
                     <div className={styles.inline}>
-                      <div className={styles.path} title={ctx.jobsRoot ?? undefined}>
+                      <div className={styles.path} title={jobsRoot ?? undefined}>
                         <Icon name="folder" className={styles.pathIcon} />
-                        <span className={styles.pathText}>{ctx.jobsRoot ?? "No jobs folder yet"}</span>
+                        <span className={styles.pathText}>{jobsRoot ?? "No jobs folder yet"}</span>
                       </div>
+                      {personalShown && <span className={styles.note}>Your Personal folder</span>}
                       <Button onClick={changeLocation}>Change…</Button>
                     </div>
                   </div>

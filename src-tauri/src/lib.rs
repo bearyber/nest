@@ -123,6 +123,8 @@ pub fn run() {
             settings_cmd::move_jobs_root,
             settings_cmd::set_default_space,
             settings_cmd::set_launch_at_login,
+            settings_cmd::set_personal_root,
+            settings_cmd::choose_personal_root,
             settings_cmd::set_archive_folder,
             settings_cmd::clear_archive_folder,
             settings_cmd::set_archive_after_days,

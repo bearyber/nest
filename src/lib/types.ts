@@ -77,6 +77,9 @@ export interface NewProjectContext {
   /** null until a jobs folder is chosen. */
   jobsRoot: string | null;
   rootMissing: boolean;
+  /** v0.4.2: the Personal folder, when it's separate from `jobsRoot`. */
+  personalRoot: string | null;
+  personalMissing: boolean;
   clients: ClientValue[];
   settingsError: string | null;
 }
@@ -221,6 +224,8 @@ export interface Settings {
   archiveFolder: string | null;
   /** Suggest archiving projects done for more than this many days; null = no suggestions. */
   archiveAfterDays: number | null;
+  /** v0.4.2: where Personal-space and "No client" projects go; null = the first jobs folder. */
+  personalRoot: string | null;
 }
 
 export interface SettingsView {

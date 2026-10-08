@@ -10,6 +10,7 @@ import {
   setArchiveFolder,
   setDefaultSpace,
   setLaunchAtLogin,
+  setPersonalRoot,
 } from "../../lib/commands";
 
 const SUGGESTED_DAYS = 90;
@@ -48,6 +49,7 @@ export default function GeneralTab({ view, run }: TabProps) {
                   <PathText path={path} />
                 </span>
                 {i === 0 && <span className={styles.pill}>New projects go here</span>}
+                {path === s.personalRoot && <span className={styles.pill}>Personal projects go here</span>}
                 <IconButton
                   icon="down"
                   label="Move up"
@@ -88,6 +90,26 @@ export default function GeneralTab({ view, run }: TabProps) {
             ))}
           </select>
         </div>
+        <div className={styles.formRow}>
+          <label htmlFor="personal-root">Personal projects go in</label>
+          <select
+            id="personal-root"
+            className={styles.select}
+            value={s.personalRoot ?? ""}
+            onChange={(e) => run(setPersonalRoot(e.target.value === "" ? null : e.target.value))}
+          >
+            <option value="">The same folder as other new projects</option>
+            {roots.map((path) => (
+              <option key={path} value={path}>
+                {path}
+              </option>
+            ))}
+          </select>
+        </div>
+        <p className={styles.hint}>
+          For the {s.noClientSpaces[0] ?? "Personal"} space and “No client” projects. To use a new folder, add it to
+          your jobs folders first (Add folder… above).
+        </p>
       </section>
 
       <section className={styles.section}>

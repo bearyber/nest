@@ -30,6 +30,8 @@ vi.mock("../lib/commands", () => ({
       lastTemplate: "grading-performance",
       jobsRoot: "D:/NestDev",
       rootMissing: false,
+      personalRoot: "D:/Personal",
+      personalMissing: false,
       clients: [{ name: "Vertex Studio", code: "VX" }],
       settingsError: null,
     }),
@@ -39,11 +41,13 @@ vi.mock("../lib/commands", () => ({
     // No client: every question is optional and the code is your own.
     const noClient = req.noClient || req.space === "Personal";
     const code = noClient ? "OWN-L01" : "VX-L01";
+    const folderName = noClient ? `${code}${artist && `_${artist}`}` : `${code}_${artist || "Artist"}`;
     return {
       jobCode: code,
-      folderName: noClient ? `${code}${artist && `_${artist}`}` : `${code}_${artist || "Artist"}`,
+      folderName,
       title: artist,
-      root: "D:/NestDev/x",
+      // Personal / No client projects go to the Personal folder (as Rust decides).
+      root: `${noClient ? "D:/Personal" : "D:/NestDev"}/${folderName}`,
       folders: ["01_REF"],
       files: [],
       manifest: {},
@@ -54,6 +58,8 @@ vi.mock("../lib/commands", () => ({
   createProject: vi.fn(),
   chooseJobsRoot: vi.fn(async () => null),
 }));
+
+vi.mock("@tauri-apps/api/event", () => ({ listen: vi.fn(async () => () => {}) }));
 
 import NewProjectSheet from "./NewProjectSheet";
 
@@ -102,8 +108,13 @@ describe("NewProjectSheet", () => {
     const create = (await screen.findByRole("button", { name: /^Create/ })) as HTMLButtonElement;
     await screen.findAllByText("VX-L01_Artist");
     expect(create.disabled).toBe(true);
+    expect(screen.getByText("D:/NestDev")).toBeTruthy();
+    expect(screen.queryByText("Your Personal folder")).toBeNull();
 
     fireEvent.click(screen.getByLabelText("No client (personal or passion project)"));
+    // It goes to the Personal folder chosen in Settings (shown from the Plan, once it's back).
+    expect(await screen.findByText("D:/Personal")).toBeTruthy();
+    expect(screen.getByText("Your Personal folder")).toBeTruthy();
     expect(screen.queryByPlaceholderText("Name")).toBeNull(); // the client name box is gone
     expect(screen.getByText(/Every question is optional/)).toBeTruthy();
     await screen.findAllByText("OWN-L01");

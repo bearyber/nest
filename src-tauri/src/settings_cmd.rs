@@ -161,6 +161,39 @@ pub fn add_jobs_root(
     .map(Some)
 }
 
+/// v0.4.2: where Personal-space and "No client" projects go. One of the jobs folders, or
+/// None = the first jobs folder (same as other new projects).
+#[tauri::command(async)]
+pub fn set_personal_root(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    path: Option<PathBuf>,
+) -> AppResult<SettingsView> {
+    edit(&app, &state, |s| s.set_personal_root(path))
+}
+
+/// "Change…" in New Project while it shows the Personal folder: pick a folder, add it to the
+/// jobs folders if it's new (so it's watched), and use it for Personal projects.
+#[tauri::command(async)]
+pub fn choose_personal_root(
+    app: AppHandle,
+    state: State<'_, AppState>,
+) -> AppResult<Option<SettingsView>> {
+    let Some(path) = pick_folder(&app, "Choose the folder for Personal projects")? else {
+        return Ok(None);
+    };
+    edit(&app, &state, |s| {
+        if let Some(problem) = s.jobs_root_problem(&path) {
+            return Err(problem);
+        }
+        if !s.jobs_roots.contains(&path) {
+            s.add_root(path.clone());
+        }
+        s.set_personal_root(Some(path))
+    })
+    .map(Some)
+}
+
 // ── Archive (M5, spec §12a #21) ──
 
 /// Pick the archive folder. Its projects show as archived after the next rescan (the main
@@ -854,6 +887,7 @@ pub fn complete_first_run(
         }
         fresh.default_space = fresh.spaces[0].clone();
         fresh.jobs_roots = vec![jobs_root.clone()];
+        fresh.personal_root = None; // starts like other new projects; chosen later in Settings
         fresh.hidden_templates = hidden_templates.clone();
         fresh.local_marker = crate::settings::check_marker(&marker)?;
         *s = fresh;

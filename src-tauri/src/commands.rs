@@ -43,7 +43,7 @@ pub struct AppState {
     /// The settings file exists but is damaged: never save over it.
     pub settings_error: Option<String>,
     /// Last scan of the jobs root (refreshed when the sheet opens and on Create).
-    pub scan: Mutex<RootScan>,
+    pub scan: Mutex<HashMap<PathBuf, RootScan>>,
     /// A Create is running: a second one (e.g. a held Cmd/Ctrl+Enter) is refused.
     pub creating: AtomicBool,
     /// The project index (SQLite cache). The folder walk never holds this lock.
@@ -94,12 +94,11 @@ pub(crate) fn reload_templates(state: &AppState) -> AppResult<()> {
     Ok(())
 }
 
-fn jobs_root(settings: &Settings) -> AppResult<PathBuf> {
-    settings
-        .jobs_roots
-        .first()
-        .cloned()
-        .ok_or_else(|| AppError::new("No jobs folder is set up yet"))
+/// Where this new project goes: the Personal folder for Personal-space and "No client"
+/// projects (if one is chosen), else the first jobs folder. `None` until a jobs folder exists.
+fn request_root(settings: &Settings, request: &PlanRequest) -> Option<PathBuf> {
+    let no_client = request.no_client || settings.no_client_spaces.contains(&request.space);
+    settings.new_project_root(no_client)
 }
 
 /// Whether the native window material (Mica / vibrancy) is active.
@@ -130,6 +129,9 @@ pub struct NewProjectContext {
     /// `None` until a jobs folder is chosen.
     pub jobs_root: Option<PathBuf>,
     pub root_missing: bool,
+    /// v0.4.2: where Personal-space and "No client" projects go (None = `jobs_root`).
+    pub personal_root: Option<PathBuf>,
+    pub personal_missing: bool,
     pub clients: Vec<ClientValue>,
     pub settings_error: Option<String>,
 }
@@ -139,13 +141,35 @@ pub struct NewProjectContext {
 #[tauri::command(async)]
 pub fn new_project_context(state: State<'_, AppState>) -> AppResult<NewProjectContext> {
     let settings = lock(&state.settings)?.clone();
-    let root = settings.jobs_roots.first().cloned();
-    let scan = root.as_deref().map(scan_root);
-    let root_missing = !matches!(scan, Some(Ok(_)));
-    let scan = scan.and_then(Result::ok);
-    let scan = scan.unwrap_or_default();
-    let clients = scan.clients.clone();
-    *lock(&state.scan)? = scan;
+    let root = settings.new_project_root(false);
+    // Sent whenever a Personal folder is chosen (even if it's also the first jobs folder), so
+    // the sheet knows Change… is about the Personal folder.
+    let personal = settings
+        .personal_root
+        .as_ref()
+        .and_then(|_| settings.new_project_root(true));
+    // Scan where new projects can go (the jobs folder, and the Personal folder if separate).
+    let mut scans = HashMap::new();
+    let mut missing = |dir: &Option<PathBuf>| match dir.as_deref().map(scan_root) {
+        Some(Ok(scan)) => {
+            scans.insert(dir.clone().unwrap_or_default(), scan);
+            false
+        }
+        _ => true,
+    };
+    let root_missing = missing(&root);
+    let personal_missing = match &personal {
+        Some(p) if Some(p) == root.as_ref() => root_missing,
+        Some(_) => missing(&personal),
+        None => false,
+    };
+    let mut clients: Vec<ClientValue> = Vec::new();
+    for c in scans.values().flat_map(|s| s.clients.iter()) {
+        if !clients.contains(c) {
+            clients.push(c.clone());
+        }
+    }
+    *lock(&state.scan)? = scans;
     Ok(NewProjectContext {
         templates: offered_templates(&state, &settings)?
             .into_iter()
@@ -157,6 +181,8 @@ pub fn new_project_context(state: State<'_, AppState>) -> AppResult<NewProjectCo
         last_template: settings.last_template,
         jobs_root: root,
         root_missing,
+        personal_root: personal,
+        personal_missing,
         clients,
         settings_error: state.settings_error.clone(),
     })
@@ -178,8 +204,25 @@ pub struct PlanRequest {
 #[tauri::command(async)]
 pub fn plan_project(state: State<'_, AppState>, request: PlanRequest) -> AppResult<Plan> {
     let settings = lock(&state.settings)?.clone();
-    let scan = lock(&state.scan)?.clone();
+    let scan = match request_root(&settings, &request) {
+        Some(root) => cached_scan(&state, &root)?,
+        None => RootScan::default(),
+    };
     Ok(build_plan(&state, &settings, &scan, &request)?.0)
+}
+
+/// The remembered scan of `root`, or a fresh one if Nest hasn't looked there since New Project
+/// opened (e.g. the Personal folder was changed in Settings meanwhile). Unreadable = empty;
+/// the plan then reports the folder as missing.
+fn cached_scan(state: &AppState, root: &Path) -> AppResult<RootScan> {
+    if let Some(scan) = lock(&state.scan)?.get(root) {
+        return Ok(scan.clone());
+    }
+    let Ok(scan) = scan_root(root) else {
+        return Ok(RootScan::default());
+    };
+    lock(&state.scan)?.insert(root.to_path_buf(), scan.clone());
+    Ok(scan)
 }
 
 fn build_plan(
@@ -195,7 +238,7 @@ fn build_plan(
         .ok_or_else(|| AppError::new("That template isn't installed"))?;
     let loaded = &loaded;
     // No jobs folder yet still previews; Create stays blocked by the issue below.
-    let root = settings.jobs_roots.first().cloned().unwrap_or_default();
+    let root = request_root(settings, request).unwrap_or_default();
     let now = Local::now();
     let ctx = PlanContext {
         jobs_root: root.clone(),
@@ -212,6 +255,10 @@ fn build_plan(
         // Spec §5: codes from the index (incl. offline folders) and from disk.
         existing_codes: {
             let mut codes = scan.codes.clone();
+            // Codes in the other folder New Project scanned (jobs / Personal) count too.
+            if let Ok(scans) = state.scan.lock() {
+                codes.extend(scans.values().flat_map(|s| s.codes.iter().cloned()));
+            }
             if let Ok(idx) = state.index.lock() {
                 codes.extend(idx.codes().unwrap_or_default());
             }
@@ -273,11 +320,12 @@ pub fn create_project(
     }
     let _guard = CreatingGuard(&state.creating);
     let settings = lock(&state.settings)?.clone();
+    let root = request_root(&settings, &request)
+        .ok_or_else(|| AppError::new("No jobs folder is set up yet"))?;
     let previewed = {
-        let scan = lock(&state.scan)?.clone();
+        let scan = cached_scan(&state, &root)?;
         build_plan(&state, &settings, &scan, &request)?.0.job_code
     };
-    let root = jobs_root(&settings)?;
     for _ in 0..CREATE_ATTEMPTS {
         let scan = scan_root(&root).map_err(|e| {
             AppError::new(format!(
@@ -286,7 +334,7 @@ pub fn create_project(
                 io_reason(&e)
             ))
         })?;
-        *lock(&state.scan)? = scan.clone();
+        lock(&state.scan)?.insert(root.clone(), scan.clone());
         let (plan, loaded) = build_plan(&state, &settings, &scan, &request)?;
         if let Some(problem) = plan.issues.iter().find(|i| i.level == Level::Error) {
             return Err(AppError::new(problem.message.clone()));
@@ -903,6 +951,39 @@ fn readable_id(id: &str) -> String {
 mod tests {
     use super::*;
     use std::fs;
+
+    #[test]
+    fn personal_and_no_client_projects_go_to_the_personal_folder() {
+        let mut s = Settings {
+            jobs_roots: vec![PathBuf::from("/Jobs"), PathBuf::from("/Personal")],
+            ..Settings::default()
+        };
+        let req = |space: &str, no_client: bool| PlanRequest {
+            template_id: "general".into(),
+            values: Values::new(),
+            space: space.into(),
+            code_override: None,
+            no_client,
+        };
+        // Not chosen: everything goes to the first jobs folder.
+        assert_eq!(
+            request_root(&s, &req("Personal", false)),
+            Some("/Jobs".into())
+        );
+        s.set_personal_root(Some("/Personal".into())).unwrap();
+        assert_eq!(request_root(&s, &req("Work", false)), Some("/Jobs".into()));
+        assert_eq!(
+            request_root(&s, &req("Work", true)),
+            Some("/Personal".into())
+        );
+        // "Personal" is a no-client space by default.
+        assert_eq!(
+            request_root(&s, &req("Personal", false)),
+            Some("/Personal".into())
+        );
+        s.jobs_roots.clear();
+        assert_eq!(request_root(&s, &req("Work", true)), None);
+    }
 
     #[test]
     fn open_folder_only_inside_jobs_roots() {

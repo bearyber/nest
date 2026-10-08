@@ -53,6 +53,9 @@ pub struct Settings {
     pub archive_after_days: Option<u32>,
     /// Project ids Bernard said "not this one" to; never suggested again.
     pub archive_dismissed: Vec<String>,
+    /// v0.4.2: where Personal-space and "No client" projects go. One of `jobs_roots` (so it's
+    /// watched); None = the first jobs folder, like every other new project.
+    pub personal_root: Option<PathBuf>,
     /// Keys this version doesn't know (e.g. written by a newer Nest): kept on every save.
     #[serde(flatten)]
     pub other: serde_json::Map<String, serde_json::Value>,
@@ -84,6 +87,7 @@ impl Default for Settings {
             archive_folder: None,
             archive_after_days: None,
             archive_dismissed: vec![],
+            personal_root: None,
             other: serde_json::Map::new(),
         }
     }
@@ -249,7 +253,36 @@ impl Settings {
         if self.jobs_roots.len() == before {
             return Err("That folder isn't in the list".into());
         }
+        // Personal projects go back to the first jobs folder.
+        if self.personal_root.as_deref() == Some(path) {
+            self.personal_root = None;
+        }
         Ok(())
+    }
+
+    /// Where Personal-space and "No client" projects go: one of the jobs folders, or None for
+    /// the first one (the same place as other new projects).
+    pub fn set_personal_root(&mut self, path: Option<PathBuf>) -> Result<(), String> {
+        if let Some(p) = &path {
+            if !self.jobs_roots.contains(p) {
+                return Err(
+                    "Add that folder to your jobs folders first (Add folder…), then pick it here."
+                        .into(),
+                );
+            }
+        }
+        self.personal_root = path;
+        Ok(())
+    }
+
+    /// The jobs folder a new project goes into. `no_client`: Personal space or "No client".
+    pub fn new_project_root(&self, no_client: bool) -> Option<PathBuf> {
+        no_client
+            .then_some(self.personal_root.as_ref())
+            .flatten()
+            .filter(|p| self.jobs_roots.contains(p))
+            .or(self.jobs_roots.first())
+            .cloned()
     }
 
     /// The first jobs folder is where new projects go.
@@ -389,6 +422,32 @@ mod tests {
         s.last_template = Some("grading-mv".into());
         save(dir.path(), &s).unwrap();
         assert_eq!(load(dir.path()).unwrap(), Some(s));
+    }
+
+    #[test]
+    fn personal_projects_folder_is_one_of_the_jobs_folders_and_optional() {
+        let mut s = Settings::default();
+        let (work, personal) = (PathBuf::from("/Jobs/Active"), PathBuf::from("/Personal"));
+        s.jobs_roots = vec![work.clone()];
+        // Not set: everything goes to the first jobs folder, as before.
+        assert_eq!(s.new_project_root(true), Some(work.clone()));
+        // Only a listed jobs folder can be chosen.
+        assert!(s.set_personal_root(Some(personal.clone())).is_err());
+        assert_eq!(s.personal_root, None);
+        s.add_root(personal.clone());
+        s.set_personal_root(Some(personal.clone())).unwrap();
+        assert_eq!(s.new_project_root(true), Some(personal.clone()));
+        assert_eq!(s.new_project_root(false), Some(work.clone()));
+        // Reordering keeps it; removing that jobs folder clears it.
+        s.move_root(&personal, 0).unwrap();
+        assert_eq!(s.new_project_root(false), Some(personal.clone()));
+        assert_eq!(s.new_project_root(true), Some(personal.clone()));
+        s.remove_root(&personal).unwrap();
+        assert_eq!(s.personal_root, None);
+        assert_eq!(s.new_project_root(true), Some(work));
+        // Older settings files (no key) still read.
+        let old: Settings = serde_json::from_str(r#"{"jobsRoots":["/Jobs"]}"#).unwrap();
+        assert_eq!(old.personal_root, None);
     }
 
     #[test]

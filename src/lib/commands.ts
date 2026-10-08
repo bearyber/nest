@@ -77,6 +77,10 @@ export const setLaunchAtLogin = (on: boolean) => s<SettingsView>("set_launch_at_
 export const setArchiveFolder = () => s<SettingsView | null>("set_archive_folder");
 export const clearArchiveFolder = () => s<SettingsView>("clear_archive_folder");
 export const setArchiveAfterDays = (days: number | null) => s<SettingsView>("set_archive_after_days", { days });
+/** Where Personal-space and "No client" projects go (one of the jobs folders; null = the first). */
+export const setPersonalRoot = (path: string | null) => s<SettingsView>("set_personal_root", { path });
+/** New Project's Change… while it shows the Personal folder. Null when cancelled. */
+export const choosePersonalRoot = () => s<SettingsView | null>("choose_personal_root");
 /** Move a Done project into the archive folder (or back). Rust asks first; null = cancelled. */
 export const archiveProject = (key: string, unarchive: boolean) =>
   s<string | null>("archive_project", { key, unarchive });
