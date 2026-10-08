@@ -271,7 +271,9 @@ fn template_root(dir: &Path) -> Result<PathBuf, String> {
         .collect();
     match subdirs.as_slice() {
         [only] if has_json(only) => Ok(only.clone()),
-        _ => Err(format!("That package has no {TEMPLATE_SUFFIX} file")),
+        _ => Err(format!(
+            "That file isn't a Nest template (no {TEMPLATE_SUFFIX} inside)"
+        )),
     }
 }
 
@@ -293,7 +295,7 @@ pub(crate) fn free_folder(parent: &Path, base: &str) -> PathBuf {
 }
 
 fn unsafe_entry(name: &str, why: &str) -> String {
-    format!("That package can't be imported: \"{name}\" {why}")
+    format!("That template file can't be added: \"{name}\" {why}")
 }
 
 /// Unpack every entry ourselves (never the library's extract, which can create links).
@@ -303,16 +305,18 @@ fn unzip_safely(file: &Path, dest: &Path, limits: Limits) -> Result<(), String> 
         ZipArchive::new(f).map_err(|_| "That file isn't a Nest template package".to_string())?;
     if zip.len() > limits.max_files {
         return Err(format!(
-            "That package has too many files (over {})",
+            "That template file has too many files (over {})",
             limits.max_files
         ));
     }
     let mut total: u64 = 0;
     let mut seen = HashSet::new();
     for i in 0..zip.len() {
-        let mut entry = zip
-            .by_index(i)
-            .map_err(|e| format!("That package is damaged: {e}"))?;
+        let mut entry = zip.by_index(i).map_err(|e| {
+            format!(
+                "That template file is damaged. Try saving it again on the other computer ({e})"
+            )
+        })?;
         let raw = entry.name().to_string();
         if raw.contains('\\') {
             return Err(unsafe_entry(&raw, "uses \\ in its path"));
@@ -368,14 +372,14 @@ fn unzip_safely(file: &Path, dest: &Path, limits: Limits) -> Result<(), String> 
         loop {
             let n = entry
                 .read(&mut buf)
-                .map_err(|e| format!("That package is damaged: {e}"))?;
+                .map_err(|e| format!("That template file is damaged. Try saving it again on the other computer ({e})"))?;
             if n == 0 {
                 break;
             }
             total += n as u64;
             if total > limits.max_bytes {
                 return Err(format!(
-                    "That package is too big (over {} MB unpacked)",
+                    "That template file is too big (over {} MB unpacked)",
                     limits.max_bytes / (1024 * 1024)
                 ));
             }

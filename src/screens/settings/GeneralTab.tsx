@@ -4,6 +4,7 @@ import { Button, IconButton, PathText } from "../../components/ui";
 import {
   addJobsRoot,
   clearArchiveFolder,
+  forgetPastArchiveFolder,
   moveJobsRoot,
   removeJobsRoot,
   setArchiveAfterDays,
@@ -11,6 +12,7 @@ import {
   setDefaultSpace,
   setLaunchAtLogin,
   setPersonalRoot,
+  reusePastArchiveFolder,
 } from "../../lib/commands";
 
 const SUGGESTED_DAYS = 90;
@@ -21,6 +23,10 @@ import styles from "./settings.module.css";
 export default function GeneralTab({ view, run }: TabProps) {
   const s = view.settings;
   const roots = s.jobsRoots;
+  // Said after changing / turning off the archive folder, so its address is never lost.
+  const oldArchiveNote = s.archiveFolder
+    ? `The old one (${s.archiveFolder}) is under "Previous archive folders".`
+    : undefined;
   // The days box saves when you leave it (not on every keystroke).
   const [days, setDays] = useState<string>(String(s.archiveAfterDays ?? SUGGESTED_DAYS));
   const commitDays = () => {
@@ -37,8 +43,7 @@ export default function GeneralTab({ view, run }: TabProps) {
       <section className={styles.section}>
         <h3 className={styles.sectionTitle}>Jobs folders</h3>
         <p className={styles.hint}>
-          Nest lists every project in these folders. New projects go in the first one. Removing a folder only stops
-          Nest watching it; nothing on disk changes.
+          Nest finds your projects in these folders. New ones go in the first. Removing a folder doesn't delete anything.
         </p>
         {roots.length > 0 && (
           <div className={styles.card}>
@@ -63,7 +68,7 @@ export default function GeneralTab({ view, run }: TabProps) {
                   disabled={i === roots.length - 1}
                   onClick={() => run(moveJobsRoot(path, i + 1))}
                 />
-                <Button onClick={() => run(removeJobsRoot(path), `Stopped watching ${path}`)}>Remove</Button>
+                <Button onClick={() => run(removeJobsRoot(path), `Removed ${path} from Nest. Your files weren't touched.`)}>Remove</Button>
               </div>
             ))}
           </div>
@@ -107,17 +112,16 @@ export default function GeneralTab({ view, run }: TabProps) {
           </select>
         </div>
         <p className={styles.hint}>
-          For the {s.noClientSpaces[0] ?? "Personal"} space and “No client” projects. To use a new folder, add it to
-          your jobs folders first (Add folder… above).
+          For the {s.noClientSpaces[0] ?? "Personal"} space and “No client” projects. The folder must be in the list
+          above.
         </p>
       </section>
 
       <section className={styles.section}>
         <h3 className={styles.sectionTitle}>Archive</h3>
         <p className={styles.hint}>
-          Off until you choose a folder. Projects in it show under Archived, read-only. To archive a Done project,
-          select it and click Archive… in the details panel (archive folder on the same drive), or move the folder
-          there yourself. Nothing is ever deleted.
+          A folder for finished projects. Select a Done project and click Archive… to move it there. Nothing is ever
+          deleted.
         </p>
         {s.archiveFolder ? (
           <div className={styles.card}>
@@ -126,8 +130,8 @@ export default function GeneralTab({ view, run }: TabProps) {
               <span className={`${styles.grow} ${styles.mono}`}>
                 <PathText path={s.archiveFolder} />
               </span>
-              <Button onClick={() => run(setArchiveFolder())}>Change…</Button>
-              <Button onClick={() => run(clearArchiveFolder(), "Archive is off. Nothing on disk changed.")}>
+              <Button onClick={() => run(setArchiveFolder(), oldArchiveNote)}>Change…</Button>
+              <Button onClick={() => run(clearArchiveFolder(), `Archive is off. Nothing on disk changed. ${oldArchiveNote}`)}>
                 Turn off
               </Button>
             </div>
@@ -165,6 +169,29 @@ export default function GeneralTab({ view, run }: TabProps) {
           <div className={styles.actions}>
             <Button onClick={() => run(setArchiveFolder())}>Choose archive folder…</Button>
           </div>
+        )}
+        {s.pastArchiveFolders.length > 0 && (
+          <>
+            <p className={styles.hint}>Previous archive folders (their projects are still in them):</p>
+            <div className={styles.card}>
+              {s.pastArchiveFolders.map((path) => (
+                <div key={path} className={styles.row}>
+                  <Icon name="folder" className={styles.folderIcon} />
+                  <span className={`${styles.grow} ${styles.mono}`}>
+                    <PathText path={path} />
+                  </span>
+                  <Button onClick={() => run(reusePastArchiveFolder(path), `Using ${path} as the archive folder again.`)}>
+                    Use again
+                  </Button>
+                  <Button
+                    onClick={() => run(forgetPastArchiveFolder(path), "Removed from this list. Nothing on disk changed.")}
+                  >
+                    Forget
+                  </Button>
+                </div>
+              ))}
+            </div>
+          </>
         )}
       </section>
 

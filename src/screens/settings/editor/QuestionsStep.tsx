@@ -33,7 +33,7 @@ function usedText(u: Usage): string[] {
 }
 
 /** Step 1: the questions New Project asks. One line each; click a line for its details.
- *  Drag to reorder. Billed to is always there (New Project can tick "No client"). */
+ *  Drag to reorder. Client is always there (New Project can tick "No client"). */
 export default function QuestionsStep({ draft, onChange }: Props) {
   const [confirm, setConfirm] = useState<string | null>(null);
   const [open, setOpen] = useState<Set<string>>(new Set());
@@ -106,7 +106,7 @@ export default function QuestionsStep({ draft, onChange }: Props) {
                 </span>
                 <input
                   className={`${styles.input} ${styles.qLabel}`}
-                  value={locked ? "Billed to" : f.label}
+                  value={locked ? "Client" : f.label}
                   disabled={locked}
                   maxLength={40}
                   aria-label="Question"
@@ -185,8 +185,8 @@ export default function QuestionsStep({ draft, onChange }: Props) {
               {confirm === f.key && (
                 <div className={styles.confirm} role="alert">
                   <span>
-                    “{f.label}” is used: {usedText(u).join(", ").toLowerCase()}. Remove it from those too? Folders that only
-                    depended on it are made always; “one per” folders for it are removed.
+                    “{f.label}” is used ({usedText(u).join(", ").toLowerCase()}). Removing it changes those too. Remove
+                    anyway?
                   </span>
                   <Button onClick={() => setConfirm(null)}>Keep it</Button>
                   <Button

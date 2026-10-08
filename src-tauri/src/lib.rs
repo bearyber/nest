@@ -128,6 +128,8 @@ pub fn run() {
             settings_cmd::set_personal_root,
             settings_cmd::choose_personal_root,
             settings_cmd::set_archive_folder,
+            settings_cmd::use_past_archive_folder,
+            settings_cmd::forget_past_archive_folder,
             settings_cmd::clear_archive_folder,
             settings_cmd::set_archive_after_days,
             commands::dismiss_archive_suggestion,

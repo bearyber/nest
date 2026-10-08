@@ -570,6 +570,7 @@ pub fn merge(rows: &mut Vec<ProjectRow>, others: &[OtherDevice]) {
                 changed_by: None,
                 archived: p.archived,
                 done_at: None,
+                size: None,
                 ready_to_archive: false,
             });
         }

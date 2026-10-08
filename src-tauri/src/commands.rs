@@ -367,7 +367,7 @@ pub fn create_project(
         }
     }
     Err(AppError::new(
-        "Couldn't find a free job code. Rescan the jobs folder and try again.",
+        "Couldn't find a free job code. Refresh the list and try again, or type a code with Edit.",
     ))
 }
 
@@ -524,7 +524,9 @@ fn project_folder(
         .locate(key)
         .map_err(|e| AppError::new(e.to_string()))?
         .ok_or_else(|| {
-            AppError::new("That project isn't in the list any more. Rescan and try again.")
+            AppError::new(
+                "That project isn't in the list any more. Refresh the list and try again.",
+            )
         })?;
     if single && located.paths.len() > 1 {
         let list: Vec<String> = located
@@ -546,7 +548,7 @@ fn project_folder(
     let roots = lock(&state.settings)?.scan_roots();
     if !is_openable(&path, &roots) {
         return Err(AppError::new(
-            "That folder isn't a project inside your jobs folders any more. Rescan and try again.",
+            "That folder isn't a project in your jobs folders any more (moved or deleted?). Refresh the list and try again.",
         ));
     }
     Ok((path, located.id))

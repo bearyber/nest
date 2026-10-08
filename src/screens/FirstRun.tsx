@@ -89,7 +89,7 @@ export default function FirstRun({ onDone }: { onDone: () => void }) {
         {step === "folder" && (
           <>
             <h1>Where do your jobs live?</h1>
-            <p>Pick the folder new projects go in. You can add more folders later in Settings.</p>
+            <p>Pick the folder new projects go in, like D:\Jobs or a folder in Documents. You can add more later.</p>
             {folder && (
               <div className={styles.picked}>
                 <Icon name="folder" className={styles.folderIcon} />
@@ -103,7 +103,7 @@ export default function FirstRun({ onDone }: { onDone: () => void }) {
             )}
             <div className={styles.buttons}>
               <Button onClick={() => tryFolder(firstRunPickFolder())}>Choose folder…</Button>
-              <Button onClick={() => tryFolder(firstRunCreateFolder())}>Create one in Documents</Button>
+              <Button onClick={() => tryFolder(firstRunCreateFolder())}>Make a "Nest Jobs" folder in Documents</Button>
             </div>
             <div className={styles.nav}>
               <Button onClick={() => go("welcome")}>Back</Button>
@@ -151,7 +151,7 @@ export default function FirstRun({ onDone }: { onDone: () => void }) {
         {step === "spaces" && (
           <>
             <h1>Spaces</h1>
-            <p>Spaces group your projects. In a "no client" space the Billed to field is hidden.</p>
+            <p>Spaces are groups for your projects, like Work and Personal. Tick "No client" for projects nobody pays you for.</p>
             <div className={styles.list}>
               {spaces.map((s, i) => (
                 <div key={i} className={styles.spaceRow}>
@@ -208,8 +208,8 @@ export default function FirstRun({ onDone }: { onDone: () => void }) {
           <>
             <h1>A letter for this computer</h1>
             <p>
-              Every job gets a short code like <b className={styles.mono}>ACME-{marker || "W"}04</b>. The letter shows which
-              computer started it, so two of your computers never make the same code. Use a different letter on each one.
+              Each of your computers gets a letter, so two never make the same job code (like{" "}
+              <b className={styles.mono}>ACME-{marker || "W"}04</b>). We picked one; you can keep it.
             </p>
             <label className={styles.letterRow}>
               <span>Letter for this computer</span>
@@ -221,7 +221,7 @@ export default function FirstRun({ onDone }: { onDone: () => void }) {
                 onChange={(e) => setMarker(e.target.value.toUpperCase().replace(/[^A-Z]/g, ""))}
               />
             </label>
-            {marker === "J" && <p className={styles.sub}>J is kept for jobs from your job tracker. Pick another letter.</p>}
+            {marker === "J" && <p className={styles.sub}>J is reserved. Pick another letter.</p>}
             <div className={styles.nav}>
               <Button onClick={() => go("spaces")}>Back</Button>
               <Button variant="primary" disabled={saving || !marker || marker === "J"} onClick={finish}>

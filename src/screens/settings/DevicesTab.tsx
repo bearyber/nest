@@ -180,6 +180,10 @@ export default function DevicesTab({ run }: TabProps) {
           </Button>
         )}
       </div>
+      {/* Said next to the button, before anything is shared. */}
+      <p className={styles.note}>
+        The lists include client names and folder paths. Use your own cloud folder, not one you share with other people.
+      </p>
 
       {view.enabled && (
         <section className={styles.section}>
@@ -238,10 +242,6 @@ export default function DevicesTab({ run }: TabProps) {
           ))}
         </section>
       )}
-
-      <p className={styles.note}>
-        The lists include client names and folder paths. Use your own cloud folder, not one you share with other people.
-      </p>
     </>
   );
 }

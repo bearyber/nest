@@ -53,6 +53,9 @@ pub struct Settings {
     pub archive_after_days: Option<u32>,
     /// Project ids Bernard said "not this one" to; never suggested again.
     pub archive_dismissed: Vec<String>,
+    /// Archive folders used before (newest first, up to 10), so changing the archive folder
+    /// never loses track of where archived projects are.
+    pub past_archive_folders: Vec<PathBuf>,
     /// v0.4.2: where Personal-space and "No client" projects go. One of `jobs_roots` (so it's
     /// watched); None = the first jobs folder, like every other new project.
     pub personal_root: Option<PathBuf>,
@@ -87,6 +90,7 @@ impl Default for Settings {
             archive_folder: None,
             archive_after_days: None,
             archive_dismissed: vec![],
+            past_archive_folders: vec![],
             personal_root: None,
             other: serde_json::Map::new(),
         }
@@ -97,6 +101,7 @@ impl Default for Settings {
 // memory; the command saves. Messages are plain English for the UI. ──
 
 pub const THEMES: [&str; 3] = ["system", "light", "dark"];
+const MAX_PAST_ARCHIVES: usize = 10;
 const MAX_SPACE_CHARS: usize = 40;
 
 /// The letter in job codes made on this computer (`{marker}`). Each computer has its own, so
@@ -318,8 +323,26 @@ impl Settings {
         if path.is_none() {
             self.archive_after_days = None;
         }
+        // Remember the folder being left; the new one isn't "previous" any more.
+        if let Some(old) = self
+            .archive_folder
+            .take()
+            .filter(|old| Some(old) != path.as_ref())
+        {
+            self.past_archive_folders.retain(|p| p != &old);
+            self.past_archive_folders.insert(0, old);
+            self.past_archive_folders.truncate(MAX_PAST_ARCHIVES);
+        }
+        if let Some(new) = &path {
+            self.past_archive_folders.retain(|p| p != new);
+        }
         self.archive_folder = path;
         Ok(())
+    }
+
+    /// Forget a previous archive folder (only the note in Nest; nothing on disk changes).
+    pub fn forget_past_archive_folder(&mut self, path: &Path) {
+        self.past_archive_folders.retain(|p| p != path);
     }
 
     /// Suggestions need an archive folder; 1–3650 days (Nest proposes 90 in the UI).
@@ -448,6 +471,38 @@ mod tests {
         // Older settings files (no key) still read.
         let old: Settings = serde_json::from_str(r#"{"jobsRoots":["/Jobs"]}"#).unwrap();
         assert_eq!(old.personal_root, None);
+    }
+
+    #[test]
+    fn previous_archive_folders_are_remembered() {
+        let mut s = Settings::default();
+        let (a, b) = (PathBuf::from("/Archive A"), PathBuf::from("/Archive B"));
+        s.set_archive_folder(Some(a.clone())).unwrap();
+        assert!(s.past_archive_folders.is_empty());
+        // Changing it remembers the old one; turning it off too; using one again takes it off
+        // the list. Newest first, never twice.
+        s.set_archive_folder(Some(b.clone())).unwrap();
+        assert_eq!(s.past_archive_folders, vec![a.clone()]);
+        s.set_archive_folder(None).unwrap();
+        assert_eq!(s.past_archive_folders, vec![b.clone(), a.clone()]);
+        s.set_archive_folder(Some(a.clone())).unwrap();
+        assert_eq!(s.past_archive_folders, vec![b.clone()]);
+        s.set_archive_folder(Some(a.clone())).unwrap();
+        assert_eq!(
+            s.past_archive_folders,
+            vec![b.clone()],
+            "same folder: nothing new"
+        );
+        s.forget_past_archive_folder(&b);
+        assert!(s.past_archive_folders.is_empty());
+        for i in 0..15 {
+            s.set_archive_folder(Some(PathBuf::from(format!("/A{i}"))))
+                .unwrap();
+        }
+        assert_eq!(s.past_archive_folders.len(), MAX_PAST_ARCHIVES);
+        // Older settings files (no key) still read.
+        let old: Settings = serde_json::from_str(r#"{"archiveFolder":"/X"}"#).unwrap();
+        assert!(old.past_archive_folders.is_empty());
     }
 
     #[test]

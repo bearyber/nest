@@ -361,7 +361,7 @@ export default function FoldersStep({ draft, nodes, folderName, onChange }: Prop
               <Button disabled={sel!.index >= sel!.list.length - 1} onClick={() => shift(node.id, 1)}>
                 Move down
               </Button>
-              <Button onClick={() => remove(node.id)}>Delete folder</Button>
+              <Button onClick={() => remove(node.id)}>Remove from template</Button>
             </div>
             {confirmDelete === node.id && (
               <div className={styles.confirm} role="alert">

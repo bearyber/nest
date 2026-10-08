@@ -71,9 +71,9 @@ describe("NewProjectSheet", () => {
     // lastTemplate names a removed template, so the first one is picked and its fields show.
     expect(await screen.findByLabelText(/^Artist/)).toBeTruthy();
     expect(screen.getByPlaceholderText("Name")).toBeTruthy();
-    // The template calls it "Client"; the sheet always shows the billing party as "Billed to".
-    expect(screen.getByText("Billed to")).toBeTruthy();
-    expect(screen.queryByText(/^Client/)).toBeNull();
+    // The sheet always calls the paying party "Client", whatever the template says.
+    expect(screen.getByText("Client")).toBeTruthy();
+    expect(screen.queryByText("Billed to")).toBeNull();
     expect(screen.getByLabelText("Client code")).toBeTruthy();
     const lookdev = screen.getByLabelText("Include look dev") as HTMLInputElement;
     expect(lookdev.type).toBe("checkbox");
@@ -103,7 +103,7 @@ describe("NewProjectSheet", () => {
     await waitFor(() => expect((create as HTMLButtonElement).disabled).toBe(false));
   });
 
-  it("No client hides Billed to and lets you create with the artist empty", async () => {
+  it("No client hides the client field and lets you create with the artist empty", async () => {
     render(<NewProjectSheet onClose={() => {}} onCreated={() => {}} />);
     const create = (await screen.findByRole("button", { name: /^Create/ })) as HTMLButtonElement;
     await screen.findAllByText("VX-L01_Artist");

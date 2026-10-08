@@ -75,7 +75,10 @@ export const setDefaultSpace = (name: string) => s<SettingsView>("set_default_sp
 export const setLaunchAtLogin = (on: boolean) => s<SettingsView>("set_launch_at_login", { on });
 /** Opens the folder picker; null when cancelled. */
 export const setArchiveFolder = () => s<SettingsView | null>("set_archive_folder");
-export const clearArchiveFolder = () => s<SettingsView>("clear_archive_folder");
+/** Rust asks first if the archive folder holds projects; null = cancelled. */
+export const clearArchiveFolder = () => s<SettingsView | null>("clear_archive_folder");
+export const reusePastArchiveFolder = (path: string) => s<SettingsView | null>("use_past_archive_folder", { path });
+export const forgetPastArchiveFolder = (path: string) => s<SettingsView>("forget_past_archive_folder", { path });
 export const setArchiveAfterDays = (days: number | null) => s<SettingsView>("set_archive_after_days", { days });
 /** Where Personal-space and "No client" projects go (one of the jobs folders; null = the first). */
 export const setPersonalRoot = (path: string | null) => s<SettingsView>("set_personal_root", { path });

@@ -66,9 +66,10 @@ pub async fn check_now(app: &AppHandle) -> AppResult<Option<UpdateInfo>> {
             "Updates only work in the installed app, not the test version",
         ));
     }
-    check(app)
-        .await
-        .map_err(|e| AppError::new(format!("Couldn't check for updates. Are you online? ({e})")))
+    check(app).await.map_err(|e| {
+        log::warn!("update check failed: {e}");
+        AppError::new("Couldn't check for updates. Are you online?")
+    })
 }
 
 fn info(update: &Update) -> UpdateInfo {

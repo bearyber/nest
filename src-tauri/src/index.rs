@@ -266,6 +266,9 @@ pub struct ProjectRow {
     /// time for projects marked done before v0.4.0. None while active.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub done_at: Option<i64>,
+    /// Folder size in bytes from the last measurement (None = not measured yet).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub size: Option<u64>,
     /// Archive (M5): done for longer than Settings' "suggest after N days", and not dismissed.
     #[serde(skip_serializing_if = "std::ops::Not::not")]
     pub ready_to_archive: bool,
@@ -368,7 +371,7 @@ impl Index {
                 for suffix in ["", "-journal", "-wal", "-shm"] {
                     let _ = fs::remove_file(format!("{}{suffix}", path.display()));
                 }
-                Self::try_open(path).map_err(|e| format!("Couldn't open the project index: {e}"))
+                Self::try_open(path).map_err(|e| format!("Nest couldn't open its project list. Restart Nest; if it keeps happening, tell support ({e})"))
             }
         }
     }
@@ -528,8 +531,9 @@ impl Index {
         let mut stmt = self.conn.prepare(
             "SELECT p.key, p.id, p.job_code, p.title, p.client_name, p.client_code, p.space,
                     p.status, p.template_id, p.created_at, p.fields, p.error, l.path, l.root,
-                    p.done_at
+                    p.done_at, json_extract(s.json, '$.total')
              FROM projects p JOIN locations l ON l.key = p.key
+             LEFT JOIN sizes s ON s.key = p.key
              ORDER BY p.created_at DESC, p.key, l.path",
         )?;
         let mut rows: Vec<ProjectRow> = Vec::new();
@@ -575,6 +579,7 @@ impl Index {
                 changed_by: None,
                 archived: root_archive,
                 done_at: r.get(14)?,
+                size: r.get::<_, Option<i64>>(15)?.map(|n| n.max(0) as u64),
                 ready_to_archive: false,
             });
         }
@@ -807,7 +812,7 @@ pub fn rescan_with_archive(
     let lock = || {
         index
             .lock()
-            .map_err(|_| "The project index is unavailable".to_string())
+            .map_err(|_| "Nest's project list is busy or broken. Restart Nest.".to_string())
     };
     let scan_start = now_ms();
     let walk = walk_roots(roots);

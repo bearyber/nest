@@ -105,9 +105,9 @@ export default function Main() {
           if (!manual) return;
           const notes = [
             `${s.found} project${s.found === 1 ? "" : "s"} found`,
-            s.removed ? `${s.removed} removed` : "",
-            s.duplicates.length ? `duplicate codes: ${s.duplicates.join(", ")}` : "",
-            s.offline.length ? `${s.offline.length} jobs folder offline` : "",
+            s.removed ? `${s.removed} no longer in your folders` : "",
+            s.duplicates.length ? `same job code used twice: ${s.duplicates.join(", ")}` : "",
+            s.offline.length ? `${s.offline.length} folder${s.offline.length === 1 ? "" : "s"} not connected` : "",
           ].filter(Boolean);
           setToast({ message: `List refreshed · ${notes.join(" · ")}` });
         })
@@ -220,7 +220,10 @@ export default function Main() {
       measuringKey.current = key;
       setSizeInfo((s) => ({ key, sizes: s?.key === key ? s.sizes : null, measuring: true }));
       measureProject(key)
-        .then((sizes) => setSizeInfo({ key, sizes, measuring: false }))
+        .then((sizes) => {
+          setSizeInfo({ key, sizes, measuring: false });
+          void refresh(); // the list's Size column shows it too
+        })
         .catch((e) => {
           setSizeInfo((s) => (s?.key === key ? { ...s, measuring: false } : s));
           fail(e);
@@ -229,7 +232,7 @@ export default function Main() {
           if (measuringKey.current === key) measuringKey.current = null;
         });
     },
-    [fail],
+    [fail, refresh],
   );
   const selectedKey = selectedRow?.key ?? null;
   const measurable = !!selectedRow && !selectedRow.device && !selectedRow.offline && !selectedRow.error;
@@ -355,10 +358,10 @@ export default function Main() {
       try {
         const menu = await Menu.new({
           items: [
-            { id: "open", text: "Open folder", enabled: here, action: () => void open(r) },
+            { id: "open", text: isMac() ? "Open in Finder" : "Open in Explorer", enabled: here, action: () => void open(r) },
             {
               id: "reveal",
-              text: isMac() ? "Reveal in Finder" : "Show in Explorer",
+              text: "Show in parent folder",
               enabled: here,
               action: () => void reveal(r),
             },
@@ -422,7 +425,7 @@ export default function Main() {
   );
 
   const onSort = (key: SortKey) =>
-    setSort((s) => (s.key === key ? { key, dir: s.dir === "asc" ? "desc" : "asc" } : { key, dir: key === "created" ? "desc" : "asc" }));
+    setSort((s) => (s.key === key ? { key, dir: s.dir === "asc" ? "desc" : "asc" } : { key, dir: key === "created" || key === "size" ? "desc" : "asc" }));
 
   // ── Menu bar (macOS) and keyboard (build spec §8) ──
   const runMenu = useCallback(
@@ -514,8 +517,7 @@ export default function Main() {
           <Icon name="folder" className={styles.emptyIcon} />
           <p className={styles.emptyTitle}>No projects yet</p>
           <p className={styles.emptyHint}>
-            Projects you create with Nest, and any folder with a Nest project file inside your jobs folders, show up
-            here.
+            Projects you make with Nest show up here. Click New to start one.
           </p>
           <Button variant="primary" onClick={() => setSheetOpen(true)}>
             Create your first project
@@ -606,7 +608,7 @@ export default function Main() {
         {offlineRoots.map((r) => (
           <div key={r.path} className={styles.banner} role="status">
             <Icon name="warning" />
-            Jobs folder not found: {r.path}. Its projects are shown greyed out until it's back.
+            Can't find {r.path}. Plug in the drive, or change folders in Settings → General. Its projects are greyed out until then.
           </div>
         ))}
 
@@ -648,8 +650,8 @@ export default function Main() {
 
         <footer className={styles.status}>
           {scanning
-            ? "Scanning your jobs folders…"
-            : `${list?.roots.length ?? 0} jobs folder${list?.roots.length === 1 ? "" : "s"} watched`}
+            ? "Refreshing the list…"
+            : `Looking in ${list?.roots.length ?? 0} folder${list?.roots.length === 1 ? "" : "s"}`}
           {version && (
             <span className={styles.version}>
               Nest {version} ·{" "}
@@ -665,7 +667,6 @@ export default function Main() {
         <Inspector
           project={selectedRow}
           onOpen={() => selectedRow && void open(selectedRow)}
-          onReveal={() => selectedRow && void reveal(selectedRow)}
           onCopyPath={() => selectedRow && void copy(selectedRow.device?.path ?? selectedRow.paths[0], "path")}
           onStatus={(s) => selectedRow && void changeStatus(selectedRow, s)}
           archiveOn={archiveOn}

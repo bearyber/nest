@@ -87,7 +87,7 @@ function BlockEditor({ label, hint, sep, pattern, draft, automatic, allowText, o
   const fieldOf = (key: string) => draft.fields.find((f) => f.key === key);
   const nameOf = (key: string) => {
     const f = fieldOf(key);
-    if (f) return f.type === "client" ? "Billed to" : f.label;
+    if (f) return f.type === "client" ? "Client" : f.label;
     return BUILTIN_BLOCKS.find((b) => b.key === key)?.label ?? key;
   };
   const set = (next: NameBlock[]) => onChange(fromBlocks(next, sep));
@@ -95,7 +95,7 @@ function BlockEditor({ label, hint, sep, pattern, draft, automatic, allowText, o
   const addable = [
     ...draft.fields
       .filter((f) => f.type !== "longtext" && f.type !== "bool" && f.type !== "multi")
-      .map((f) => ({ key: f.key, label: f.type === "client" ? "Billed to (client name)" : f.label })),
+      .map((f) => ({ key: f.key, label: f.type === "client" ? "Client (name)" : f.label })),
     ...BUILTIN_BLOCKS,
   ].filter((a) => !used.has(a.key));
   const addPart = (key: string) => {
@@ -202,7 +202,7 @@ function BlockEditor({ label, hint, sep, pattern, draft, automatic, allowText, o
             )
           ) : (
             <Button className={styles.linkButton} onClick={() => setAsText(true)}>
-              Write it as text instead
+              Edit as text (advanced)
             </Button>
           )}
           {advanced && blocks === null && (

@@ -221,7 +221,7 @@ export default function NewProjectSheet({ onClose, onCreated }: Props) {
                           />
                         )}
                         <div className={styles.row}>
-                          <span className={styles.label}>{noClient ? "Billed to" : ""}</span>
+                          <span className={styles.label}>{noClient ? "Client" : ""}</span>
                           <div>
                             <label className={styles.check}>
                               <input

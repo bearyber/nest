@@ -167,7 +167,7 @@ export default function TemplateEditor({ sourceKey, mode, start, starterFiles, s
               Job code <b className={styles.mono}>{preview.jobCode}</b>
             </span>
           )}
-          <span className={styles.exampleNote}>Billed to Acme · project “Summer Campaign” · started today</span>
+          <span className={styles.exampleNote}>Client Acme · project “Summer Campaign” · started today</span>
         </div>
 
         <div className={step === "folders" ? styles.bodyWide : styles.body}>

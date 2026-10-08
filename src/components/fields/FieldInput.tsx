@@ -21,7 +21,7 @@ export default function FieldInput({ field, value, onChange, onBlur, error, clie
   const id = `field-${field.key}`;
   const text = typeof value === "string" ? value : "";
   // The client is always the billing party, whatever an older or personal template calls it.
-  const label = field.type === "client" ? "Billed to" : field.label;
+  const label = field.type === "client" ? "Client" : field.label;
   const required = field.required && (
     <span className={styles.required} aria-hidden="true">
       {" "}

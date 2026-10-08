@@ -42,6 +42,7 @@ fn row(id: &str, code: &str, title: &str, path: &str) -> ProjectRow {
         changed_by: None,
         archived: false,
         done_at: None,
+        size: None,
         ready_to_archive: false,
     }
 }

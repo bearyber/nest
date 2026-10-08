@@ -141,9 +141,8 @@ export default function TemplatesTab({ run }: TabProps) {
   return (
     <>
       <p className={styles.hint}>
-        A template is the set of folders and files Nest makes for a new project, plus the questions it asks (who it's
-        billed to, project name, start date…). You pick one each time you click New Project. To change one, select it
-        and click Customize.
+        A template decides which folders and starter files a new project gets, and what New Project asks (client,
+        project name, start date…).
       </p>
       <div className={styles.actions}>
         <Button variant="primary" onClick={() => void newMenu()}>
@@ -176,12 +175,13 @@ export default function TemplatesTab({ run }: TabProps) {
             <span className={styles.tdesc}>
               {t.replaced
                 ? "Nest's original (you use your own version)"
-                : t.description}
+                : replacesBuiltIn(t)
+                  ? `Your version of Nest's “${t.name}”`
+                  : t.description}
             </span>
-            <span className={t.builtIn ? styles.pillMuted : styles.pill}>
-              {t.builtIn ? (t.replaced ? "Original" : "Built in") : replacesBuiltIn(t) ? "Customized" : "Yours"}
-            </span>
-            {t.hidden && !t.replaced && <span className={styles.tflag}>Not in list</span>}
+            {/* Two badges only: it came with Nest, or it's yours (made or changed by you). */}
+            <span className={t.builtIn ? styles.pillMuted : styles.pill}>{t.builtIn ? "Included" : "Yours"}</span>
+            {t.hidden && !t.replaced && <span className={styles.tflag}>Hidden</span>}
           </button>
         ))}
       </div>
@@ -222,7 +222,7 @@ export default function TemplatesTab({ run }: TabProps) {
                   <div className={styles.qs}>
                     {draft.template.fields.map((f) => (
                       <span key={f.key} className={styles.q}>
-                        {f.type === "client" ? "Billed to" : f.label}
+                        {f.type === "client" ? "Client" : f.label}
                       </span>
                     ))}
                   </div>

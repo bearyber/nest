@@ -379,11 +379,11 @@ fn resolve_values(
     out
 }
 
-/// The client field is always "Billed to" (the billing party, never the artist), whatever
-/// label an older or personal template gives it.
+/// The client field is always called "Client" (who pays, never the artist), whatever label an
+/// older or personal template gives it (e.g. "Billed to", used until 2026-10-08).
 fn field_label(f: &Field) -> &str {
     if f.kind == FieldKind::Client {
-        "Billed to"
+        "Client"
     } else {
         &f.label
     }
@@ -1490,13 +1490,15 @@ mod tests {
     }
 
     #[test]
-    fn client_field_is_called_billed_to_in_messages() {
-        // GRADING_MV's client field is labelled "Client"; messages still say "Billed to".
+    fn client_field_is_called_client_in_messages() {
+        // Older templates label it "Billed to"; messages always say "Client".
+        let json = GRADING_MV.replace(r#""label": "Client""#, r#""label": "Billed to""#);
+        let t = loaded(&json, &["starter/NOTES.md"]);
         let mut v = values("KIRA", "Song");
         v.remove("client");
-        let plan = plan_project(&mv(), &v, &ctx());
+        let plan = plan_project(&t, &v, &ctx());
         assert!(
-            errors(&plan).contains(&"Billed to is required"),
+            errors(&plan).contains(&"Client is required"),
             "{:?}",
             plan.issues
         );

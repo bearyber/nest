@@ -9,7 +9,6 @@ import styles from "./Inspector.module.css";
 interface Props {
   project: ProjectRow | null;
   onOpen: () => void;
-  onReveal: () => void;
   onCopyPath: () => void;
   onStatus: (status: "active" | "done") => void;
   /** Archive (M5 P2): an archive folder is set, and Archive… / Unarchive… was clicked. */
@@ -186,12 +185,12 @@ function display(v: unknown): string {
   return String(v);
 }
 
-/** Why the status can't be changed right now, or null if it can. */
+/** Why the status can't be changed right now (a whole sentence), or null if it can. */
 function statusBlocked(p: ProjectRow): string | null {
-  if (p.error) return "The project file can't be read";
-  if (p.archived) return "Archived: unarchive it to change it";
-  if (p.offline) return "Its jobs folder is offline";
-  if (p.paths.length > 1) return "It exists in two places; remove the extra copy first";
+  if (p.error) return "Nest can't read this project's info file, so its status can't be changed.";
+  if (p.archived) return "It's archived. Unarchive it to change it.";
+  if (p.offline) return "Its folder isn't connected right now (drive unplugged?).";
+  if (p.paths.length > 1) return "This project is in two places (see Location below). Remove one copy to continue.";
   return null;
 }
 
@@ -199,7 +198,6 @@ function statusBlocked(p: ProjectRow): string | null {
 export default function Inspector({
   project: p,
   onOpen,
-  onReveal,
   onCopyPath,
   onStatus,
   archiveOn,
@@ -222,16 +220,16 @@ export default function Inspector({
   const blocked = statusBlocked(p);
   // Archive… on a Done project here; Unarchive… on an archived one (Rust re-checks and asks).
   const archiveBlocked = p.error
-    ? "The project file can't be read"
+    ? "Nest can't read this project's info file"
     : p.offline
-      ? "Its folder is offline"
+      ? "Its folder isn't connected right now"
       : p.paths.length > 1
-        ? "It exists in two places; remove the extra copy first"
+        ? "It's in two places; remove one copy first"
         : !p.archived && !isDone(p)
           ? "Mark it done first"
           : null;
   const fields = Object.entries(p.fields ?? {}).filter(([, v]) => display(v) !== "");
-  const revealLabel = isMac() ? "Reveal in Finder" : "Show in Explorer";
+  const openLabel = isMac() ? "Open in Finder" : "Open in Explorer";
 
   return (
     <aside className={styles.inspector} aria-label="Details">
@@ -274,8 +272,12 @@ export default function Inspector({
         <div className={styles.alert} role="alert">
           <Icon name="warning" />
           <div>
-            <b>Manifest unreadable.</b> Nest won't change or fix it. Open it in a text editor to repair it.
-            <div className={styles.alertDetail}>{p.error}</div>
+            <b>Nest can't read this project's info file</b> (.project.json), so it can't show its details or change
+            its status. Your files are fine.
+            <details className={styles.alertDetail}>
+              <summary>Details</summary>
+              {p.error}
+            </details>
           </div>
         </div>
       )}
@@ -296,11 +298,7 @@ export default function Inspector({
             disabled={blocked !== null}
             block
           />
-          {blocked && (
-            <p className={styles.note}>
-              Status can't be changed: {blocked.charAt(0).toLowerCase() + blocked.slice(1)}.
-            </p>
-          )}
+          {blocked && <p className={styles.note}>{blocked}</p>}
           {/* Devices: a project on another computer is changed there, by request. */}
           {p.device && p.pending && p.pending !== p.status && (
             <div className={styles.waiting}>
@@ -329,7 +327,7 @@ export default function Inspector({
       <dl className={styles.details}>
         {p.client.name ? (
           <>
-            <dt>Billed to</dt>
+            <dt>Client</dt>
             <dd>
               {p.client.name} {p.client.code && <span className={styles.mono}>{p.client.code}</span>}
             </dd>
@@ -337,7 +335,7 @@ export default function Inspector({
         ) : (
           p.client.code && (
             <>
-              <dt>Billed to</dt>
+              <dt>Client</dt>
               <dd>No client (personal)</dd>
             </>
           )
@@ -385,7 +383,9 @@ export default function Inspector({
                   <span className={styles.note}>
                     {" "}
                     · {ago(new Date(sizes.measuredAt).toISOString())}
-                    {sizes.unreadable > 0 ? ` · ${sizes.unreadable} unreadable` : ""}
+                    {sizes.unreadable > 0
+                      ? ` · ${sizes.unreadable} file${sizes.unreadable === 1 ? "" : "s"} couldn't be counted`
+                      : ""}
                   </span>
                 </dd>
               </dl>
@@ -424,12 +424,11 @@ export default function Inspector({
         ))}
       </div>
 
-      <div className={styles.actions}>
+      {/* One main button; "Show in parent folder" is in the right-click menu. Archive… sits
+          beside it when an archive folder is set. */}
+      <div className={archiveOn && !p.device ? styles.actions : styles.actionsOne}>
         <Button variant="primary" onClick={onOpen} disabled={p.offline || !!p.device}>
-          Open folder
-        </Button>
-        <Button onClick={onReveal} disabled={p.offline || !!p.device}>
-          {revealLabel}
+          {openLabel}
         </Button>
         {archiveOn && !p.device && (
           <Button onClick={onArchive} disabled={!!archiveBlocked} title={archiveBlocked ?? undefined}>

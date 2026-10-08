@@ -53,7 +53,7 @@ pub fn plan_move(from: &Path, dest_root: &Path, unarchive: bool) -> Result<MoveP
         ));
     }
     if !from.is_dir() {
-        return Err("The project folder isn't there any more. Rescan and try again.".into());
+        return Err("The project folder isn't there any more (moved or deleted?). Refresh the list and try again.".into());
     }
     if !dest_root.is_dir() {
         return Err(format!(
@@ -120,7 +120,7 @@ pub fn move_error(e: &io::Error, unarchive: bool) -> String {
         return "Nest isn't allowed to move this folder. Check that the folder or drive isn't locked or read-only, and that Nest has access to it (System Settings → Privacy & Security → Files and Folders). Nothing was moved.".into();
     }
     if e.kind() == io::ErrorKind::NotFound {
-        return "The project folder isn't there any more. Rescan and try again.".into();
+        return "The project folder isn't there any more (moved or deleted?). Refresh the list and try again.".into();
     }
     format!("Couldn't move the folder ({e}). Nothing was moved.")
 }
@@ -266,7 +266,7 @@ mod tests {
         let e = io::Error::from(io::ErrorKind::PermissionDenied);
         assert!(move_error(&e, false).contains("Close it and try again"));
         let e = io::Error::from(io::ErrorKind::NotFound);
-        assert!(move_error(&e, false).contains("Rescan"));
+        assert!(move_error(&e, false).contains("Refresh the list"));
         let e = io::Error::other("disk on fire");
         assert!(move_error(&e, false).contains("Nothing was moved"));
     }

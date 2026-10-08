@@ -2,7 +2,7 @@ import type { ProjectRow } from "./types";
 
 /** "archived" lists only archived projects; "active" and "done" never include them; "all" does. */
 export type StatusFilter = "active" | "done" | "all" | "archived";
-export type SortKey = "created" | "code" | "title" | "client";
+export type SortKey = "created" | "code" | "title" | "client" | "size";
 
 export interface Sort {
   key: SortKey;
@@ -93,6 +93,16 @@ export function filterProjects(rows: ProjectRow[], f: Filters): ProjectRow[] {
 const collator = new Intl.Collator(undefined, { numeric: true, sensitivity: "base" });
 
 export function sortProjects(rows: ProjectRow[], sort: Sort): ProjectRow[] {
+  const sign = sort.dir === "asc" ? 1 : -1;
+  if (sort.key === "size") {
+    // Biggest/smallest first; projects not measured yet always go last.
+    return [...rows].sort((a, b) => {
+      if (a.size === undefined || b.size === undefined) {
+        return (a.size === undefined ? 1 : 0) - (b.size === undefined ? 1 : 0) || collator.compare(a.key, b.key);
+      }
+      return sign * (a.size - b.size) || collator.compare(a.key, b.key);
+    });
+  }
   const value = (p: ProjectRow): string => {
     switch (sort.key) {
       case "code":
@@ -102,10 +112,10 @@ export function sortProjects(rows: ProjectRow[], sort: Sort): ProjectRow[] {
       case "client":
         return p.client.name || p.client.code;
       case "created":
+      default:
         return p.createdAt;
     }
   };
-  const sign = sort.dir === "asc" ? 1 : -1;
   return [...rows].sort((a, b) => sign * collator.compare(value(a), value(b)) || collator.compare(a.key, b.key));
 }
 

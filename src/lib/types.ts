@@ -137,6 +137,8 @@ export interface ProjectRow {
   archived: boolean;
   /** Done since, ms since 1970 (absent while active). */
   doneAt?: number;
+  /** Folder size in bytes from the last measurement; missing = not measured yet. */
+  size?: number;
   /** Archive: done for longer than Settings' "suggest after N days", and not dismissed. */
   readyToArchive?: boolean;
 }
@@ -226,6 +228,8 @@ export interface Settings {
   archiveAfterDays: number | null;
   /** v0.4.2: where Personal-space and "No client" projects go; null = the first jobs folder. */
   personalRoot: string | null;
+  /** Archive folders used before, newest first. */
+  pastArchiveFolders: string[];
 }
 
 export interface SettingsView {

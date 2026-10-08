@@ -206,17 +206,95 @@ pub fn set_archive_folder(
     let Some(path) = pick_folder(&app, "Choose the archive folder")? else {
         return Ok(None);
     };
-    let v = edit(&app, &state, |s| s.set_archive_folder(Some(path)))?;
-    forget_roots_not_in(&state, &v)?;
-    Ok(Some(v))
+    switch_archive_folder(&app, &state, Some(path))
 }
 
 /// Stop watching the archive folder. Nothing on disk changes; its projects leave the list.
+/// `None` = you clicked Cancel.
 #[tauri::command(async)]
-pub fn clear_archive_folder(app: AppHandle, state: State<'_, AppState>) -> AppResult<SettingsView> {
-    let v = edit(&app, &state, |s| s.set_archive_folder(None))?;
-    forget_roots_not_in(&state, &v)?;
-    Ok(v)
+pub fn clear_archive_folder(
+    app: AppHandle,
+    state: State<'_, AppState>,
+) -> AppResult<Option<SettingsView>> {
+    switch_archive_folder(&app, &state, None)
+}
+
+/// "Use again" on a previous archive folder.
+#[tauri::command(async)]
+pub fn use_past_archive_folder(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    path: PathBuf,
+) -> AppResult<Option<SettingsView>> {
+    if !lock(&state.settings)?.past_archive_folders.contains(&path) {
+        return Err(AppError::new(
+            "That folder isn't in the list of previous archive folders",
+        ));
+    }
+    if !path.is_dir() {
+        return Err(AppError::new(format!(
+            "Can't find {} (is its drive connected?)",
+            path.display()
+        )));
+    }
+    switch_archive_folder(&app, &state, Some(path))
+}
+
+/// Remove a folder from "Previous archive folders" (only the note; nothing on disk changes).
+#[tauri::command(async)]
+pub fn forget_past_archive_folder(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    path: PathBuf,
+) -> AppResult<SettingsView> {
+    edit(&app, &state, |s| {
+        s.forget_past_archive_folder(&path);
+        Ok(())
+    })
+}
+
+/// Change (or turn off) the archive folder. If the current one holds projects, ask first:
+/// they stay where they are, but Nest stops showing them. The old folder is remembered under
+/// "Previous archive folders". `None` = cancelled.
+fn switch_archive_folder(
+    app: &AppHandle,
+    state: &AppState,
+    to: Option<PathBuf>,
+) -> AppResult<Option<SettingsView>> {
+    let current = lock(&state.settings)?.archive_folder.clone();
+    if let Some(current) = current.filter(|c| Some(c) != to.as_ref()) {
+        let count = folder_info(current.clone()).projects;
+        if count > 0 {
+            let projects = if count == 1 {
+                "1 project".to_string()
+            } else {
+                format!("{count} projects")
+            };
+            let confirmed = app
+                .dialog()
+                .message(format!(
+                    "Your current archive folder ({}) has {projects}. They stay there, but Nest will stop showing them. You can switch back any time under \"Previous archive folders\".",
+                    current.display()
+                ))
+                .title(if to.is_some() {
+                    "Change the archive folder?"
+                } else {
+                    "Turn off the archive folder?"
+                })
+                .kind(MessageDialogKind::Info)
+                .buttons(MessageDialogButtons::OkCancelCustom(
+                    if to.is_some() { "Change" } else { "Turn off" }.into(),
+                    "Cancel".into(),
+                ))
+                .blocking_show();
+            if !confirmed {
+                return Ok(None);
+            }
+        }
+    }
+    let v = edit(app, state, |s| s.set_archive_folder(to))?;
+    forget_roots_not_in(state, &v)?;
+    Ok(Some(v))
 }
 
 /// Suggest archiving projects done for more than `days` (None = no suggestions).

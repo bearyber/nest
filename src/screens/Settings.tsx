@@ -69,7 +69,8 @@ export default function Settings() {
     try {
       const result = await p;
       if (result && typeof result === "object" && "settings" in result) setView(result as unknown as SettingsView);
-      setMessage(ok ? { text: ok, error: false } : null);
+      // null = cancelled (e.g. a dialog): no "done" message.
+      setMessage(ok && result !== null ? { text: ok, error: false } : null);
       return result;
     } catch (e) {
       setMessage({ text: errorMessage(e), error: true });

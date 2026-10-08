@@ -28,9 +28,8 @@ export default function SpacesTab({ view, run }: TabProps) {
     <>
       <section className={styles.section}>
         <p className={styles.hint}>
-          Spaces group your projects in the sidebar. In a "no client" space (like Personal) the Billed to field is
-          hidden and job codes use your own code. A space that has projects can't be renamed or deleted, because
-          projects keep their space name in their own files.
+          Spaces group your projects in the sidebar, like Work and Personal. A "no client" space never asks for a
+          client and uses your own job code. A space with projects in it can't be renamed or deleted.
         </p>
         <div className={styles.card}>
           {s.spaces.map((name, i) => {

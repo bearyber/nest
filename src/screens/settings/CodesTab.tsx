@@ -33,7 +33,7 @@ export const CODE_STYLES = [
 ];
 
 const CAPTION: Record<CodePart["kind"], string> = {
-  client: "Who it's billed to",
+  client: "Client code",
   marker: "This computer",
   seq: "Job number",
   text: "",
@@ -116,8 +116,8 @@ export default function CodesTab({ view, run }: TabProps) {
           <div className={styles.field}>
             <span className={styles.name}>Client code</span>
             <p className={styles.hint}>
-              Comes from who the job is billed to. You give each client a code the first time you bill them (for
-              example Acme → <b className={styles.mono}>ACME</b>). Nothing to set here.
+              Comes from the client (who pays you). You give each client a code the first time (for example Acme →{" "}
+              <b className={styles.mono}>ACME</b>). Nothing to set here.
             </p>
           </div>
           <div className={styles.field}>

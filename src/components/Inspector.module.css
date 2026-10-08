@@ -284,9 +284,8 @@
   min-width: 0;
 }
 
-/* Archive… / Unarchive…: its own row under Open and Reveal. */
-.actions button:nth-child(3) {
-  grid-column: 1 / -1;
+.actionsOne {
+  display: grid;
 }
 
 .inlineActions {
