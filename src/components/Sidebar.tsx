@@ -1,3 +1,4 @@
+import { useState, type ReactNode } from "react";
 import type { StatusFilter } from "../lib/search";
 import Icon from "./Icon";
 import styles from "./Sidebar.module.css";
@@ -54,52 +55,128 @@ export default function Sidebar({
   hereCount = 0,
   allCount = 0,
 }: Props) {
+  const [collapsed, setCollapsed] = useState<Set<string>>(loadCollapsed);
+  const toggle = (id: string) =>
+    setCollapsed((c) => {
+      const next = new Set(c);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      saveCollapsed(next);
+      return next;
+    });
+
   return (
     <nav className={styles.sidebar} aria-label="Filters">
-      <div className={styles.section}>
-        <h2 className={styles.heading}>Spaces</h2>
-        <Item label="All projects" count={counts[""] ?? 0} selected={space === null} onClick={() => onSpace(null)} />
-        {spaces.map((s) => (
-          <Item key={s} label={s} count={counts[s] ?? 0} selected={space === s} onClick={() => onSpace(s)} />
-        ))}
-      </div>
-      <div className={styles.section}>
-        <h2 className={styles.heading}>Status</h2>
-        {STATUSES.filter((s) => s.value !== "archived" || statusCounts.archived > 0 || status === "archived").map(
-          (s) => (
-            <Item
-              key={s.value}
-              label={s.label}
-              count={statusCounts[s.value]}
-              selected={status === s.value}
-              onClick={() => onStatus(s.value)}
-              dot={s.value === "active" || s.value === "done" ? s.value : undefined}
-            />
-          ),
+      <Section id="spaces" title="Spaces" collapsed={collapsed} onToggle={toggle}>
+        {(open) => (
+          <>
+            {(open || space === null) && (
+              <Item label="All projects" count={counts[""] ?? 0} selected={space === null} onClick={() => onSpace(null)} />
+            )}
+            {spaces
+              .filter((s) => open || space === s)
+              .map((s) => (
+                <Item key={s} label={s} count={counts[s] ?? 0} selected={space === s} onClick={() => onSpace(s)} />
+              ))}
+          </>
         )}
-      </div>
+      </Section>
+      <Section id="status" title="Status" collapsed={collapsed} onToggle={toggle}>
+        {(open) =>
+          STATUSES.filter((s) => s.value !== "archived" || statusCounts.archived > 0 || status === "archived")
+            .filter((s) => open || status === s.value)
+            .map((s) => (
+              <Item
+                key={s.value}
+                label={s.label}
+                count={statusCounts[s.value]}
+                selected={status === s.value}
+                onClick={() => onStatus(s.value)}
+                dot={s.value === "active" || s.value === "done" ? s.value : undefined}
+              />
+            ))
+        }
+      </Section>
       {computers.length > 0 && onComputer && (
-        <div className={styles.section}>
-          <h2 className={styles.heading}>Computer</h2>
-          <Item label="All computers" count={allCount} selected={computer === null} onClick={() => onComputer(null)} />
-          <Item label="This computer" count={hereCount} selected={computer === ""} onClick={() => onComputer("")} />
-          {computers.map((c) => (
-            <Item
-              key={c.name}
-              label={c.name}
-              count={c.count}
-              selected={computer === c.name}
-              onClick={() => onComputer(c.name)}
-              fresh={c.fresh}
-            />
-          ))}
-        </div>
+        <Section id="computer" title="Computer" collapsed={collapsed} onToggle={toggle}>
+          {(open) => (
+            <>
+              {(open || computer === null) && (
+                <Item label="All computers" count={allCount} selected={computer === null} onClick={() => onComputer(null)} />
+              )}
+              {(open || computer === "") && (
+                <Item label="This computer" count={hereCount} selected={computer === ""} onClick={() => onComputer("")} />
+              )}
+              {computers
+                .filter((c) => open || computer === c.name)
+                .map((c) => (
+                  <Item
+                    key={c.name}
+                    label={c.name}
+                    count={c.count}
+                    selected={computer === c.name}
+                    onClick={() => onComputer(c.name)}
+                    fresh={c.fresh}
+                  />
+                ))}
+            </>
+          )}
+        </Section>
       )}
       <button type="button" className={styles.settings} onClick={onSettings}>
         <Icon name="gear" />
         Settings
       </button>
     </nav>
+  );
+}
+
+// Folded sections, remembered per computer (a convenience: lost storage just means unfolded).
+const COLLAPSED_KEY = "nest.sidebarCollapsed";
+
+function loadCollapsed(): Set<string> {
+  try {
+    const saved: unknown = JSON.parse(localStorage.getItem(COLLAPSED_KEY) ?? "[]");
+    return new Set(Array.isArray(saved) ? saved.filter((x): x is string => typeof x === "string") : []);
+  } catch {
+    return new Set();
+  }
+}
+
+function saveCollapsed(c: Set<string>) {
+  try {
+    localStorage.setItem(COLLAPSED_KEY, JSON.stringify([...c]));
+  } catch {
+    /* storage unavailable: just not remembered */
+  }
+}
+
+/** A sidebar section whose heading folds it away. Folded, it still shows the chosen row (so
+ *  you can see what's filtering the list). */
+function Section({
+  id,
+  title,
+  collapsed,
+  onToggle,
+  children,
+}: {
+  id: string;
+  title: string;
+  collapsed: Set<string>;
+  onToggle: (id: string) => void;
+  children: (open: boolean) => ReactNode;
+}) {
+  const open = !collapsed.has(id);
+  return (
+    <div className={styles.section}>
+      <h2 className={styles.headingWrap}>
+        <button type="button" className={styles.heading} aria-expanded={open} onClick={() => onToggle(id)}>
+          {title}
+          <Icon name="chevron" className={open ? styles.chevronOpen : styles.chevron} />
+        </button>
+      </h2>
+      {children(open)}
+    </div>
   );
 }
 

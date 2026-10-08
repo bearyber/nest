@@ -13,12 +13,42 @@
   gap: 1px;
 }
 
-.heading {
+.headingWrap {
   margin: 0 0 var(--space-1);
+  font: inherit;
+}
+
+/* The heading folds its section (like the sidebar in Claude): "Spaces ›". */
+.heading {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  height: 22px;
   padding: 0 var(--space-2);
+  border: none;
+  border-radius: var(--radius-control);
+  background: transparent;
   font-size: var(--text-small);
   font-weight: 600;
   color: var(--text-secondary);
+  cursor: pointer;
+}
+
+.heading:hover {
+  background: var(--control-hover);
+  color: var(--text);
+}
+
+.chevron,
+.chevronOpen {
+  width: 11px;
+  height: 11px;
+  opacity: 0.7;
+  transition: transform var(--motion);
+}
+
+.chevronOpen {
+  transform: rotate(90deg);
 }
 
 .item {
