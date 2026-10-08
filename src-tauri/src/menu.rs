@@ -61,7 +61,11 @@ pub fn build<R: Runtime>(app: &AppHandle<R>) -> tauri::Result<Menu<R>> {
         .build()?;
 
     let view = SubmenuBuilder::new(app, "View")
-        .item(&item(TOGGLE_SIDEBAR, "Toggle Sidebar", Some("CmdOrCtrl+B"))?)
+        .item(&item(
+            TOGGLE_SIDEBAR,
+            "Toggle Sidebar",
+            Some("CmdOrCtrl+B"),
+        )?)
         .item(&item(
             TOGGLE_INSPECTOR,
             "Toggle Details",
