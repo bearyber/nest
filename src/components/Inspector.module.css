@@ -113,6 +113,8 @@
   display: inline-flex;
   align-items: center;
   gap: 3px;
+  max-width: 100%;
+  min-width: 0;
   padding: 0;
   border: none;
   background: none;
@@ -132,11 +134,53 @@
   cursor: default;
 }
 
-.folderCell {
+/* Size: one line per folder — ▸, name (shortened with … when long), size on the right — and
+   the type split small underneath. Nesting only indents; nothing gets squeezed. */
+.folderList {
+  display: grid;
+  gap: 6px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.folderList .folderList {
+  margin-top: 6px;
+}
+
+.folderRow {
   display: flex;
-  align-items: center;
+  align-items: flex-start;
   gap: 8px;
   min-width: 0;
+}
+
+.folderText {
+  display: grid;
+  flex: 1;
+  min-width: 0;
+  justify-items: start;
+}
+
+.folderName {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.folderSplit {
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: var(--text-small);
+  color: var(--text-tertiary);
+}
+
+.folderSize {
+  flex: none;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
 }
 
 /* ▸ / ▾: show what's inside a folder. A 20px target with a hover circle, kept apart from

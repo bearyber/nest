@@ -50,16 +50,17 @@ function FolderRows({
 }) {
   const app = isMac() ? "Finder" : "Explorer";
   return (
-    <>
+    <ul className={styles.folderList}>
       {folders
         .filter((f) => f.total > 0)
         .map((f) => {
           const path = f.name ? [...parent, f.name] : parent;
           const id = path.join("/");
           const open = f.name ? inside[id] : undefined;
+          const split = typeSplit(f);
           return (
-            <div key={f.name || "/"} className={styles.pair}>
-              <dt style={{ paddingLeft: depth * 16 }} className={styles.folderCell}>
+            <li key={f.name || "/"}>
+              <div className={styles.folderRow} style={{ paddingLeft: depth * 16 }}>
                 {f.name ? (
                   <button
                     type="button"
@@ -74,30 +75,30 @@ function FolderRows({
                 ) : (
                   <span className={styles.expandGap} />
                 )}
-                <button
-                  type="button"
-                  className={styles.folderLink}
-                  disabled={disabled}
-                  title={`Open ${f.name || "this folder"} in ${app}`}
-                  onClick={() => onOpen(path)}
-                >
-                  {f.name || "Loose files"}
-                  <Icon name="open" className={styles.folderLinkIcon} />
-                </button>
-              </dt>
-              <dd>
-                {formatBytes(f.total)}
-                <span className={styles.note}> · {typeSplit(f)}</span>
-              </dd>
+                <div className={styles.folderText}>
+                  <button
+                    type="button"
+                    className={styles.folderLink}
+                    disabled={disabled}
+                    title={`Open ${f.name || "this folder"} in ${app}`}
+                    onClick={() => onOpen(path)}
+                  >
+                    <span className={styles.folderName}>{f.name || "Loose files"}</span>
+                    <Icon name="open" className={styles.folderLinkIcon} />
+                  </button>
+                  {split && <span className={styles.folderSplit}>{split}</span>}
+                </div>
+                <span className={styles.folderSize}>{formatBytes(f.total)}</span>
+              </div>
               {open === "loading" && (
-                <dd className={styles.insideNote} style={{ paddingLeft: (depth + 1) * 16 }}>
+                <p className={styles.insideNote} style={{ paddingLeft: (depth + 1) * 16 + 28 }}>
                   Counting…
-                </dd>
+                </p>
               )}
               {open === "error" && (
-                <dd className={styles.insideNote} style={{ paddingLeft: (depth + 1) * 16 }}>
+                <p className={styles.insideNote} style={{ paddingLeft: (depth + 1) * 16 + 28 }}>
                   Couldn't look inside.
-                </dd>
+                </p>
               )}
               {open && typeof open === "object" && (
                 <FolderRows
@@ -110,10 +111,10 @@ function FolderRows({
                   onOpen={onOpen}
                 />
               )}
-            </div>
+            </li>
           );
         })}
-    </>
+    </ul>
   );
 }
 
@@ -376,16 +377,18 @@ export default function Inspector({
             </Button>
           </div>
           {sizes ? (
-            <dl className={styles.details}>
-              <dt>Total</dt>
-              <dd>
-                {formatBytes(sizes.total)}
-                <span className={styles.note}>
-                  {" "}
-                  · {ago(new Date(sizes.measuredAt).toISOString())}
-                  {sizes.unreadable > 0 ? ` · ${sizes.unreadable} unreadable` : ""}
-                </span>
-              </dd>
+            <>
+              <dl className={styles.details}>
+                <dt>Total</dt>
+                <dd>
+                  {formatBytes(sizes.total)}
+                  <span className={styles.note}>
+                    {" "}
+                    · {ago(new Date(sizes.measuredAt).toISOString())}
+                    {sizes.unreadable > 0 ? ` · ${sizes.unreadable} unreadable` : ""}
+                  </span>
+                </dd>
+              </dl>
               <FolderTree
                 key={`${p.key}:${sizes.measuredAt}`}
                 sizes={sizes}
@@ -393,7 +396,7 @@ export default function Inspector({
                 onOpenFolder={onOpenFolder}
                 onMeasureFolder={onMeasureFolder}
               />
-            </dl>
+            </>
           ) : (
             <p className={styles.note}>{measuring ? "Counting every file…" : "Not measured yet."}</p>
           )}
