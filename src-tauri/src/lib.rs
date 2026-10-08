@@ -1,4 +1,5 @@
 pub mod apply;
+pub mod archive;
 mod commands;
 pub mod devices;
 mod devices_cmd;
@@ -110,6 +111,7 @@ pub fn run() {
             commands::open_project,
             commands::reveal_project,
             commands::set_status,
+            commands::archive_project,
             commands::copy_text,
             commands::pending_update,
             commands::check_for_updates,

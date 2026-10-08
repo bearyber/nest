@@ -10,6 +10,7 @@ import Sidebar, { type Computer } from "../components/Sidebar";
 import Toast, { type ToastData } from "../components/Toast";
 import { Button, IconButton } from "../components/ui";
 import {
+  archiveProject,
   checkForUpdates,
   copyText,
   devicesRefresh,
@@ -63,6 +64,7 @@ export default function Main() {
   const [list, setList] = useState<List | null>(null);
   const [spaces, setSpaces] = useState<string[]>(DEFAULT_SPACES);
   const [archiveDays, setArchiveDays] = useState<number | null>(null);
+  const [archiveOn, setArchiveOn] = useState(false);
   const [scanning, setScanning] = useState(false);
   const [filters, setFilters] = useState<Filters>({ space: null, status: "active", query: "", computer: null });
   const [sort, setSort] = useState<Sort>({ key: "created", dir: "desc" });
@@ -124,6 +126,7 @@ export default function Main() {
         .then((v) => {
           setSpaces(v.settings.spaces);
           setArchiveDays(v.settings.archiveAfterDays);
+          setArchiveOn(v.settings.archiveFolder !== null);
         })
         .catch(() => {});
     void loadSpaces();
@@ -318,9 +321,32 @@ export default function Main() {
     [refresh, fail],
   );
 
+  // Archive (M5 P2): Rust checks everything and asks first; null = you clicked Cancel.
+  // One at a time: a second click while the question is open does nothing.
+  const archiving = useRef(false);
+  const archive = useCallback(
+    (r: ProjectRow) => {
+      if (archiving.current) return;
+      archiving.current = true;
+      return archiveProject(r.key, r.archived)
+        .then((message) => {
+          if (!message) return;
+          setToast({ message });
+          return refresh();
+        })
+        .catch(fail)
+        .finally(() => {
+          archiving.current = false;
+        });
+    },
+    [refresh, fail],
+  );
+
   const showContextMenu = useCallback(
     async (r: ProjectRow) => {
       const canStatus = !r.error && !r.offline && !r.archived && (r.device ? true : r.paths.length === 1);
+      const canArchive =
+        archiveOn && !r.error && !r.offline && !r.device && r.paths.length === 1 && (r.archived || isDone(r));
       const shownStatus = r.pending ?? r.status;
       const here = !r.offline && !r.device;
       const path = r.device?.path ?? r.paths[0] ?? "";
@@ -349,6 +375,16 @@ export default function Main() {
               enabled: canStatus,
               action: () => void changeStatus(r, shownStatus === "done" ? "active" : "done"),
             },
+            ...(archiveOn
+              ? [
+                  {
+                    id: "archive",
+                    text: r.archived ? "Unarchive…" : "Archive…",
+                    enabled: canArchive,
+                    action: () => void archive(r),
+                  },
+                ]
+              : []),
           ],
         });
         await menu.popup();
@@ -356,7 +392,7 @@ export default function Main() {
         fail(e);
       }
     },
-    [open, reveal, copy, changeStatus, fail],
+    [open, reveal, copy, changeStatus, archive, archiveOn, fail],
   );
 
   const onCreated = useCallback(
@@ -586,8 +622,7 @@ export default function Main() {
         {filters.ready && (
           <div className={styles.update} role="status">
             <span>
-              Ready to archive. Move each folder into the archive folder yourself (right-click → Reveal), or pick
-              “Not this one” in the details panel.
+              Ready to archive. Select one and click Archive… in the details panel, or pick “Not this one”.
             </span>
             <Button onClick={() => setFilters((f) => ({ ...f, ready: false, status: "active" }))}>Show all</Button>
           </div>
@@ -631,6 +666,8 @@ export default function Main() {
           onReveal={() => selectedRow && void reveal(selectedRow)}
           onCopyPath={() => selectedRow && void copy(selectedRow.device?.path ?? selectedRow.paths[0], "path")}
           onStatus={(s) => selectedRow && void changeStatus(selectedRow, s)}
+          archiveOn={archiveOn}
+          onArchive={() => selectedRow && void archive(selectedRow)}
           onDismissArchive={() =>
             selectedRow &&
             dismissArchiveSuggestion(selectedRow.key)

@@ -114,12 +114,12 @@ fn open_new(path: &Path, _hidden: bool) -> io::Result<File> {
 
 /// Persist the rename itself. Not possible through std on Windows.
 #[cfg(unix)]
-fn sync_dir(dir: &Path) -> io::Result<()> {
+pub(crate) fn sync_dir(dir: &Path) -> io::Result<()> {
     File::open(dir)?.sync_all()
 }
 
 #[cfg(not(unix))]
-fn sync_dir(_dir: &Path) -> io::Result<()> {
+pub(crate) fn sync_dir(_dir: &Path) -> io::Result<()> {
     Ok(())
 }
 

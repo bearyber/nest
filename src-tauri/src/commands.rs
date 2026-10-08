@@ -9,10 +9,11 @@ use std::sync::{Mutex, MutexGuard};
 use chrono::{Datelike, Local};
 use serde::{Deserialize, Serialize};
 use tauri::State;
-use tauri_plugin_dialog::DialogExt;
+use tauri_plugin_dialog::{DialogExt, MessageDialogButtons, MessageDialogKind};
 use tauri_plugin_opener::OpenerExt;
 
 use crate::apply::apply_plan;
+use crate::archive;
 use crate::error::{io_reason, AppError, AppResult};
 use crate::index::{
     self, now_ms, scan_root, FoundProject, Index, ProjectRow, RescanSummary, RootScan, RootState,
@@ -568,6 +569,155 @@ pub fn set_status(
     }
     crate::devices_cmd::sync_soon(&app);
     Ok(())
+}
+
+/// Archive (M5 P2): move a Done project's folder into the archive folder, or an archived one
+/// back to a jobs folder, on the same drive: one rename, nothing copied or deleted (locked
+/// #4). Asks first with a native dialog. `Ok(None)` = cancelled; `Ok(Some(message))` = moved.
+#[tauri::command(async)]
+pub fn archive_project(
+    app: tauri::AppHandle,
+    state: State<'_, AppState>,
+    key: String,
+    unarchive: bool,
+) -> AppResult<Option<String>> {
+    let check = || -> AppResult<(archive::MovePlan, String)> {
+        let (path, id) = project_folder(&state, &key, true)?;
+        let settings = lock(&state.settings)?.clone();
+        let archive_root = settings.archive_folder.clone().ok_or_else(|| {
+            AppError::new("Choose an archive folder first: Settings → General → Archive.")
+        })?;
+        let id = id.ok_or_else(|| {
+            AppError::new("The project file can't be read, so Nest won't move this project")
+        })?;
+        let manifest = manifest::read_json_object(&path.join(plan::MANIFEST_NAME))
+            .map_err(|e| AppError::new(format!("The project file can't be read ({e})")))?;
+        // The folder must still hold the project the list shows (it may have been swapped).
+        if manifest["id"].as_str() != Some(id.as_str()) {
+            return Err(AppError::new(
+                "This folder now holds a different project. Rescan (Ctrl+R) and try again.",
+            ));
+        }
+        let archived = is_archived(&settings, &path);
+        let dest = if unarchive {
+            if !archived {
+                return Err(AppError::new("This project isn't archived"));
+            }
+            archive::unarchive_root(
+                manifest["archivedFrom"].as_str(),
+                &settings.jobs_roots,
+                &path,
+            )
+            .ok_or_else(|| AppError::new("Choose a jobs folder first (Settings → General)"))?
+        } else {
+            if archived {
+                return Err(AppError::new("This project is already archived"));
+            }
+            if manifest["status"].as_str() != Some("done") {
+                return Err(AppError::new("Mark it done first, then archive it."));
+            }
+            archive_root
+        };
+        let plan = archive::plan_move(&path, &dest, unarchive).map_err(AppError::new)?;
+        Ok((plan, id))
+    };
+
+    let (asked, _) = {
+        let _one = lock(&state.status_lock)?;
+        check()?
+    };
+    let target = asked.to.parent().unwrap_or(&asked.to).display().to_string();
+    let (title, message, button) = if unarchive {
+        (
+            "Unarchive this project?",
+            format!(
+                "\"{}\" moves back to {target}. You can change it in Nest again.",
+                asked.name
+            ),
+            "Unarchive",
+        )
+    } else {
+        (
+            "Archive this project?",
+            format!(
+                "\"{}\" moves to the archive folder ({target}). It stays a normal folder you can open; Unarchive brings it back.",
+                asked.name
+            ),
+            "Archive",
+        )
+    };
+    let confirmed = app
+        .dialog()
+        .message(message)
+        .title(title)
+        .kind(MessageDialogKind::Info)
+        .buttons(MessageDialogButtons::OkCancelCustom(
+            button.into(),
+            "Cancel".into(),
+        ))
+        .blocking_show();
+    if !confirmed {
+        return Ok(None);
+    }
+
+    // Checked again after the question: anything may have changed while the dialog was open.
+    let one = lock(&state.status_lock)?;
+    let (plan, id) = check()?;
+    if plan != asked {
+        return Err(AppError::new(
+            "The project changed while Nest was asking. Nothing was moved; try again.",
+        ));
+    }
+    archive::apply_move(&plan, unarchive).map_err(AppError::new)?;
+    // A note only: archived is decided by where the folder is (locked #5), so the move stands.
+    let note = archive::mark_manifest(
+        &plan.to,
+        &id,
+        (!unarchive).then(|| plan.from.parent()).flatten(),
+    )
+    .err();
+    drop(one);
+
+    // From here on the move has happened: nothing below may turn it into an error.
+    // Show it in its new place. A scan already running may have read the folders before the
+    // move, so wait for it (a few seconds at most, usually) and scan once more after it.
+    let started = std::time::Instant::now();
+    let mut got_scan = true;
+    while state.scanning.swap(true, Ordering::SeqCst) {
+        if started.elapsed() > std::time::Duration::from_secs(60) {
+            log::warn!("archive: a rescan kept running; the list updates on the next one");
+            got_scan = false;
+            break;
+        }
+        std::thread::sleep(std::time::Duration::from_millis(100));
+    }
+    if got_scan {
+        let _guard = CreatingGuard(&state.scanning);
+        let roots = state
+            .settings
+            .lock()
+            .map(|s| (s.jobs_roots.clone(), s.archive_folder.clone()));
+        match roots {
+            Ok((roots, archive)) => {
+                if let Err(e) = index::rescan_with_archive(&state.index, &roots, archive.as_deref())
+                {
+                    log::warn!("archive: rescan after the move failed: {e}");
+                }
+            }
+            Err(_) => log::warn!("archive: settings unavailable for the rescan after the move"),
+        }
+    }
+    crate::devices_cmd::sync_soon(&app);
+
+    let done = if unarchive {
+        format!("Moved {} back to {target}", plan.name)
+    } else {
+        format!("Archived {}", plan.name)
+    };
+    Ok(Some(match note {
+        Some(e) => format!("{done}. (Its project file couldn't note the date: {e}.)"),
+        None => done,
+    }))
 }
 
 /// Folder sizes (M5 P4): the last measurement, if any (the UI shows it at once).

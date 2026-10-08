@@ -77,6 +77,9 @@ export const setLaunchAtLogin = (on: boolean) => s<SettingsView>("set_launch_at_
 export const setArchiveFolder = () => s<SettingsView | null>("set_archive_folder");
 export const clearArchiveFolder = () => s<SettingsView>("clear_archive_folder");
 export const setArchiveAfterDays = (days: number | null) => s<SettingsView>("set_archive_after_days", { days });
+/** Move a Done project into the archive folder (or back). Rust asks first; null = cancelled. */
+export const archiveProject = (key: string, unarchive: boolean) =>
+  s<string | null>("archive_project", { key, unarchive });
 /** "Not this one": never suggest archiving this project again. */
 export const dismissArchiveSuggestion = (key: string) => s<void>("dismiss_archive_suggestion", { key });
 export const setCodeSettings = (pattern: string, marker: string, ownCode: string) =>

@@ -163,6 +163,17 @@
   min-width: 0;
 }
 
+/* Archive… / Unarchive…: its own row under Open and Reveal. */
+.actions button:nth-child(3) {
+  grid-column: 1 / -1;
+}
+
+.inlineActions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+}
+
 /* Devices: a project that lives on another computer. */
 .lives {
   display: grid;

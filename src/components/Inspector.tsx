@@ -1,5 +1,5 @@
 import { isMac } from "../lib/platform";
-import { ago, formatBytes, formatDate } from "../lib/search";
+import { ago, formatBytes, formatDate, isDone } from "../lib/search";
 import type { FolderSize, ProjectRow, Sizes } from "../lib/types";
 import Icon from "./Icon";
 import { Button, IconButton, PathText, Segmented } from "./ui";
@@ -11,6 +11,9 @@ interface Props {
   onReveal: () => void;
   onCopyPath: () => void;
   onStatus: (status: "active" | "done") => void;
+  /** Archive (M5 P2): an archive folder is set, and Archive… / Unarchive… was clicked. */
+  archiveOn: boolean;
+  onArchive: () => void;
   /** Archive: "Not this one" on a project that's ready to archive. */
   onDismissArchive: () => void;
   /** Folder sizes: the last measurement (null = none yet), and whether one is running. */
@@ -49,7 +52,7 @@ function display(v: unknown): string {
 /** Why the status can't be changed right now, or null if it can. */
 function statusBlocked(p: ProjectRow): string | null {
   if (p.error) return "The project file can't be read";
-  if (p.archived) return "Archived: move its folder back to a jobs folder to change it";
+  if (p.archived) return "Archived: unarchive it to change it";
   if (p.offline) return "Its jobs folder is offline";
   if (p.paths.length > 1) return "It exists in two places; remove the extra copy first";
   return null;
@@ -62,6 +65,8 @@ export default function Inspector({
   onReveal,
   onCopyPath,
   onStatus,
+  archiveOn,
+  onArchive,
   onDismissArchive,
   sizes,
   measuring,
@@ -76,6 +81,16 @@ export default function Inspector({
   }
 
   const blocked = statusBlocked(p);
+  // Archive… on a Done project here; Unarchive… on an archived one (Rust re-checks and asks).
+  const archiveBlocked = p.error
+    ? "The project file can't be read"
+    : p.offline
+      ? "Its folder is offline"
+      : p.paths.length > 1
+        ? "It exists in two places; remove the extra copy first"
+        : !p.archived && !isDone(p)
+          ? "Mark it done first"
+          : null;
   const fields = Object.entries(p.fields ?? {}).filter(([, v]) => display(v) !== "");
   const revealLabel = isMac() ? "Reveal in Finder" : "Show in Explorer";
 
@@ -101,8 +116,13 @@ export default function Inspector({
       {p.readyToArchive && (
         <div className={styles.lives}>
           <b>Ready to archive</b>
-          <span>Done {p.doneAt ? ago(new Date(p.doneAt).toISOString()) : "a while ago"}. Move its folder to the archive folder, or:</span>
-          <div>
+          <span>Done {p.doneAt ? ago(new Date(p.doneAt).toISOString()) : "a while ago"}.</span>
+          <div className={styles.inlineActions}>
+            {archiveOn && (
+              <Button onClick={onArchive} disabled={!!archiveBlocked} title={archiveBlocked ?? undefined}>
+                Archive…
+              </Button>
+            )}
             <Button onClick={onDismissArchive}>Not this one</Button>
           </div>
         </div>
@@ -274,6 +294,11 @@ export default function Inspector({
         <Button onClick={onReveal} disabled={p.offline || !!p.device}>
           {revealLabel}
         </Button>
+        {archiveOn && !p.device && (
+          <Button onClick={onArchive} disabled={!!archiveBlocked} title={archiveBlocked ?? undefined}>
+            {p.archived ? "Unarchive…" : "Archive…"}
+          </Button>
+        )}
       </div>
       {p.device && <p className={styles.note}>To open it, use Nest on {p.device.name}.</p>}
     </aside>
