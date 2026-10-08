@@ -72,10 +72,30 @@ export default function GeneralTab({ view, run }: TabProps) {
       </section>
 
       <section className={styles.section}>
+        <h3 className={styles.sectionTitle}>New projects</h3>
+        <div className={styles.formRow}>
+          <label htmlFor="default-space">Default space</label>
+          <select
+            id="default-space"
+            className={styles.select}
+            value={s.defaultSpace}
+            onChange={(e) => run(setDefaultSpace(e.target.value))}
+          >
+            {s.spaces.map((sp) => (
+              <option key={sp} value={sp}>
+                {sp}
+              </option>
+            ))}
+          </select>
+        </div>
+      </section>
+
+      <section className={styles.section}>
         <h3 className={styles.sectionTitle}>Archive</h3>
         <p className={styles.hint}>
-          Off until you choose a folder. Projects whose folder is in it show under Archived, read-only. Move folders
-          in or out yourself; Nest picks it up on the next rescan. Nothing is ever deleted.
+          Off until you choose a folder. Projects in it show under Archived, read-only. To archive a Done project,
+          select it and click Archive… in the details panel (archive folder on the same drive), or move the folder
+          there yourself. Nothing is ever deleted.
         </p>
         {s.archiveFolder ? (
           <div className={styles.card}>
@@ -124,25 +144,6 @@ export default function GeneralTab({ view, run }: TabProps) {
             <Button onClick={() => run(setArchiveFolder())}>Choose archive folder…</Button>
           </div>
         )}
-      </section>
-
-      <section className={styles.section}>
-        <h3 className={styles.sectionTitle}>New projects</h3>
-        <div className={styles.formRow}>
-          <label htmlFor="default-space">Default space</label>
-          <select
-            id="default-space"
-            className={styles.select}
-            value={s.defaultSpace}
-            onChange={(e) => run(setDefaultSpace(e.target.value))}
-          >
-            {s.spaces.map((sp) => (
-              <option key={sp} value={sp}>
-                {sp}
-              </option>
-            ))}
-          </select>
-        </div>
       </section>
 
       <section className={styles.section}>
