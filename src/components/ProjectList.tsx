@@ -25,7 +25,7 @@ const COLUMNS: { key: SortKey; label: string }[] = [
 // Resizable columns: Title takes what's left; the others have a width you can drag.
 type Widths = Record<"code" | "client" | "size" | "created", number>;
 const DEFAULT_WIDTHS: Widths = { code: 110, client: 140, size: 84, created: 104 };
-const MIN_W = 56;
+const MIN_W = 44;
 const MAX_W = 420;
 const WIDTHS_KEY = "nest.listColumns";
 
@@ -57,9 +57,9 @@ export default function ProjectList({ rows, selected, sort, onSort, onSelect, on
   const selectedRef = useRef<HTMLDivElement>(null);
   const [widths, setWidths] = useState<Widths>(loadWidths);
   // Each column grows to its width when there's room and shrinks (down to MIN_W) when the window
-  // is narrow; Title keeps at least 140px and takes whatever is left.
+  // is narrow; Title keeps at least 100px and takes whatever is left.
   const col = (w: number) => `minmax(${MIN_W}px, ${w}px)`;
-  const cols = `28px ${col(widths.code)} minmax(140px, 1fr) ${col(widths.client)} ${col(widths.size)} ${col(widths.created)}`;
+  const cols = `28px ${col(widths.code)} minmax(100px, 1fr) ${col(widths.client)} ${col(widths.size)} ${col(widths.created)}`;
 
   // Code's border is on its right (drag right = wider); the columns after Title have theirs on
   // the left (drag left = wider), so Title always gives or takes the space.

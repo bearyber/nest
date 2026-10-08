@@ -26,8 +26,8 @@
 
 .heading {
   display: grid;
-  flex: 1;
-  min-width: 0;
+  flex: 1 1 140px;
+  min-width: 110px;
 }
 
 .heading h1 {
@@ -40,6 +40,9 @@
 }
 
 .heading span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
   font-size: var(--text-small);
   color: var(--text-tertiary);
 }
@@ -49,7 +52,7 @@
   flex: 0 1 280px;
   align-items: center;
   gap: 6px;
-  min-width: 0;
+  min-width: 110px;
   height: 30px;
   padding: 0 10px;
   border: var(--hairline) solid var(--control-border);
