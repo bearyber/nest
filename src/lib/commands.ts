@@ -81,6 +81,9 @@ export const setArchiveAfterDays = (days: number | null) => s<SettingsView>("set
 export const setPersonalRoot = (path: string | null) => s<SettingsView>("set_personal_root", { path });
 /** New Project's Change… while it shows the Personal folder. Null when cancelled. */
 export const choosePersonalRoot = () => s<SettingsView | null>("choose_personal_root");
+/** Open one of a project's top-level folders ("" = the project folder) in Finder/Explorer. */
+export const openProjectSubfolder = (key: string, name: string) =>
+  invoke<void>("open_project_subfolder", { key, name });
 /** Move a Done project into the archive folder (or back). Rust asks first; null = cancelled. */
 export const archiveProject = (key: string, unarchive: boolean) =>
   s<string | null>("archive_project", { key, unarchive });

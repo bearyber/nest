@@ -20,6 +20,8 @@ interface Props {
   sizes: Sizes | null;
   measuring: boolean;
   onMeasure: () => void;
+  /** Open one of the project's top-level folders ("" = the project folder) in Finder/Explorer. */
+  onOpenFolder: (name: string) => void;
 }
 
 /** "video 390 GB, images 5 GB": only the types that are there, biggest first. */
@@ -71,6 +73,7 @@ export default function Inspector({
   sizes,
   measuring,
   onMeasure,
+  onOpenFolder,
 }: Props) {
   if (!p) {
     return (
@@ -252,7 +255,18 @@ export default function Inspector({
                 .filter((f) => f.total > 0)
                 .map((f) => (
                   <div key={f.name || "/"} className={styles.pair}>
-                    <dt title={f.name || "Files in the project folder"}>{f.name || "Loose files"}</dt>
+                    <dt>
+                      <button
+                        type="button"
+                        className={styles.folderLink}
+                        disabled={p.offline}
+                        title={`Open ${f.name || "the project folder"} in ${isMac() ? "Finder" : "Explorer"}`}
+                        onClick={() => onOpenFolder(f.name)}
+                      >
+                        {f.name || "Loose files"}
+                        <Icon name="open" className={styles.folderLinkIcon} />
+                      </button>
+                    </dt>
                     <dd>
                       {formatBytes(f.total)}
                       <span className={styles.note}> · {typeSplit(f)}</span>

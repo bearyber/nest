@@ -107,6 +107,42 @@
   color: var(--text-secondary);
 }
 
+/* Size rows: the folder name opens that folder in Finder/Explorer. Looks like the label
+   until you point at it. */
+.folderLink {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  padding: 0;
+  border: none;
+  background: none;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.folderLink:hover:not(:disabled),
+.folderLink:focus-visible {
+  color: var(--accent);
+  text-decoration: underline;
+}
+
+.folderLink:disabled {
+  cursor: default;
+}
+
+.folderLinkIcon {
+  width: 11px;
+  height: 11px;
+  opacity: 0.55;
+  flex: none;
+}
+
+.folderLink:hover:not(:disabled) .folderLinkIcon {
+  opacity: 1;
+}
+
 .details dd {
   margin: 0;
   overflow-wrap: anywhere;

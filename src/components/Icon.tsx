@@ -15,6 +15,7 @@ const PATHS = {
   refresh: { fill: false, d: "M13 8a5 5 0 1 1-1.5-3.6 M13 2.8v2.9h-2.9" },
   search: { fill: false, d: "M7 2.5a4.5 4.5 0 1 1 0 9 4.5 4.5 0 0 1 0-9z M10.3 10.3 13.5 13.5" },
   plus: { fill: false, d: "M8 3v10 M3 8h10" },
+  open: { fill: false, d: "M6 3.5H3.5v9h9V10 M9 3.5h3.5V7 M12.5 3.5 7.5 8.5" },
   gear: {
     fill: false,
     d: "M8 5.6a2.4 2.4 0 1 1 0 4.8 2.4 2.4 0 0 1 0-4.8z M8 1.8v1.6 M8 12.6v1.6 M1.8 8h1.6 M12.6 8h1.6 M3.6 3.6l1.1 1.1 M11.3 11.3l1.1 1.1 M3.6 12.4l1.1-1.1 M11.3 4.7l1.1-1.1",

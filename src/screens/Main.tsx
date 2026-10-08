@@ -24,6 +24,7 @@ import {
   projectSizes,
   pendingUpdate,
   openProject,
+  openProjectSubfolder,
   rescanProjects,
   revealProject,
   requestStatus,
@@ -677,6 +678,7 @@ export default function Main() {
           sizes={selectedRow && sizeInfo?.key === selectedRow.key ? sizeInfo.sizes : null}
           measuring={!!selectedRow && sizeInfo?.key === selectedRow.key && sizeInfo.measuring}
           onMeasure={() => selectedRow && measure(selectedRow.key)}
+          onOpenFolder={(name) => selectedRow && void openProjectSubfolder(selectedRow.key, name).catch(fail)}
         />
       )}
 

@@ -112,6 +112,7 @@ pub fn run() {
             commands::reveal_project,
             commands::set_status,
             commands::archive_project,
+            commands::open_project_subfolder,
             commands::copy_text,
             commands::pending_update,
             commands::check_for_updates,
