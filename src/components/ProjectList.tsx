@@ -56,7 +56,10 @@ function saveWidths(w: Widths) {
 export default function ProjectList({ rows, selected, sort, onSort, onSelect, onOpen, onContextMenu }: Props) {
   const selectedRef = useRef<HTMLDivElement>(null);
   const [widths, setWidths] = useState<Widths>(loadWidths);
-  const cols = `28px ${widths.code}px minmax(80px, 1fr) ${widths.client}px ${widths.size}px ${widths.created}px`;
+  // Each column grows to its width when there's room and shrinks (down to MIN_W) when the window
+  // is narrow; Title keeps at least 140px and takes whatever is left.
+  const col = (w: number) => `minmax(${MIN_W}px, ${w}px)`;
+  const cols = `28px ${col(widths.code)} minmax(140px, 1fr) ${col(widths.client)} ${col(widths.size)} ${col(widths.created)}`;
 
   // Code's border is on its right (drag right = wider); the columns after Title have theirs on
   // the left (drag left = wider), so Title always gives or takes the space.

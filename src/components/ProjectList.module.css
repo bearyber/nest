@@ -11,7 +11,7 @@
   display: grid;
   grid-template-columns: var(--cols);
   align-items: center;
-  gap: var(--space-4);
+  gap: var(--space-3);
   padding: 0 var(--space-3);
 }
 
@@ -161,11 +161,11 @@
 }
 
 .resizeLeft {
-  left: calc(-1 * var(--space-4) / 2 - 4px);
+  left: calc(-1 * var(--space-3) / 2 - 4px);
 }
 
 .resizeRight {
-  right: calc(-1 * var(--space-4) / 2 - 4px);
+  right: calc(-1 * var(--space-3) / 2 - 4px);
 }
 
 .resizeLeft::after,
