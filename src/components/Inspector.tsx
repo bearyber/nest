@@ -1,3 +1,4 @@
+import { useState } from "react";
 import { isMac } from "../lib/platform";
 import { ago, formatBytes, formatDate, isDone } from "../lib/search";
 import type { FolderSize, ProjectRow, Sizes } from "../lib/types";
@@ -20,8 +21,141 @@ interface Props {
   sizes: Sizes | null;
   measuring: boolean;
   onMeasure: () => void;
-  /** Open one of the project's top-level folders ("" = the project folder) in Finder/Explorer. */
-  onOpenFolder: (name: string) => void;
+  /** Open a folder inside the project in Finder/Explorer ([] = the project folder). */
+  onOpenFolder: (path: string[]) => void;
+  /** What's inside one folder, one level down (the ▸ under Size). */
+  onMeasureFolder: (path: string[]) => Promise<Sizes>;
+}
+
+type Inside = Sizes | "loading" | "error";
+
+/** Size rows: each folder opens in Finder/Explorer, and ▸ shows what's inside it, as deep as
+ *  you like. "Loose files" opens the folder they're in. */
+function FolderRows({
+  folders,
+  parent,
+  depth,
+  disabled,
+  inside,
+  onToggle,
+  onOpen,
+}: {
+  folders: FolderSize[];
+  parent: string[];
+  depth: number;
+  disabled: boolean;
+  inside: Record<string, Inside>;
+  onToggle: (path: string[]) => void;
+  onOpen: (path: string[]) => void;
+}) {
+  const app = isMac() ? "Finder" : "Explorer";
+  return (
+    <>
+      {folders
+        .filter((f) => f.total > 0)
+        .map((f) => {
+          const path = f.name ? [...parent, f.name] : parent;
+          const id = path.join("/");
+          const open = f.name ? inside[id] : undefined;
+          return (
+            <div key={f.name || "/"} className={styles.pair}>
+              <dt style={{ paddingLeft: depth * 16 }} className={styles.folderCell}>
+                {f.name ? (
+                  <button
+                    type="button"
+                    className={styles.expand}
+                    aria-expanded={!!open}
+                    aria-label={`${open ? "Hide" : "Show"} what's inside ${f.name}`}
+                    disabled={disabled}
+                    onClick={() => onToggle(path)}
+                  >
+                    {open ? "▾" : "▸"}
+                  </button>
+                ) : (
+                  <span className={styles.expandGap} />
+                )}
+                <button
+                  type="button"
+                  className={styles.folderLink}
+                  disabled={disabled}
+                  title={`Open ${f.name || "this folder"} in ${app}`}
+                  onClick={() => onOpen(path)}
+                >
+                  {f.name || "Loose files"}
+                  <Icon name="open" className={styles.folderLinkIcon} />
+                </button>
+              </dt>
+              <dd>
+                {formatBytes(f.total)}
+                <span className={styles.note}> · {typeSplit(f)}</span>
+              </dd>
+              {open === "loading" && (
+                <dd className={styles.insideNote} style={{ paddingLeft: (depth + 1) * 16 }}>
+                  Counting…
+                </dd>
+              )}
+              {open === "error" && (
+                <dd className={styles.insideNote} style={{ paddingLeft: (depth + 1) * 16 }}>
+                  Couldn't look inside.
+                </dd>
+              )}
+              {open && typeof open === "object" && (
+                <FolderRows
+                  folders={open.folders}
+                  parent={path}
+                  depth={depth + 1}
+                  disabled={disabled}
+                  inside={inside}
+                  onToggle={onToggle}
+                  onOpen={onOpen}
+                />
+              )}
+            </div>
+          );
+        })}
+    </>
+  );
+}
+
+/** The Size breakdown with its own unfolded state (reset per project and per measurement). */
+function FolderTree({
+  sizes,
+  disabled,
+  onOpenFolder,
+  onMeasureFolder,
+}: {
+  sizes: Sizes;
+  disabled: boolean;
+  onOpenFolder: (path: string[]) => void;
+  onMeasureFolder: (path: string[]) => Promise<Sizes>;
+}) {
+  const [inside, setInside] = useState<Record<string, Inside>>({});
+  const toggle = (path: string[]) => {
+    const id = path.join("/");
+    if (inside[id]) {
+      setInside((s) => {
+        const next = { ...s };
+        delete next[id];
+        return next;
+      });
+      return;
+    }
+    setInside((s) => ({ ...s, [id]: "loading" }));
+    onMeasureFolder(path)
+      .then((found) => setInside((s) => (s[id] ? { ...s, [id]: found } : s)))
+      .catch(() => setInside((s) => (s[id] ? { ...s, [id]: "error" } : s)));
+  };
+  return (
+    <FolderRows
+      folders={sizes.folders}
+      parent={[]}
+      depth={0}
+      disabled={disabled}
+      inside={inside}
+      onToggle={toggle}
+      onOpen={onOpenFolder}
+    />
+  );
 }
 
 /** "video 390 GB, images 5 GB": only the types that are there, biggest first. */
@@ -74,6 +208,7 @@ export default function Inspector({
   measuring,
   onMeasure,
   onOpenFolder,
+  onMeasureFolder,
 }: Props) {
   if (!p) {
     return (
@@ -251,28 +386,13 @@ export default function Inspector({
                   {sizes.unreadable > 0 ? ` · ${sizes.unreadable} unreadable` : ""}
                 </span>
               </dd>
-              {sizes.folders
-                .filter((f) => f.total > 0)
-                .map((f) => (
-                  <div key={f.name || "/"} className={styles.pair}>
-                    <dt>
-                      <button
-                        type="button"
-                        className={styles.folderLink}
-                        disabled={p.offline}
-                        title={`Open ${f.name || "the project folder"} in ${isMac() ? "Finder" : "Explorer"}`}
-                        onClick={() => onOpenFolder(f.name)}
-                      >
-                        {f.name || "Loose files"}
-                        <Icon name="open" className={styles.folderLinkIcon} />
-                      </button>
-                    </dt>
-                    <dd>
-                      {formatBytes(f.total)}
-                      <span className={styles.note}> · {typeSplit(f)}</span>
-                    </dd>
-                  </div>
-                ))}
+              <FolderTree
+                key={`${p.key}:${sizes.measuredAt}`}
+                sizes={sizes}
+                disabled={p.offline}
+                onOpenFolder={onOpenFolder}
+                onMeasureFolder={onMeasureFolder}
+              />
             </dl>
           ) : (
             <p className={styles.note}>{measuring ? "Counting every file…" : "Not measured yet."}</p>

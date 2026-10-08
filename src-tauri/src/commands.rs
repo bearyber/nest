@@ -573,43 +573,66 @@ pub fn open_project(
         .map_err(|e| AppError::new(format!("Couldn't open the folder: {e}")))
 }
 
-/// Folder sizes: open one of the project's top-level folders (a row under Size) in
-/// Finder/Explorer. `name` "" = the project folder itself (its loose files).
+/// Folder sizes: open a folder inside the project (a row under Size) in Finder/Explorer.
+/// `path` = folder names from the project down, e.g. `["99_MISC", "CROPLINES"]`; empty =
+/// the project folder itself.
 #[tauri::command(async)]
 pub fn open_project_subfolder(
     app: tauri::AppHandle,
     state: State<'_, AppState>,
     key: String,
-    name: String,
+    path: Vec<String>,
 ) -> AppResult<()> {
-    let (path, _) = project_folder(&state, &key, false)?;
-    let target = subfolder(&path, &name).ok_or_else(|| {
-        AppError::new(format!(
-            "\"{name}\" isn't a folder in this project any more. Click Measure again."
-        ))
-    })?;
+    let (project, _) = project_folder(&state, &key, false)?;
+    let target = subfolder_or_error(&project, &path)?;
     app.opener()
         .open_path(target.to_string_lossy(), None::<&str>)
         .map_err(|e| AppError::new(format!("Couldn't open the folder: {e}")))
 }
 
-/// A folder directly inside `project` (never a link, never anywhere else), or the project
-/// folder itself for "". The name comes from the UI, so it's checked, not trusted.
-fn subfolder(project: &Path, name: &str) -> Option<PathBuf> {
-    if name.is_empty() {
-        return Some(project.to_path_buf());
+/// Folder sizes: what's inside one folder of the project, one level down (for the ▸ under
+/// Size). Measured now, not remembered. Read-only.
+#[tauri::command(async)]
+pub fn measure_project_folder(
+    state: State<'_, AppState>,
+    key: String,
+    path: Vec<String>,
+) -> AppResult<Sizes> {
+    let (project, _) = project_folder(&state, &key, false)?;
+    let target = subfolder_or_error(&project, &path)?;
+    Ok(crate::sizes::measure(&target, index::now_ms()))
+}
+
+fn subfolder_or_error(project: &Path, path: &[String]) -> AppResult<PathBuf> {
+    subfolder(project, path).ok_or_else(|| {
+        AppError::new(format!(
+            "\"{}\" isn't a folder in this project any more. Click Measure again.",
+            path.join("/")
+        ))
+    })
+}
+
+/// A folder inside `project`, step by step: each name must be one plain folder name, and
+/// each step a real folder (never a link, so it can't lead outside the project). Empty =
+/// the project folder. The names come from the UI, so they're checked, not trusted.
+fn subfolder(project: &Path, path: &[String]) -> Option<PathBuf> {
+    let mut dir = project.to_path_buf();
+    for name in path {
+        let mut parts = Path::new(name).components();
+        let single = matches!(
+            (parts.next(), parts.next()),
+            (Some(std::path::Component::Normal(_)), None)
+        );
+        if !single || name.contains(['/', '\\']) {
+            return None;
+        }
+        dir.push(name);
+        let meta = std::fs::symlink_metadata(&dir).ok()?;
+        if !meta.is_dir() || meta.file_type().is_symlink() {
+            return None;
+        }
     }
-    let mut parts = Path::new(name).components();
-    let single = matches!(
-        (parts.next(), parts.next()),
-        (Some(std::path::Component::Normal(_)), None)
-    );
-    if !single || name.contains(['/', '\\']) {
-        return None;
-    }
-    let dir = project.join(name);
-    let meta = std::fs::symlink_metadata(&dir).ok()?;
-    (meta.is_dir() && !meta.file_type().is_symlink()).then_some(dir)
+    Some(dir)
 }
 
 /// Show a project folder selected in its parent folder.
@@ -1002,24 +1025,32 @@ mod tests {
         let p = tmp.path().join("261007_X");
         fs::create_dir_all(p.join("06_DI/LUTS")).unwrap();
         fs::write(p.join("notes.txt"), "x").unwrap();
+        let v = |parts: &[&str]| parts.iter().map(|s| s.to_string()).collect::<Vec<_>>();
         assert_eq!(
-            subfolder(&p, ""),
+            subfolder(&p, &[]),
             Some(p.clone()),
             "loose files: the project"
         );
-        assert_eq!(subfolder(&p, "06_DI"), Some(p.join("06_DI")));
+        assert_eq!(subfolder(&p, &v(&["06_DI"])), Some(p.join("06_DI")));
+        assert_eq!(
+            subfolder(&p, &v(&["06_DI", "LUTS"])),
+            Some(p.join("06_DI").join("LUTS")),
+            "one level deeper, step by step"
+        );
         for bad in [
-            "..",
-            ".",
-            "06_DI/LUTS",
-            "06_DI\\LUTS",
-            "../261007_X",
-            "notes.txt",
-            "Gone",
-            "C:\\Windows",
-            "/etc",
+            v(&[".."]),
+            v(&["."]),
+            v(&["06_DI/LUTS"]),
+            v(&["06_DI\\LUTS"]),
+            v(&["06_DI", ".."]),
+            v(&["..", "261007_X"]),
+            v(&["notes.txt"]),
+            v(&["Gone"]),
+            v(&["C:\\Windows"]),
+            v(&["/etc"]),
+            v(&[""]),
         ] {
-            assert_eq!(subfolder(&p, bad), None, "{bad}");
+            assert_eq!(subfolder(&p, &bad), None, "{bad:?}");
         }
     }
 

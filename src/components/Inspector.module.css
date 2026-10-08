@@ -132,6 +132,47 @@
   cursor: default;
 }
 
+.folderCell {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+/* ▸ / ▾: show what's inside a folder. A 20px target with a hover circle, kept apart from
+   the folder name so the two are hard to mix up. */
+.expand,
+.expandGap {
+  flex: none;
+  width: 20px;
+  height: 20px;
+}
+
+.expand {
+  display: grid;
+  place-items: center;
+  margin: -2px 0;
+  padding: 0;
+  border: none;
+  border-radius: 50%;
+  background: none;
+  color: var(--text-tertiary);
+  font-size: 11px;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.expand:hover:not(:disabled) {
+  background: var(--control-hover);
+  color: var(--text);
+}
+
+.insideNote {
+  grid-column: 1 / -1;
+  font-size: var(--text-small);
+  color: var(--text-tertiary);
+}
+
 .folderLinkIcon {
   width: 11px;
   height: 11px;

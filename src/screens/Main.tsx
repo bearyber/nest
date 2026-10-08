@@ -20,6 +20,7 @@ import {
   installUpdate,
   listProjects,
   measureProject,
+  measureProjectFolder,
   openSettings,
   projectSizes,
   pendingUpdate,
@@ -678,7 +679,10 @@ export default function Main() {
           sizes={selectedRow && sizeInfo?.key === selectedRow.key ? sizeInfo.sizes : null}
           measuring={!!selectedRow && sizeInfo?.key === selectedRow.key && sizeInfo.measuring}
           onMeasure={() => selectedRow && measure(selectedRow.key)}
-          onOpenFolder={(name) => selectedRow && void openProjectSubfolder(selectedRow.key, name).catch(fail)}
+          onOpenFolder={(path) => selectedRow && void openProjectSubfolder(selectedRow.key, path).catch(fail)}
+          onMeasureFolder={(path) =>
+            selectedRow ? measureProjectFolder(selectedRow.key, path) : Promise.reject(new Error("No project selected"))
+          }
         />
       )}
 

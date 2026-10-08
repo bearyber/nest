@@ -113,6 +113,7 @@ pub fn run() {
             commands::set_status,
             commands::archive_project,
             commands::open_project_subfolder,
+            commands::measure_project_folder,
             commands::copy_text,
             commands::pending_update,
             commands::check_for_updates,
