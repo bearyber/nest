@@ -300,31 +300,31 @@ Each milestone is done only when every box is ticked **on both Windows and macOS
 
 ### M0: Scaffold
 
-- [ ] Tauri 2 app runs on both OSes with a blank three-pane window
-- [ ] Vibrancy (mac) and Mica (win) applied; falls back to solid on unsupported systems
-- [ ] Single instance + window state working
-- [ ] `CLAUDE.md` in repo, gate commands pass (section 10)
+- [x] Tauri 2 app runs on both OSes with a blank three-pane window
+- [x] Vibrancy (mac) and Mica (win) applied; falls back to solid on unsupported systems
+- [x] Single instance + window state working
+- [x] `CLAUDE.md` in repo, gate commands pass (section 10)
 
 ### M1: Templates + plan
 
-- [ ] Bundled templates load; invalid template import is refused with a clear message
-- [ ] `plan_project` unit-tested: variables, transforms, `when`, `each`, sanitiser, reserved names, long paths
-- [ ] Job code generation unit-tested incl. collisions and gaps (e.g. J01, J03 exist → next is J04)
+- [x] Bundled templates load; invalid template import is refused with a clear message
+- [x] `plan_project` unit-tested: variables, transforms, `when`, `each`, sanitiser, reserved names, long paths
+- [x] Job code generation unit-tested incl. collisions and gaps (e.g. J01, J03 exist → next is J04)
 
 ### M2: Create
 
-- [ ] New Project sheet renders fields from the template, validates required fields
-- [ ] Preview tree matches exactly what Create produces (integration test compares Plan to disk)
-- [ ] Create writes folders, starter files (with fill), and `.project.json` (hidden on Windows via file attribute)
-- [ ] Failure mid-create rolls back only what this run created
-- [ ] Korean/Chinese characters in fields work on both OSes
+- [x] New Project sheet renders fields from the template, validates required fields
+- [x] Preview tree matches exactly what Create produces (integration test compares Plan to disk)
+- [x] Create writes folders, starter files (with fill), and `.project.json` (hidden on Windows via file attribute)
+- [x] Failure mid-create rolls back only what this run created
+- [x] Korean/Chinese characters in fields work on both OSes
 
 ### M3: Browse
 
-- [ ] List, search (code, title, client, any field value), Space + Status filters
-- [ ] Inspector with Open folder, Reveal, Copy path, status change (writes manifest atomically)
-- [ ] Rescan on launch/focus/manual; offline roots handled per section 6
-- [ ] Context menus and all shortcuts in section 8
+- [x] List, search (code, title, client, any field value), Space + Status filters
+- [x] Inspector with Open folder, Reveal, Copy path, status change (writes manifest atomically)
+- [x] Rescan on launch/focus/manual; offline roots handled per section 6
+- [x] Context menus and all shortcuts in section 8
 
 ### M4: Settings + first run
 

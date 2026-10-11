@@ -48,6 +48,7 @@ src-tauri/
     template_edit.rs template editor: preview, save (Rust picks id/version), one copy per template (T-A)
     settings.rs      settings file
     sizes.rs         folder sizes per subfolder and file type (read-only walk; cached in the index)
+    archive.rs       Archive / Unarchive: one rename, same drive only (moves project folders)
     error.rs         AppError (user-facing message)
     menu.rs          macOS menu bar (Windows has none: shortcuts + context menus)
     window.rs        window appearance (Mica / vibrancy, theme)
