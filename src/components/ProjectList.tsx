@@ -22,10 +22,12 @@ const COLUMNS: { key: SortKey; label: string }[] = [
   { key: "created", label: "Created" },
 ];
 
-// Resizable columns: Title takes what's left; the others have a width you can drag.
-type Widths = Record<"code" | "client" | "size" | "created", number>;
-const DEFAULT_WIDTHS: Widths = { code: 110, client: 140, size: 84, created: 104 };
+// Resizable columns, like Explorer and Finder: each divider resizes the column on its left, and
+// an empty filler after the last column takes what's left.
+type Widths = Record<"code" | "title" | "client" | "size" | "created", number>;
+const DEFAULT_WIDTHS: Widths = { code: 110, title: 280, client: 140, size: 84, created: 104 };
 const MIN_W = 44;
+const MIN_TITLE = 120;
 const MAX_W = 420;
 const WIDTHS_KEY = "nest.listColumns";
 
@@ -56,32 +58,41 @@ function saveWidths(w: Widths) {
 export default function ProjectList({ rows, selected, sort, onSort, onSelect, onOpen, onContextMenu }: Props) {
   const selectedRef = useRef<HTMLDivElement>(null);
   const [widths, setWidths] = useState<Widths>(loadWidths);
-  // Each column grows to its width when there's room and shrinks (down to MIN_W) when the window
-  // is narrow; Title keeps at least 100px and takes whatever is left.
-  const col = (w: number) => `minmax(${MIN_W}px, ${w}px)`;
-  const cols = `28px ${col(widths.code)} minmax(100px, 1fr) ${col(widths.client)} ${col(widths.size)} ${col(widths.created)}`;
+  const [dragging, setDragging] = useState<keyof Widths | null>(null);
+  // Each column grows to its width when there's room and shrinks (down to its minimum) when the
+  // window is narrow; the filler at the end takes whatever is left.
+  const col = (w: number, min = MIN_W) => `minmax(${min}px, ${w}px)`;
+  const cols = `28px ${col(widths.code)} ${col(widths.title, MIN_TITLE)} ${col(widths.client)} ${col(widths.size)} ${col(widths.created)} minmax(0, 1fr)`;
 
-  // Code's border is on its right (drag right = wider); the columns after Title have theirs on
-  // the left (drag left = wider), so Title always gives or takes the space.
-  const startResize = (col: keyof Widths, e: React.PointerEvent) => {
+  // Drag right = wider. The drag starts from the width on screen (a narrow window may have
+  // squeezed the column below its saved width), so the divider follows the mouse from the start.
+  const startResize = (col: keyof Widths, e: React.PointerEvent<HTMLElement>) => {
     e.preventDefault();
     e.stopPropagation();
+    const min = col === "title" ? MIN_TITLE : MIN_W;
+    const onScreen = e.currentTarget.parentElement?.getBoundingClientRect().width ?? widths[col];
+    const start = Math.min(MAX_W, Math.max(min, Math.round(onScreen)));
     const startX = e.clientX;
-    const start = widths[col];
-    const dir = col === "code" ? 1 : -1;
-    let latest = widths;
+    let latest = { ...widths, [col]: start };
+    setWidths(latest);
+    setDragging(col);
+    document.body.classList.add(styles.resizing);
     const move = (ev: PointerEvent) => {
-      const w = Math.min(MAX_W, Math.max(MIN_W, start + dir * (ev.clientX - startX)));
+      const w = Math.min(MAX_W, Math.max(min, start + ev.clientX - startX));
       latest = { ...latest, [col]: w };
       setWidths(latest);
     };
     const up = () => {
       window.removeEventListener("pointermove", move);
       window.removeEventListener("pointerup", up);
+      window.removeEventListener("pointercancel", up);
+      document.body.classList.remove(styles.resizing);
+      setDragging(null);
       saveWidths(latest);
     };
     window.addEventListener("pointermove", move);
     window.addEventListener("pointerup", up);
+    window.addEventListener("pointercancel", up);
   };
   const resetWidth = (col: keyof Widths) => {
     const next = { ...widths, [col]: DEFAULT_WIDTHS[col] };
@@ -105,7 +116,7 @@ export default function ProjectList({ rows, selected, sort, onSort, onSelect, on
       <div className={styles.header} role="row">
         <span role="columnheader" aria-label="Status" />
         {COLUMNS.map((c) => {
-          const resizable = c.key !== "title" ? (c.key as keyof Widths) : null;
+          const resizable = c.key as keyof Widths;
           return (
             <div key={c.key} className={styles.headerWrap}>
               <button
@@ -120,17 +131,15 @@ export default function ProjectList({ rows, selected, sort, onSort, onSelect, on
                   <Icon name="down" className={sort.dir === "asc" ? styles.sortAsc : styles.sortDesc} />
                 )}
               </button>
-              {resizable && (
-                <span
-                  role="separator"
-                  aria-orientation="vertical"
-                  aria-label={`Resize ${c.label} column`}
-                  title="Drag to resize · double-click to reset"
-                  className={resizable === "code" ? styles.resizeRight : styles.resizeLeft}
-                  onPointerDown={(e) => startResize(resizable, e)}
-                  onDoubleClick={() => resetWidth(resizable)}
-                />
-              )}
+              <span
+                role="separator"
+                aria-orientation="vertical"
+                aria-label={`Resize ${c.label} column`}
+                title="Drag to resize · double-click to reset"
+                className={`${styles.resize} ${dragging === resizable ? styles.resizeActive : ""}`}
+                onPointerDown={(e) => startResize(resizable, e)}
+                onDoubleClick={() => resetWidth(resizable)}
+              />
             </div>
           );
         })}
@@ -166,7 +175,7 @@ export default function ProjectList({ rows, selected, sort, onSort, onSelect, on
                 )}
               </span>
               <span role="gridcell" className={styles.title}>
-                {r.title || "Untitled"}
+                <span className={styles.titleText}>{r.title || "Untitled"}</span>
                 {r.error && <span className={styles.pill}>Unreadable</span>}
                 {r.archived && <span className={styles.pill}>Archived</span>}
                 {r.offline && <span className={styles.pill}>Offline</span>}
