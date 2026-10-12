@@ -20,7 +20,7 @@ Private notes (how we work, releasing, TODO, SHIPLOG, plans) live in `private/`,
 6. **Atomic JSON writes** (tmp + fsync + rename). Always.
 7. **Native feel.** System fonts, system accent, native menus/context menus/dialogs, no web-looking widgets, no component libraries, no Tailwind. Tokens in `src/styles/tokens.css`.
 8. **Sanitise every generated name** through the one sanitiser in `src-tauri/src/names.rs`. Never build a path from raw user input anywhere else.
-9. **Standalone.** No network calls except the updater. No accounts, telemetry or connections in v1. *Unlocked (Bernard, 2026-10-12): direct transfer between your own paired computers is being explored (no accounts, no sign-in). Nothing else.*
+9. **Standalone.** No network calls except the updater. No accounts, telemetry or connections in v1. *Unlocked (Bernard, 2026-10-12): on-demand transfer of a project between your own paired computers is in v1 (not syncing; no accounts, no sign-in). Nothing else.*
 10. **Scope is v1 only.** Anything in build spec section 12 is out. If a task drifts there, stop and ask.
 
 ## Layout

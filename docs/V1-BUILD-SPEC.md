@@ -445,7 +445,7 @@ Bernard's own template is named "Project". The year is never part of the job cod
 
 - Resolve/Premiere/AE project creation
 - Drop-to-rename, export naming, watch folders
-- ops app or any connection
+- ops app or any connection to other services (in v1: on-demand transfer of a project between your own computers, not syncing; Bernard, 2026-10-12)
 - Delivery check, checksums (archive moved to §12a #21 on 2026-10-04)
 - Licensing, payments, accounts, telemetry
 - Any deletion of user files (templates excepted: your own go to the Recycle Bin / Trash, see §12a #16)
