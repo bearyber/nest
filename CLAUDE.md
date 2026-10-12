@@ -15,7 +15,7 @@ Private notes (how we work, releasing, TODO, SHIPLOG, plans) live in `private/`,
 1. **Both OSes or nothing.** Every feature works on Windows 10/11 and macOS 13+. No `#[cfg]`-only features without the other OS covered.
 2. **All filesystem writes in Rust.** The webview never writes files. No fs write permissions in `capabilities/`.
 3. **Plan, then apply.** `plan_project` is pure and returns what will be created. The preview renders the Plan. `apply_plan` executes it. Never create anything that isn't in the Plan.
-4. **Never delete or overwrite user files.** Only rollback of items created in the same failed run. No "cleanup" features. *Exception (Bernard, 2026-10-02): your own templates may go to the Recycle Bin / Trash (delete, go back to original, replaced by a newer save), always restorable. Never projects.*
+4. **Never delete or overwrite user files.** Only rollback of items created in the same failed run. No "cleanup" features. *Exception (Bernard, 2026-10-02): your own templates may go to the Recycle Bin / Trash (delete, go back to original, replaced by a newer save), always restorable. Never projects.* *Exception (Bernard, 2026-10-12): a transfer between your computers may replace a changed file; the old version moves to `_Replaced by Nest/<date>/` inside the project (never the bin, never deleted).*
 5. **The folder is the truth.** `.project.json` is canonical; SQLite index is a disposable cache. Preserve unknown manifest fields on every write.
 6. **Atomic JSON writes** (tmp + fsync + rename). Always.
 7. **Native feel.** System fonts, system accent, native menus/context menus/dialogs, no web-looking widgets, no component libraries, no Tailwind. Tokens in `src/styles/tokens.css`.
