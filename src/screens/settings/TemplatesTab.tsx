@@ -167,7 +167,7 @@ export default function TemplatesTab({ run }: TabProps) {
         items: [
           {
             id: "folder",
-            text: "From a folder you already use…",
+            text: "From one of your project folders…",
             action: () => void fromFolder(null),
           },
           {
@@ -209,13 +209,14 @@ export default function TemplatesTab({ run }: TabProps) {
     <>
       <p className={styles.hint}>
         A template decides which folders and starter files a new project gets, and what New Project asks (client,
-        project name, start date…). Drop a folder you already use here to make a template from it.
+        project name, start date…). Drop one of your project folders here to make a template from it.
       </p>
       <div className={styles.actions}>
         <Button variant="primary" onClick={() => void newMenu()}>
           New template…
         </Button>
         <Button
+          title="Opens a .nesttemplate file made with Export… (on this or another computer)"
           onClick={async () => {
             const t = await run(importTemplate());
             if (t) {
@@ -224,7 +225,7 @@ export default function TemplatesTab({ run }: TabProps) {
             }
           }}
         >
-          Add from a file…
+          Import…
         </Button>
       </div>
 
@@ -327,16 +328,16 @@ export default function TemplatesTab({ run }: TabProps) {
             )}
             <Button onClick={() => void open("new", current.key)}>Duplicate</Button>
             <Button
-              title="Saves this template as one file you can open on another computer with “Add from a file…”"
+              title="Saves this template as one .nesttemplate file. Open it on another computer with Import…"
               onClick={async () => {
                 if (await run(exportTemplate(current.key)))
                   void run(
                     Promise.resolve(null),
-                    `Saved “${current.name}” as a file. On your other computer: Settings → Templates → Add from a file…`,
+                    `Saved “${current.name}” as a file. On your other computer: Settings → Templates → Import…`,
                   );
               }}
             >
-              Send to another computer…
+              Export…
             </Button>
             {!current.builtIn && replacesBuiltIn(current) && (
               <Button
