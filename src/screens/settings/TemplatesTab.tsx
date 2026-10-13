@@ -1,21 +1,33 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { listen } from "@tauri-apps/api/event";
+import { getCurrentWebview } from "@tauri-apps/api/webview";
 import { Menu } from "@tauri-apps/api/menu";
 import PreviewTree from "../../components/PreviewTree";
 import { Button } from "../../components/ui";
 import {
   deleteTemplate,
   exportTemplate,
+  closeFolderDraft,
   importTemplate,
   listTemplates,
   previewTemplate,
   resetTemplate,
   setTemplateHidden,
   templateDraft,
+  templateFromFolder,
 } from "../../lib/commands";
 import { isMac } from "../../lib/platform";
 import { asPlan } from "../../lib/templateDraft";
-import type { SaveMode, Template, TemplateDraft, TemplateInfo, TemplatePreview } from "../../lib/types";
+import type {
+  FolderDraft,
+  SaveMode,
+  Skipped,
+  SkipReason,
+  Template,
+  TemplateDraft,
+  TemplateInfo,
+  TemplatePreview,
+} from "../../lib/types";
 import type { TabProps } from "../Settings";
 import TemplateEditor, { type EditorStep } from "./editor/TemplateEditor";
 import styles from "./settings.module.css";
@@ -26,6 +38,26 @@ interface Editing {
   start: Template;
   starterFiles: string[];
   step: EditorStep;
+  note?: string;
+}
+
+/** What a folder left out, in plain words. System files aren't mentioned: nobody misses them. */
+const LEFT_OUT: Record<Exclude<SkipReason, "clutter">, [string, string]> = {
+  tooBig: ["file over 100 MB", "files over 100 MB"],
+  cache: ["cache, auto-save or app library folder", "cache, auto-save and app library folders"],
+  link: ["shortcut", "shortcuts"],
+  unreadable: ["item Nest couldn't read", "items Nest couldn't read"],
+  badName: ["name that can't work on both Windows and Mac", "names that can't work on both Windows and Mac"],
+};
+
+export function folderNote(skipped: Skipped[], fromProject: boolean): string {
+  const parts = (Object.keys(LEFT_OUT) as (keyof typeof LEFT_OUT)[]).flatMap((reason) => {
+    const n = skipped.filter((s) => s.reason === reason).length;
+    return n ? [`${n} ${LEFT_OUT[reason][n === 1 ? 0 : 1]}`] : [];
+  });
+  const answers = fromProject ? "This was a Nest project: its answers became blanks. " : "";
+  const left = parts.length ? `Left out: ${parts.join(", ")}.` : "Everything came along.";
+  return `${answers}${left} Your folder wasn't changed.`;
 }
 
 /** Templates: what each one makes, Customize / Edit in the app, new ones, sharing between
@@ -96,6 +128,36 @@ export default function TemplatesTab({ run }: TabProps) {
     setEditing({ sourceKey: key, mode, start, starterFiles: d.starterFiles, step });
   };
 
+  const fromFolder = async (path: string | null) => {
+    if (editing) return; // a drop while the editor is open isn't meant for a new template
+    const made: FolderDraft | null | undefined = await run(templateFromFolder(path));
+    if (!made) return;
+    setEditing({
+      sourceKey: made.key,
+      mode: "new",
+      start: made.draft.template,
+      starterFiles: made.draft.starterFiles,
+      step: "folders",
+      note: folderNote(made.skipped, made.fromProject),
+    });
+  };
+
+  // Drop a folder on this tab to make a template from it.
+  const fromFolderRef = useRef(fromFolder);
+  useEffect(() => {
+    fromFolderRef.current = fromFolder;
+  });
+  useEffect(() => {
+    let unlisten: (() => void) | undefined;
+    getCurrentWebview()
+      .onDragDropEvent((e) => {
+        if (e.payload.type === "drop" && e.payload.paths.length > 0) void fromFolderRef.current(e.payload.paths[0]);
+      })
+      .then((u) => (unlisten = u))
+      .catch(() => {});
+    return () => unlisten?.();
+  }, []);
+
   const newMenu = async () => {
     const blank = templates.find((t) => t.builtIn && t.id === "blank") ?? templates.find((t) => !t.superseded);
     try {
@@ -103,6 +165,11 @@ export default function TemplatesTab({ run }: TabProps) {
       const copies = templates.filter((t) => !t.superseded && !t.replaced && t.id !== "blank");
       const menu = await Menu.new({
         items: [
+          {
+            id: "folder",
+            text: "From a folder you already use…",
+            action: () => void fromFolder(null),
+          },
           {
             id: "empty",
             text: "Start empty",
@@ -142,7 +209,7 @@ export default function TemplatesTab({ run }: TabProps) {
     <>
       <p className={styles.hint}>
         A template decides which folders and starter files a new project gets, and what New Project asks (client,
-        project name, start date…).
+        project name, start date…). Drop a folder you already use here to make a template from it.
       </p>
       <div className={styles.actions}>
         <Button variant="primary" onClick={() => void newMenu()}>
@@ -298,7 +365,10 @@ export default function TemplatesTab({ run }: TabProps) {
       {editing && (
         <TemplateEditor
           {...editing}
-          onClose={() => setEditing(null)}
+          onClose={() => {
+            if (editing.sourceKey.startsWith("folder:")) void closeFolderDraft(editing.sourceKey).catch(() => {});
+            setEditing(null);
+          }}
           onSaved={({ info, binned, binProblem }) => {
             setEditing(null);
             setSelected(info.key);

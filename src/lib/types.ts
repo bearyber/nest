@@ -288,6 +288,24 @@ export interface TemplatePreview {
 /** edit = one of yours (next version); customize = a built-in (yours replaces it); new = new id. */
 export type SaveMode = "edit" | "customize" | "new";
 
+/** Why something in a folder didn't come along into a template (Rust `SkipReason`). */
+export type SkipReason = "clutter" | "cache" | "tooBig" | "link" | "unreadable" | "badName";
+
+export interface Skipped {
+  /** `/`-separated, relative to the folder. */
+  path: string;
+  reason: SkipReason;
+}
+
+/** A template read from a folder (Rust `FolderDraft`). `key` goes to preview / save. */
+export interface FolderDraft {
+  key: string;
+  draft: TemplateDraft;
+  skipped: Skipped[];
+  /** The folder was a Nest project: its answers became blanks. */
+  fromProject: boolean;
+}
+
 /** A saved template and what happened to its previous copy (decision T-A). */
 export interface Saved {
   info: TemplateInfo;

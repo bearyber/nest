@@ -46,6 +46,7 @@ src-tauri/
     devices.rs       Devices: this computer's list, reading other computers' lists, Google Drive detection
     devices_cmd.rs   Devices commands + background sync (launch, every minute, focus, after changes, quit)
     template_edit.rs template editor: preview, save (Rust picks id/version), one copy per template (T-A)
+    template_from_folder.rs  make a template from a folder (read-only walk, skip rules, answers back to blanks)
     settings.rs      settings file
     sizes.rs         folder sizes per subfolder and file type (read-only walk; cached in the index)
     archive.rs       Archive / Unarchive: one rename, same drive only (moves project folders)

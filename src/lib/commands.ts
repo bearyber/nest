@@ -14,6 +14,7 @@ import type {
   SettingsView,
   Sizes,
   DevicesView,
+  FolderDraft,
   SaveMode,
   Saved,
   SyncedFolder,
@@ -118,6 +119,10 @@ export const previewTemplate = (key: string, draft: Template) =>
   s<TemplatePreview>("preview_template", { key, draft });
 export const saveTemplate = (key: string, draft: Template, mode: SaveMode) =>
   s<Saved>("save_template", { key, draft, mode });
+/** Make a template from a folder (`null` = pick one). `null` back if cancelled. */
+export const templateFromFolder = (path: string | null) =>
+  s<FolderDraft | null>("template_from_folder", { path });
+export const closeFolderDraft = (key: string) => s<void>("close_folder_draft", { key });
 export const takeNotice = () => invoke<string | null>("take_notice");
 export const devicesView = () => s<DevicesView>("devices_view");
 export const devicesDetect = () => invoke<SyncedFolder[]>("devices_detect");

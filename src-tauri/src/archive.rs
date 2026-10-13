@@ -263,8 +263,14 @@ mod tests {
         assert_eq!(move_error(&e, false), other_drive(false));
         assert_eq!(move_error(&e, true), other_drive(true));
         assert!(other_drive(false).contains(crate::error::file_manager()));
+        // Windows: a file is open. macOS: really a permission problem.
         let e = io::Error::from(io::ErrorKind::PermissionDenied);
-        assert!(move_error(&e, false).contains("Close it and try again"));
+        let expected = if cfg!(windows) {
+            "Close it and try again"
+        } else {
+            "isn't allowed to move"
+        };
+        assert!(move_error(&e, false).contains(expected));
         let e = io::Error::from(io::ErrorKind::NotFound);
         assert!(move_error(&e, false).contains("Refresh the list"));
         let e = io::Error::other("disk on fire");

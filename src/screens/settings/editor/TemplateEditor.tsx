@@ -27,6 +27,8 @@ interface Props {
   start: Template;
   starterFiles: string[];
   step: EditorStep;
+  /** Shown in the footer instead of the usual hint (e.g. what a folder left out). */
+  note?: string;
   onClose: () => void;
   onSaved: (saved: Saved) => void;
 }
@@ -34,7 +36,16 @@ interface Props {
 /** The template editor (spec §12a #19): a sheet over the Settings window. Name at the top, then
  *  3 steps: Questions, Folder name, Folders. Rust
  *  previews every change with the real planner and does the saving. */
-export default function TemplateEditor({ sourceKey, mode, start, starterFiles, step: firstStep, onClose, onSaved }: Props) {
+export default function TemplateEditor({
+  sourceKey,
+  mode,
+  start,
+  starterFiles,
+  step: firstStep,
+  note,
+  onClose,
+  onSaved,
+}: Props) {
   const [draft, setDraft] = useState<Template>(start);
   const [nodes, setNodes] = useState<FolderNode[]>(() => toNodes(start.tree));
   const [step, setStep] = useState<EditorStep>(firstStep);
@@ -221,7 +232,9 @@ export default function TemplateEditor({ sourceKey, mode, start, starterFiles, s
                 {problems.length === 1 ? problems[0] : `${problems[0]} (and ${problems.length - 1} more)`}
               </span>
             ) : (
-              <span className={styles.hint}>Changes apply to new projects only. Projects you already made are never touched.</span>
+              <span className={styles.hint}>
+                {note ?? "Changes apply to new projects only. Projects you already made are never touched."}
+              </span>
             )}
           </div>
           {confirmClose ? (

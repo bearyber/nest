@@ -411,7 +411,7 @@ Bernard's own template is named "Project". The year is never part of the job cod
     - a date field default of `"today"`.
 
     If a folder name has no `{jobCode}` and a folder with that name already exists, that's an error ("change the name or the date"): bumping the code can't free the name.
-14. **User templates** live in the app config folder's `templates/`, next to the bundled ones, and win on the same id. Bernard's v1.6 template is installed there, not in the repo. It deliberately skips Premiere `.prproj` files and Premiere's auto-save folders until v2.
+14. **User templates** live in the app config folder's `templates/`, next to the bundled ones, and win on the same id. Bernard's v1.6 template is installed there, not in the repo. It deliberately skips Premiere `.prproj` files and Premiere's auto-save folders until v2. *(2026-10-13: a `.prproj` may now come along as a plain copied file, §12a #23.)*
 
 16. **Templates in Settings (M4):**
     - **Import:** `.nesttemplate` (zip) or `.json`; unsafe or invalid packages are refused, and nothing existing is overwritten.
@@ -441,9 +441,16 @@ Bernard's own template is named "Project". The year is never part of the job cod
     - **Personal folder (v0.4.2, 2026-10-08), optional:** Settings → General → "Personal projects go in" picks one of the jobs folders for Personal-space and "No client" projects (default: the same folder as other new projects). New Project's Location switches to it, and its Change… then changes the Personal folder (adding it to the jobs folders if new). Removing that jobs folder resets the choice. Preview and Create use the same root, so the Plan says where the project goes.
     - **Template editor order:** template name and description at the top, then ① Questions ② Folder name ③ Folders. Questions are one line each (label, kind, Required switch, ▸ details, ×); "+ Add a question" lists the kinds with examples. The folder name is built by clicking answers; the list title and "write it as text" are under More options. "New template…" starts empty or from a copy of any template.
 
+23. **Make a template from a folder (Bernard 2026-10-13; was parked 2026-10-02).** Settings → Templates → New template… → "From a folder you already use…", or drop a folder on the Templates tab. Nest asks "Folders and files" or "Folders only", reads the folder (never changes it: locked #4) and opens the editor with it; nothing is saved until Save.
+    - **Left out, and listed:** system and hidden files, editing apps' caches / previews / auto-saves, app libraries macOS shows as one file (`.fcpbundle`, `.app`…), files over 100 MB (footage), links (never followed, checked again at save), unreadable items, Windows device names, names with `{` `}` and `.nest.json` files. Over 2,000 items or 200 MB in files: refused (the template limits).
+    - **Names are cleaned like project names** (NFC, characters Windows refuses removed), so the template can go between Windows and macOS: `Final?.prproj` → `Final.prproj`. Two names that clean to the same name: only the first comes.
+    - **Files come along as they are**, each new project gets its own copy. `.md` / `.txt` files get blanks filled in; everything else (a Premiere `.prproj`, an After Effects `.aep`, LUTs, logos) is copied byte for byte. Nest never edits inside a project file (that stays v2, §12).
+    - **A Nest project folder** (`.project.json`) gets its answers back as blanks, whole words only and 3+ letters: `251013_SUMMER_CAMPAIGN` → `{start|yymmdd}_{name|caps}`, `NIKE-W03_DELIVERY` → `{jobCode}_DELIVERY`. Its questions come from its template if installed, else from the manifest. Other folders get the Blank template's questions and folder name. The manifest itself never comes along.
+    - **Saving** copies only the files the draft still uses, checked again (still a plain file, still under 100 MB), each forced to disk, into a new template folder renamed into place.
+
 ## 12. Out of scope for v1 (do not build)
 
-- Resolve/Premiere/AE project creation
+- Resolve/Premiere/AE project creation (a project file you put in a template is copied untouched, §12a #23; filling blanks inside it is v2)
 - Drop-to-rename, export naming, watch folders
 - ops app or any connection to other services (in v1: on-demand transfer of a project between your own computers, not syncing; Bernard, 2026-10-12)
 - Delivery check, checksums (archive moved to §12a #21 on 2026-10-04)

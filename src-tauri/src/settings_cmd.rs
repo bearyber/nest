@@ -12,7 +12,9 @@ use chrono::{Datelike, Local};
 use serde::Serialize;
 use tauri::{AppHandle, Emitter, Manager, State, WebviewUrl, WebviewWindowBuilder};
 use tauri_plugin_autostart::ManagerExt as _;
-use tauri_plugin_dialog::{DialogExt, MessageDialogButtons, MessageDialogKind};
+use tauri_plugin_dialog::{
+    DialogExt, MessageDialogButtons, MessageDialogKind, MessageDialogResult,
+};
 use tauri_plugin_opener::OpenerExt;
 
 use crate::commands::{lock, reload_templates, AppState};
@@ -22,6 +24,7 @@ use crate::plan::Date;
 use crate::settings::{self, Settings};
 use crate::template::Template;
 use crate::template_edit::{self, Example, SaveMode, TemplateDraft, TemplatePreview};
+use crate::template_from_folder::{self, Keep, Skipped};
 use crate::template_io::{self, TemplateInfo, BUILT_IN_IDS, LIMITS, PACKAGE_EXT};
 use crate::window;
 
@@ -680,12 +683,16 @@ pub fn preview_template(
     key: String,
     draft: Template,
 ) -> AppResult<TemplatePreview> {
+    let ex = example(&state)?;
+    if let Some(folder) = lock(&state.folder_drafts)?.get(&key) {
+        return Ok(template_edit::preview(
+            &draft,
+            &folder.loaded(draft.clone()),
+            &ex,
+        ));
+    }
     let source = find_template(&state, &key)?;
-    Ok(template_edit::preview(
-        &draft,
-        &source.loaded,
-        &example(&state)?,
-    ))
+    Ok(template_edit::preview(&draft, &source.loaded, &ex))
 }
 
 /// Save the editor's draft as one of your templates. `key` is the template the editor started
@@ -698,18 +705,31 @@ pub fn save_template(
     draft: Template,
     mode: SaveMode,
 ) -> AppResult<Saved> {
-    let source = find_template(&state, &key)?;
     let installed = lock(&state.templates)?.clone();
-    let saved = template_edit::save(
-        &draft,
-        mode,
-        &source,
-        &installed,
-        &state.user_templates,
-        BUILT_IN_IDS,
-        &example(&state)?,
-    )
+    let folder = lock(&state.folder_drafts)?.get(&key).cloned();
+    let saved = match &folder {
+        Some(folder) => template_edit::save_from_folder(
+            &draft,
+            folder,
+            &installed,
+            &state.user_templates,
+            BUILT_IN_IDS,
+            &example(&state)?,
+        ),
+        None => template_edit::save(
+            &draft,
+            mode,
+            &find_template(&state, &key)?,
+            &installed,
+            &state.user_templates,
+            BUILT_IN_IDS,
+            &example(&state)?,
+        ),
+    }
     .map_err(AppError::new)?;
+    if folder.is_some() {
+        lock(&state.folder_drafts)?.remove(&key);
+    }
     // Hiding is per template id, and your customized version shares the built-in's id: show it,
     // since you just made it to use it.
     if mode == SaveMode::Customize {
@@ -748,6 +768,100 @@ pub fn save_template(
         binned,
         bin_problem,
     })
+}
+
+/// A template read from a folder, ready for the editor (`key` goes to preview / save).
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct FolderDraft {
+    pub key: String,
+    pub draft: TemplateDraft,
+    /// What was left out, and why.
+    pub skipped: Vec<Skipped>,
+    /// The folder was a Nest project: its answers became blanks.
+    pub from_project: bool,
+}
+
+/// Make a template from a folder: `path` is a folder dropped on the list, or `None` to pick
+/// one. Asks whether files come along, then reads the folder (read-only: it's never changed).
+/// The draft lives in Rust until it's saved or the editor closes; the UI only gets its key.
+/// `None` if a picker or the question was cancelled.
+#[tauri::command(async)]
+pub fn template_from_folder(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    path: Option<String>,
+) -> AppResult<Option<FolderDraft>> {
+    let path = match path {
+        Some(p) => PathBuf::from(p),
+        None => {
+            let picked = app
+                .dialog()
+                .file()
+                .set_title("Make a template from a folder")
+                .blocking_pick_folder();
+            let Some(picked) = picked else {
+                return Ok(None);
+            };
+            picked
+                .into_path()
+                .map_err(|e| AppError::new(e.to_string()))?
+        }
+    };
+    const FILES: &str = "Folders and files";
+    const FOLDERS: &str = "Folders only";
+    let answer = app
+        .dialog()
+        .message(
+            "Files under 100 MB come along as they are: project files (Premiere, After Effects), \
+             LUTs, logos, briefs. Footage, caches and auto-saves stay behind.",
+        )
+        .title("Bring the files too?")
+        .buttons(MessageDialogButtons::YesNoCancelCustom(
+            FILES.into(),
+            FOLDERS.into(),
+            "Cancel".into(),
+        ))
+        .blocking_show_with_result();
+    let keep = match answer {
+        MessageDialogResult::Yes => Keep::FoldersAndFiles,
+        MessageDialogResult::No => Keep::Folders,
+        MessageDialogResult::Custom(label) if label == FILES => Keep::FoldersAndFiles,
+        MessageDialogResult::Custom(label) if label == FOLDERS => Keep::Folders,
+        _ => return Ok(None),
+    };
+    let installed = lock(&state.templates)?.clone();
+    let folder = template_from_folder::read_folder(&path, keep, |id| {
+        installed
+            .iter()
+            .filter(|t| t.loaded.template.id == id)
+            .max_by_key(|t| (!t.built_in, t.loaded.template.version))
+            .map(|t| t.loaded.template.clone())
+    })
+    .map_err(AppError::new)?;
+    let key = format!("folder:{}", uuid::Uuid::new_v4().simple());
+    let out = FolderDraft {
+        key: key.clone(),
+        draft: TemplateDraft {
+            template: folder.template.clone(),
+            built_in: false,
+            replaced: false,
+            starter_files: folder.files.iter().cloned().collect(),
+        },
+        skipped: folder.skipped.clone(),
+        from_project: folder.from_project,
+    };
+    let mut drafts = lock(&state.folder_drafts)?;
+    drafts.clear(); // one editor at a time: an older unsaved one is dropped
+    drafts.insert(key, folder);
+    Ok(Some(out))
+}
+
+/// The editor closed without saving a folder draft: forget it.
+#[tauri::command(async)]
+pub fn close_folder_draft(state: State<'_, AppState>, key: String) -> AppResult<()> {
+    lock(&state.folder_drafts)?.remove(&key);
+    Ok(())
 }
 
 /// A saved template, and what happened to its previous copy (decision T-A).

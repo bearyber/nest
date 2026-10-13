@@ -19,6 +19,7 @@ use crate::plan::{plan_project, ClientValue, Date, FieldValue, Level, PlanContex
 use crate::template::{
     load_dir, FieldKind, LoadedTemplate, Template, TEMPLATE_SCHEMA, TEMPLATE_SUFFIX,
 };
+use crate::template_from_folder::FolderTemplate;
 use crate::template_io::{copy_starters, delete, free_folder, write_new, Installed};
 
 /// What the editor opens.
@@ -214,25 +215,21 @@ pub fn save(
     ex: &Example,
 ) -> Result<LoadedTemplate, String> {
     let source_id = source.loaded.template.id.clone();
-    let yours_max = |id: &str| {
-        installed
-            .iter()
-            .filter(|t| !t.built_in && t.loaded.template.id == id)
-            .map(|t| t.loaded.template.version)
-            .max()
-    };
     let (id, version) = match mode {
         SaveMode::Edit => {
             if source.built_in {
                 return Err("Built-in templates can't be edited. Customize it instead.".into());
             }
-            (source_id.clone(), yours_max(&source_id).unwrap_or(0) + 1)
+            (
+                source_id.clone(),
+                yours_max(installed, &source_id).unwrap_or(0) + 1,
+            )
         }
         SaveMode::Customize => {
             if !source.built_in {
                 return Err("That one is already yours. Edit it instead.".into());
             }
-            if let Some(max) = yours_max(&source_id) {
+            if let Some(max) = yours_max(installed, &source_id) {
                 return Err(format!(
                     "You already have your own version of \"{}\" (version {max}). Edit that one instead.",
                     source.loaded.template.name
@@ -240,23 +237,80 @@ pub fn save(
             }
             (source_id.clone(), source.loaded.template.version + 1)
         }
-        SaveMode::New => {
-            let mut taken: HashSet<String> = installed
-                .iter()
-                .map(|t| t.loaded.template.id.clone())
-                .collect();
-            taken.extend(built_in_ids.iter().map(|s| s.to_string()));
-            (new_id(&draft.name, &taken, user_dir), 1)
-        }
+        SaveMode::New => (new_template_id(draft, installed, user_dir, built_in_ids), 1),
     };
+    write_template(
+        draft,
+        &id,
+        version,
+        &source.loaded,
+        installed,
+        user_dir,
+        ex,
+        |tmp| copy_starters(&source.loaded.dir, tmp),
+    )
+}
 
+/// Save a draft made from a folder on disk as a new template of yours. Only the folder's files
+/// the draft still uses are copied, each checked again (see `FolderTemplate::copy_files`).
+pub fn save_from_folder(
+    draft: &Template,
+    folder: &FolderTemplate,
+    installed: &[Installed],
+    user_dir: &Path,
+    built_in_ids: &[&str],
+    ex: &Example,
+) -> Result<LoadedTemplate, String> {
+    let id = new_template_id(draft, installed, user_dir, built_in_ids);
+    let source = folder.loaded(draft.clone());
+    write_template(draft, &id, 1, &source, installed, user_dir, ex, |tmp| {
+        folder.copy_files(draft, tmp)
+    })
+}
+
+fn yours_max(installed: &[Installed], id: &str) -> Option<u32> {
+    installed
+        .iter()
+        .filter(|t| !t.built_in && t.loaded.template.id == id)
+        .map(|t| t.loaded.template.version)
+        .max()
+}
+
+fn new_template_id(
+    draft: &Template,
+    installed: &[Installed],
+    user_dir: &Path,
+    built_in_ids: &[&str],
+) -> String {
+    let mut taken: HashSet<String> = installed
+        .iter()
+        .map(|t| t.loaded.template.id.clone())
+        .collect();
+    taken.extend(built_in_ids.iter().map(|s| s.to_string()));
+    new_id(&draft.name, &taken, user_dir)
+}
+
+/// Check `draft` with the real planner against `source`'s files, then write it as a new folder
+/// in `user_dir`: built in a hidden temporary folder (`copy` adds the starter files), loaded
+/// back to be sure, and renamed into place. Nothing existing is overwritten.
+#[allow(clippy::too_many_arguments)]
+fn write_template(
+    draft: &Template,
+    id: &str,
+    version: u32,
+    source: &LoadedTemplate,
+    installed: &[Installed],
+    user_dir: &Path,
+    ex: &Example,
+    copy: impl FnOnce(&Path) -> Result<(), String>,
+) -> Result<LoadedTemplate, String> {
     let mut t = draft.clone();
     t.schema = TEMPLATE_SCHEMA;
-    t.id = id.clone();
+    t.id = id.to_string();
     t.version = version;
     t.name = t.name.trim().to_string();
     t.description = t.description.trim().to_string();
-    let check = preview(&t, &source.loaded, ex);
+    let check = preview(&t, source, ex);
     if !check.problems.is_empty() {
         return Err(format!(
             "This template can't be saved yet:\n- {}",
@@ -269,14 +323,14 @@ pub fn save(
     let tmp = user_dir.join(format!(".edit-{}", uuid::Uuid::new_v4().simple()));
     let result = (|| -> Result<LoadedTemplate, String> {
         fs::create_dir(&tmp).map_err(|e| format!("Couldn't save the template: {e}"))?;
-        copy_starters(&source.loaded.dir, &tmp)?;
+        copy(&tmp)?;
         let text = serde_json::to_string_pretty(&t).map_err(|e| e.to_string())? + "\n";
         write_new(&tmp.join(format!("{id}{TEMPLATE_SUFFIX}")), text.as_bytes())?;
         load_dir(&tmp).map_err(|e| e.to_string())?;
-        let base = if yours_max(&id).is_some() {
+        let base = if yours_max(installed, id).is_some() {
             format!("{id}-v{version}")
         } else {
-            id.clone()
+            id.to_string()
         };
         let folder = free_folder(user_dir, &base);
         fs::rename(&tmp, &folder).map_err(|e| format!("Couldn't save the template: {e}"))?;
