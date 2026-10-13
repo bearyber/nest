@@ -122,6 +122,22 @@
   text-align: left;
 }
 
+/* Templates and Settings, at the bottom of the sidebar. */
+.bottom {
+  display: grid;
+  margin-top: auto;
+}
+
+.bottom .settings {
+  margin-top: 0;
+}
+
+.settingsOn,
+.settingsOn:hover {
+  background: var(--accent-soft);
+  color: var(--text);
+}
+
 .settings:hover {
   background: var(--control-hover);
   color: var(--text);

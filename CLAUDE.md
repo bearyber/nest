@@ -29,6 +29,7 @@ Private notes (how we work, releasing, TODO, SHIPLOG, plans) live in `private/`,
 src/                 React UI
   components/        presentational pieces
   screens/           Main, NewProjectSheet, Settings, FirstRun
+    templates/       Templates view (main window) + the one-screen template editor
   lib/               typed wrappers around Tauri commands (invoke)
   styles/tokens.css  design tokens (build spec section 8)
 src-tauri/
@@ -49,6 +50,7 @@ src-tauri/
     template_from_folder.rs  make a template from a folder (read-only walk, skip rules, answers back to blanks)
     settings.rs      settings file
     sizes.rs         folder sizes per subfolder and file type (read-only walk; cached in the index)
+    staged.rs        files waiting to go into a template (checked again and copied on save)
     archive.rs       Archive / Unarchive: one rename, same drive only (moves project folders)
     error.rs         AppError (user-facing message)
     menu.rs          macOS menu bar (Windows has none: shortcuts + context menus)

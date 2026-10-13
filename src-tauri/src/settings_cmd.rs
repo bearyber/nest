@@ -672,6 +672,20 @@ fn today() -> Date {
     }
 }
 
+/// Templates live in the main window: bring it forward on its Templates view (from Settings).
+#[tauri::command(async)]
+pub fn open_templates(app: AppHandle) -> AppResult<()> {
+    let main = app
+        .get_webview_window("main")
+        .ok_or_else(|| AppError::new("Nest's main window isn't open"))?;
+    let _ = main.unminimize();
+    main.show()
+        .and_then(|_| main.set_focus())
+        .map_err(|e| AppError::new(format!("Couldn't show the main window: {e}")))?;
+    main.emit_to("main", "open-templates", ())
+        .map_err(|e| AppError::new(e.to_string()))
+}
+
 /// Open a template in the editor.
 #[tauri::command(async)]
 pub fn template_draft(state: State<'_, AppState>, key: String) -> AppResult<TemplateDraft> {

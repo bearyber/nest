@@ -28,12 +28,14 @@ function parentOf(path: string): string {
 }
 
 interface Props {
+  /** Start with this template (e.g. "New project from this" in Templates). */
+  initialTemplate?: string;
   onClose: () => void;
   onCreated: (created: Created) => void;
 }
 
 /** New Project sheet (build spec §3.2). Every preview comes from Rust's Plan. */
-export default function NewProjectSheet({ onClose, onCreated }: Props) {
+export default function NewProjectSheet({ initialTemplate, onClose, onCreated }: Props) {
   const [ctx, setCtx] = useState<NewProjectContext | null>(null);
   const [templateId, setTemplateId] = useState("");
   const [values, setValues] = useState<Values>({});
@@ -61,12 +63,13 @@ export default function NewProjectSheet({ onClose, onCreated }: Props) {
       .then((c) => {
         setCtx(c);
         setSpace(c.defaultSpace);
+        const asked = c.templates.find((t) => t.id === initialTemplate);
         const last = c.templates.find((t) => t.id === c.lastTemplate);
-        const first = last ?? c.templates[0];
+        const first = asked ?? last ?? c.templates[0];
         if (first) chooseTemplate(first.id, c);
       })
       .catch((e) => setError(errorMessage(e)));
-  }, [chooseTemplate]);
+  }, [chooseTemplate, initialTemplate]);
 
   // Settings changed while the sheet is open (e.g. a new Personal folder): reload what it shows.
   useEffect(() => {

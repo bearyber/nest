@@ -55,6 +55,7 @@ import {
   type UpdateInfo,
 } from "../lib/types";
 import NewProjectSheet from "./NewProjectSheet";
+import Templates from "./templates/Templates";
 import styles from "./Main.module.css";
 
 /** Rescan when the window regains focus after this long (build spec §7). */
@@ -93,6 +94,10 @@ export default function Main() {
   );
   const [showInspector, setShowInspector] = useState(true);
   const [sheetOpen, setSheetOpen] = useState(false);
+  /** The list of projects, or your templates (sidebar → Templates). */
+  const [view, setView] = useState<"projects" | "templates">("projects");
+  /** New Project opened from a template ("New project from this"). */
+  const [sheetTemplate, setSheetTemplate] = useState<string | undefined>(undefined);
   const [toast, setToast] = useState<ToastData | null>(null);
   const searchRef = useRef<HTMLInputElement>(null);
   const scanningRef = useRef(false);
@@ -159,6 +164,11 @@ export default function Main() {
     })
       .then((u) => (unlisten = u))
       .catch(() => {});
+    // Settings → Templates → Open templates.
+    let unlistenTemplates: (() => void) | undefined;
+    listen("open-templates", () => setView("templates"))
+      .then((u) => (unlistenTemplates = u))
+      .catch(() => {});
     // Devices: another computer's list changed (or this one's was saved): reload the list.
     let unlistenDevices: (() => void) | undefined;
     listen("devices-changed", () => void refresh())
@@ -178,6 +188,7 @@ export default function Main() {
     return () => {
       unlisten?.();
       unlistenDevices?.();
+      unlistenTemplates?.();
       unlistenNotice?.();
     };
   }, [refresh, rescan]);
@@ -509,7 +520,8 @@ export default function Main() {
         if (!menuOwned) toggleSidebar();
         return;
       }
-      if (typing) return;
+      // The list's keys don't apply while Templates is showing.
+      if (typing || view === "templates") return;
       if (e.key === "Escape" && inSearch) {
         setFilters((f) => ({ ...f, query: "" }));
         searchRef.current?.blur();
@@ -526,7 +538,7 @@ export default function Main() {
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [sheetOpen, rescan, moveSelection, selectedRow, open, fail, toggleSidebar]);
+  }, [sheetOpen, rescan, moveSelection, selectedRow, open, fail, toggleSidebar, view]);
 
   const closeSheet = useCallback(() => setSheetOpen(false), []);
   const dismissToast = useCallback(() => setToast(null), []);
@@ -563,7 +575,20 @@ export default function Main() {
   const heading = filters.space ?? "All projects";
   const statusLabel = { active: "Active", done: "Done", all: "All statuses", archived: "Archived" }[filters.status];
 
-  const columns = [showSidebar ? "200px" : "", "minmax(0, 1fr)", showInspector ? "280px" : ""]
+  /** Templates' commands: errors and "done" notes show as toasts. */
+  const runTemplates = async <T,>(p: Promise<T>, ok?: string): Promise<T | undefined> => {
+    try {
+      const result = await p;
+      if (ok && result !== null) setToast({ message: ok });
+      return result;
+    } catch (e) {
+      fail(e);
+      return undefined;
+    }
+  };
+  const inspector = showInspector && view === "projects";
+
+  const columns = [showSidebar ? "200px" : "", "minmax(0, 1fr)", inspector ? "280px" : ""]
     .filter(Boolean)
     .join(" ");
 
@@ -577,17 +602,54 @@ export default function Main() {
           space={filters.space}
           status={filters.status}
           statusCounts={statusCounts}
-          onSpace={(space) => setFilters((f) => ({ ...f, space }))}
-          onStatus={(status) => setFilters((f) => ({ ...f, status }))}
+          onSpace={(space) => {
+            setView("projects");
+            setFilters((f) => ({ ...f, space }));
+          }}
+          onStatus={(status) => {
+            setView("projects");
+            setFilters((f) => ({ ...f, status }));
+          }}
           onSettings={() => void openSettings().catch(fail)}
+          onTemplates={() => setView((v) => (v === "templates" ? "projects" : "templates"))}
+          templatesOpen={view === "templates"}
           computers={computers}
           computer={computerGone ? null : (filters.computer ?? null)}
-          onComputer={(computer) => setFilters((f) => ({ ...f, computer }))}
+          onComputer={(computer) => {
+            setView("projects");
+            setFilters((f) => ({ ...f, computer }));
+          }}
           hereCount={hereCount}
           allCount={allCount}
         />
       )}
 
+      {view === "templates" ? (
+        <main className={styles.list}>
+          <header className={styles.toolbar}>
+            {!showSidebar && (
+              <IconButton
+                icon="sidebar"
+                label={`Show sidebar (${isMac() ? "⌘B" : "Ctrl+B"})`}
+                onClick={toggleSidebar}
+              />
+            )}
+            <div className={styles.heading}>
+              <h1>Templates</h1>
+              <span>What a new project gets</span>
+            </div>
+          </header>
+          <div className={`${styles.fill} ${styles.templates}`}>
+            <Templates
+              run={runTemplates}
+              onNewProject={(id) => {
+                setSheetTemplate(id);
+                setSheetOpen(true);
+              }}
+            />
+          </div>
+        </main>
+      ) : (
       <main className={styles.list}>
         <header className={styles.toolbar}>
           {/* While the sidebar is hidden, its button waits here (it lives in the sidebar otherwise). */}
@@ -695,8 +757,9 @@ export default function Main() {
           )}
         </footer>
       </main>
+      )}
 
-      {showInspector && (
+      {inspector && (
         <Inspector
           project={selectedRow}
           onOpen={() => selectedRow && void open(selectedRow)}
@@ -720,7 +783,20 @@ export default function Main() {
         />
       )}
 
-      {sheetOpen && <NewProjectSheet onClose={closeSheet} onCreated={onCreated} />}
+      {sheetOpen && (
+        <NewProjectSheet
+          initialTemplate={sheetTemplate}
+          onClose={() => {
+            setSheetTemplate(undefined);
+            closeSheet();
+          }}
+          onCreated={(c) => {
+            setSheetTemplate(undefined);
+            setView("projects");
+            onCreated(c);
+          }}
+        />
+      )}
       {toast && <Toast toast={toast} onDismiss={dismissToast} />}
     </div>
   );

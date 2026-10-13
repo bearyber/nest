@@ -156,6 +156,7 @@ pub fn run() {
             settings_cmd::save_template,
             settings_cmd::template_from_folder,
             settings_cmd::editor_open,
+            settings_cmd::open_templates,
             settings_cmd::editor_add_files,
             settings_cmd::editor_close,
             settings_cmd::set_template_hidden,

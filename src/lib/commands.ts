@@ -130,6 +130,8 @@ export const editorOpen = (key: string) => s<EditorOpened>("editor_open", { key 
 export const editorAddFiles = (key: string, into: string, paths: string[] | null) =>
   s<AddedFiles | null>("editor_add_files", { key, into, paths });
 export const editorClose = (key: string) => s<void>("editor_close", { key });
+/** Show the main window's Templates view (from Settings). */
+export const openTemplates = () => s<void>("open_templates");
 export const takeNotice = () => invoke<string | null>("take_notice");
 export const devicesView = () => s<DevicesView>("devices_view");
 export const devicesDetect = () => invoke<SyncedFolder[]>("devices_detect");

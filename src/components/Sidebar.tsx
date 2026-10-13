@@ -17,6 +17,9 @@ interface Props {
   onSpace: (space: string | null) => void;
   onStatus: (status: StatusFilter) => void;
   onSettings: () => void;
+  /** The Templates view in the main window, and whether it's showing. */
+  onTemplates?: () => void;
+  templatesOpen?: boolean;
   /** Devices: your other computers (none = the section is hidden). */
   computers?: Computer[];
   /** null = all computers, "" = this computer, or another computer's name. */
@@ -54,6 +57,8 @@ export default function Sidebar({
   onSpace,
   onStatus,
   onSettings,
+  onTemplates,
+  templatesOpen = false,
   computers = [],
   computer = null,
   onComputer,
@@ -131,10 +136,23 @@ export default function Sidebar({
           )}
         </Section>
       )}
-      <button type="button" className={styles.settings} onClick={onSettings}>
-        <Icon name="gear" />
-        Settings
-      </button>
+      <div className={styles.bottom}>
+        {onTemplates && (
+          <button
+            type="button"
+            className={`${styles.settings} ${templatesOpen ? styles.settingsOn : ""}`}
+            aria-current={templatesOpen ? "page" : undefined}
+            onClick={onTemplates}
+          >
+            <Icon name="folder" />
+            Templates
+          </button>
+        )}
+        <button type="button" className={styles.settings} onClick={onSettings}>
+          <Icon name="gear" />
+          Settings
+        </button>
+      </div>
     </nav>
   );
 }

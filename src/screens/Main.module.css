@@ -199,3 +199,12 @@
     animation: none;
   }
 }
+
+/* Sidebar → Templates: the list and details, scrolling inside the main area. */
+.templates {
+  display: grid;
+  align-content: start;
+  gap: var(--space-3);
+  padding: var(--space-4);
+  overflow-y: auto;
+}

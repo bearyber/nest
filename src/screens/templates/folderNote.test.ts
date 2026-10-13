@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { folderNote } from "./TemplatesTab";
+import { folderNote } from "./Templates";
 
 describe("folderNote", () => {
   it("counts what was left out in plain words, without system files", () => {
