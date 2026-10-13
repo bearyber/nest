@@ -56,8 +56,9 @@ pub struct AppState {
     pub devices: crate::devices_cmd::Devices,
     /// One project status change at a time (a click here, or a request from another computer).
     pub status_lock: Mutex<()>,
-    /// Templates being made from a folder, until saved or closed (key `folder:<uuid>`).
-    pub folder_drafts: Mutex<HashMap<String, crate::template_from_folder::FolderTemplate>>,
+    /// The open template editor (key `editor:<uuid>`): where its draft came from and the files
+    /// waiting to come along. Dropped on save or close.
+    pub editor_sessions: Mutex<HashMap<String, crate::template_edit::EditorSession>>,
 }
 
 /// Clears an in-progress flag however the command exits.

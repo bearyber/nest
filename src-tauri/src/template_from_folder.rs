@@ -7,9 +7,8 @@
 //! A folder holding a Nest project (`.project.json`) gets its answers turned back into blanks:
 //! `251013_SUMMER_CAMPAIGN` becomes `{start|yymmdd}_{name|caps}`.
 
-use std::collections::{BTreeMap, BTreeSet, HashSet};
-use std::fs::{self, File, OpenOptions};
-use std::io;
+use std::collections::HashSet;
+use std::fs;
 use std::path::{Path, PathBuf};
 
 use serde::{Deserialize, Serialize};
@@ -18,13 +17,14 @@ use unicode_normalization::UnicodeNormalization;
 
 use crate::manifest::read_json_object;
 use crate::names::{sanitize_segment, Transform};
+pub use crate::staged::MAX_FILE_BYTES;
+use crate::staged::{OnDisk, Staged};
 use crate::template::{
-    Field, FieldKind, LoadedTemplate, Template, TreeEntry, TEMPLATE_SCHEMA, TEMPLATE_SUFFIX, TODAY,
+    Field, FieldKind, FileEntry, LoadedTemplate, Template, TreeEntry, TEMPLATE_SCHEMA,
+    TEMPLATE_SUFFIX, TODAY,
 };
 use crate::template_io::LIMITS;
 
-/// Files bigger than this stay behind: footage, renders and audio don't belong in a template.
-pub const MAX_FILE_BYTES: u64 = 100 * 1024 * 1024;
 /// Deeper than this is almost certainly not a project folder.
 const MAX_DEPTH: usize = 32;
 /// Text files whose blanks get filled in on create (like NOTES.md), up to 1 MB.
@@ -93,11 +93,9 @@ pub struct FolderTemplate {
     pub template: Template,
     /// The folder it was read from.
     pub dir: PathBuf,
-    /// Files that come along, by their name in the template (`/`-separated, cleaned like an
-    /// imported template's: NFC, valid on Windows and macOS).
-    pub files: BTreeSet<String>,
-    /// Template name → the file's path in `dir` as it is on disk (e.g. NFD on a Mac).
-    on_disk: BTreeMap<String, String>,
+    /// The files that come along, by their name in the template (cleaned like an imported
+    /// template's: NFC, valid on Windows and macOS).
+    pub staged: Staged,
     pub skipped: Vec<Skipped>,
     /// The folder held a Nest project, and its answers became blanks.
     pub from_project: bool,
@@ -113,64 +111,56 @@ impl FolderTemplate {
                 ..draft
             },
             dir: self.dir.clone(),
-            files: self.files.clone(),
+            files: self.staged.names(),
         }
     }
+}
 
-    /// Copy the files `draft` uses into `dst` (a fresh folder of ours), under their template
-    /// names. Refuses a draft that uses anything but this folder's files. Each file is opened
-    /// first and the open file is checked (a plain file, under 100 MB), no folder on its way is
-    /// a link, and at most 100 MB is read from it. Nothing existing is overwritten, and each
-    /// copy is forced to disk before the template folder is renamed into place.
-    pub fn copy_files(&self, draft: &Template, dst: &Path) -> Result<(), String> {
-        let mut used = BTreeSet::new();
-        for f in &draft.files {
-            if !self.files.contains(&f.from) {
-                return Err(format!(
-                    "\"{}\" isn't one of the files from the folder. Make the template from the folder again.",
-                    f.from
-                ));
-            }
-            used.insert(f.from.as_str());
+/// Files and folders dropped into the editor (or picked with Add files…), read like a project
+/// folder: `folders` and file names are relative to where they were dropped.
+#[derive(Debug, Clone, Default)]
+pub struct Dropped {
+    pub folders: Vec<String>,
+    /// Name relative to the drop → where it is on disk.
+    pub files: Vec<(String, OnDisk)>,
+    pub skipped: Vec<Skipped>,
+}
+
+/// Read files and folders dropped into the editor. `items` and `bytes` are what the template
+/// already holds, so the template limits (2,000 items, 200 MB) count the whole template.
+pub fn read_dropped(paths: &[PathBuf], items: usize, bytes: u64) -> Result<Dropped, String> {
+    let mut walk = Walk {
+        keep: Keep::FoldersAndFiles,
+        folders: vec![],
+        files: vec![],
+        skipped: vec![],
+        bytes,
+        seen: 0,
+        already: items,
+    };
+    let mut out = Dropped::default();
+    let mut taken = HashSet::new();
+    for path in paths {
+        let (Some(base), Some(raw)) = (path.parent(), path.file_name().and_then(|n| n.to_str()))
+        else {
+            continue;
+        };
+        let first = walk.files.len();
+        walk.entry(path, raw, &mut vec![], 0, &mut taken)?;
+        for f in walk.files.drain(first..) {
+            out.files.push((
+                f.name,
+                OnDisk {
+                    base: base.to_path_buf(),
+                    rel: f.disk,
+                    size: f.size,
+                },
+            ));
         }
-        let mut total = 0u64;
-        for name in used {
-            let disk = self.on_disk.get(name).map(String::as_str).unwrap_or(name);
-            let changed = || format!("\"{name}\" changed since the folder was read. Try again.");
-            let mut src = self.dir.clone();
-            for seg in disk.split('/') {
-                src.push(seg);
-                let link = fs::symlink_metadata(&src).map_err(|_| changed())?;
-                if link.file_type().is_symlink() {
-                    return Err(changed());
-                }
-            }
-            let input = File::open(&src).map_err(|_| changed())?;
-            let meta = input.metadata().map_err(|_| changed())?;
-            if !meta.is_file() || meta.len() > MAX_FILE_BYTES {
-                return Err(changed());
-            }
-            let out_path = name.split('/').fold(dst.to_path_buf(), |p, s| p.join(s));
-            if let Some(parent) = out_path.parent() {
-                fs::create_dir_all(parent).map_err(|e| e.to_string())?;
-            }
-            let copy = || -> io::Result<u64> {
-                let mut out = OpenOptions::new()
-                    .write(true)
-                    .create_new(true)
-                    .open(&out_path)?;
-                let n = io::copy(&mut io::Read::take(input, MAX_FILE_BYTES + 1), &mut out)?;
-                out.sync_all()?;
-                Ok(n)
-            };
-            let n = copy().map_err(|e| format!("Couldn't copy \"{name}\": {e}"))?;
-            total += n;
-            if n > MAX_FILE_BYTES || total > LIMITS.max_bytes {
-                return Err(changed());
-            }
-        }
-        Ok(())
     }
+    out.folders = walk.folders;
+    out.skipped = walk.skipped;
+    Ok(out)
 }
 
 /// Read `dir` into a draft template. `installed` finds an installed template by id (for a Nest
@@ -191,6 +181,7 @@ pub fn read_folder(
         skipped: vec![],
         bytes: 0,
         seen: 0,
+        already: 0,
     };
     walk.dir(dir, &mut vec![], 0)?;
 
@@ -259,18 +250,28 @@ pub fn read_folder(
         files: walk
             .files
             .iter()
-            .map(|f| crate::template::FileEntry {
+            .map(|f| FileEntry {
                 from: f.name.clone(),
                 to: rename(&f.name),
                 fill: fills(&f.name, f.size),
             })
             .collect(),
     };
+    let mut staged = Staged::default();
+    for f in walk.files {
+        staged.insert(
+            f.name,
+            OnDisk {
+                base: dir.to_path_buf(),
+                rel: f.disk,
+                size: f.size,
+            },
+        );
+    }
     Ok(FolderTemplate {
         template,
         dir: dir.to_path_buf(),
-        files: walk.files.iter().map(|f| f.name.clone()).collect(),
-        on_disk: walk.files.into_iter().map(|f| (f.name, f.disk)).collect(),
+        staged,
         skipped: walk.skipped,
         from_project: project.is_some(),
     })
@@ -300,6 +301,8 @@ struct Walk {
     bytes: u64,
     /// Everything looked at, skipped or not: bounds a walk through a huge folder.
     seen: usize,
+    /// Folders and files the template already has (the limit counts the whole template).
+    already: usize,
 }
 
 /// Looked at (including what's skipped) before giving up on a folder as too big to be a project.
@@ -358,66 +361,80 @@ impl Walk {
             if kind.is_file() && self.keep == Keep::Folders {
                 continue;
             }
-            let Ok(meta) = fs::symlink_metadata(e.path()) else {
-                self.skip(rel, Some(name), SkipReason::Unreadable);
-                continue;
-            };
-            let lower = name.to_lowercase();
-            if meta.file_type().is_symlink() {
-                self.skip(rel, Some(name), SkipReason::Link);
-                continue;
+            self.entry(&e.path(), name, rel, depth, &mut taken)?;
+        }
+        Ok(())
+    }
+
+    /// One file or folder: skipped with a reason, or taken (a folder is walked into).
+    /// `taken` holds the cleaned names already used at this level.
+    fn entry(
+        &mut self,
+        path: &Path,
+        name: &str,
+        rel: &mut Vec<Seg>,
+        depth: usize,
+        taken: &mut HashSet<String>,
+    ) -> Result<(), String> {
+        let Ok(meta) = fs::symlink_metadata(path) else {
+            self.skip(rel, Some(name), SkipReason::Unreadable);
+            return Ok(());
+        };
+        let lower = name.to_lowercase();
+        if meta.file_type().is_symlink() {
+            self.skip(rel, Some(name), SkipReason::Link);
+            return Ok(());
+        }
+        if name.starts_with('.') || is_hidden(&meta) || CLUTTER.contains(&lower.as_str()) {
+            self.skip(rel, Some(name), SkipReason::Clutter);
+            return Ok(());
+        }
+        if meta.is_dir() && (CACHES.contains(&lower.as_str()) || is_package(&lower)) {
+            self.skip(rel, Some(name), SkipReason::Cache);
+            return Ok(());
+        }
+        if !meta.is_dir() && !meta.is_file() {
+            return Ok(());
+        }
+        let clean = clean_name(name)
+            .filter(|c| !c.to_lowercase().ends_with(TEMPLATE_SUFFIX) || meta.is_dir())
+            .filter(|c| taken.insert(c.to_lowercase()));
+        let Some(clean) = clean else {
+            self.skip(rel, Some(name), SkipReason::BadName);
+            return Ok(());
+        };
+        let seg = Seg {
+            disk: name.to_string(),
+            name: clean,
+        };
+        if meta.is_dir() {
+            if depth + 1 >= MAX_DEPTH {
+                return Err(format!(
+                    "That folder goes more than {MAX_DEPTH} folders deep. Choose the project folder itself."
+                ));
             }
-            if name.starts_with('.') || is_hidden(&meta) || CLUTTER.contains(&lower.as_str()) {
-                self.skip(rel, Some(name), SkipReason::Clutter);
-                continue;
-            }
-            if meta.is_dir() && (CACHES.contains(&lower.as_str()) || is_package(&lower)) {
-                self.skip(rel, Some(name), SkipReason::Cache);
-                continue;
-            }
-            if !meta.is_dir() && !meta.is_file() {
-                continue;
-            }
-            let clean = clean_name(name)
-                .filter(|c| !c.to_lowercase().ends_with(TEMPLATE_SUFFIX) || meta.is_dir())
-                .filter(|c| taken.insert(c.to_lowercase()));
-            let Some(clean) = clean else {
-                self.skip(rel, Some(name), SkipReason::BadName);
-                continue;
-            };
-            let seg = Seg {
-                disk: name.to_string(),
-                name: clean,
-            };
-            if meta.is_dir() {
-                if depth + 1 >= MAX_DEPTH {
-                    return Err(format!(
-                        "That folder goes more than {MAX_DEPTH} folders deep. Choose the project folder itself."
-                    ));
-                }
-                rel.push(seg);
-                self.folders.push(join(rel, |s| &s.name));
-                self.count()?;
-                self.dir(&e.path(), rel, depth + 1)?;
-                rel.pop();
-            } else if meta.len() > MAX_FILE_BYTES {
-                self.skip(rel, Some(name), SkipReason::TooBig);
-            } else {
-                rel.push(seg);
-                self.files.push(Found {
-                    name: join(rel, |s| &s.name),
-                    disk: join(rel, |s| &s.disk),
-                    size: meta.len(),
-                });
-                rel.pop();
-                self.bytes += meta.len();
-                self.count()?;
-                if self.bytes > LIMITS.max_bytes {
-                    return Err(format!(
-                        "The files in that folder add up to more than {} MB, the most a template can hold. Try \"Folders only\", or a smaller folder.",
-                        LIMITS.max_bytes / 1024 / 1024
-                    ));
-                }
+            rel.push(seg);
+            self.folders.push(join(rel, |s| &s.name));
+            self.count()?;
+            self.dir(path, rel, depth + 1)?;
+            rel.pop();
+        } else if meta.len() > MAX_FILE_BYTES {
+            self.skip(rel, Some(name), SkipReason::TooBig);
+        } else {
+            rel.push(seg);
+            self.files.push(Found {
+                name: join(rel, |s| &s.name),
+                disk: join(rel, |s| &s.disk),
+                size: meta.len(),
+            });
+            rel.pop();
+            self.bytes += meta.len();
+            self.count()?;
+            if self.bytes > LIMITS.max_bytes {
+                return Err(format!(
+                    "The files add up to more than {} MB, the most a template can hold. Try \"Folders only\", or fewer files.",
+                    LIMITS.max_bytes / 1024 / 1024
+                ));
             }
         }
         Ok(())
@@ -425,7 +442,7 @@ impl Walk {
 
     /// Stops the walk early (e.g. a whole drive was picked) once over the item limit.
     fn count(&self) -> Result<(), String> {
-        if self.folders.len() + self.files.len() > LIMITS.max_files {
+        if self.already + self.folders.len() + self.files.len() > LIMITS.max_files {
             return Err(format!(
                 "That folder holds more than {} folders and files, the most a template can hold. Choose the project folder itself.",
                 LIMITS.max_files
@@ -482,7 +499,8 @@ fn is_hidden(_: &fs::Metadata) -> bool {
     false // dot names, checked by the caller
 }
 
-fn fills(path: &str, size: u64) -> bool {
+/// Text files whose blanks get filled in on create.
+pub(crate) fn fills(path: &str, size: u64) -> bool {
     let ext = path.rsplit_once('.').map(|(_, e)| e.to_lowercase());
     size <= FILL_MAX_BYTES && ext.is_some_and(|e| FILL_EXTENSIONS.contains(&e.as_str()))
 }
@@ -696,7 +714,8 @@ mod tests {
             folders(&r.template),
             ["01_BRIEF", "02_FOOTAGE", "02_FOOTAGE/A_CAM", "03_PROJECT"]
         );
-        let files: Vec<_> = r.files.iter().map(String::as_str).collect();
+        let names = r.staged.names();
+        let files: Vec<_> = names.iter().map(String::as_str).collect();
         assert_eq!(files, ["01_BRIEF/notes.md", "03_PROJECT/edit.prproj"]);
         // Text files get their blanks filled in; the Premiere project is copied as it is.
         let fill: Vec<_> = r
@@ -736,7 +755,7 @@ mod tests {
         file(tmp.path(), "A/brief.md", b"hi");
         let r = read_folder(tmp.path(), Keep::Folders, none).unwrap();
         assert_eq!(folders(&r.template), ["A", "A/B"]);
-        assert!(r.files.is_empty() && r.template.files.is_empty() && r.skipped.is_empty());
+        assert!(r.staged.is_empty() && r.template.files.is_empty() && r.skipped.is_empty());
     }
 
     #[test]
@@ -786,7 +805,7 @@ mod tests {
         mk(tmp.path(), "{old}/inside");
         file(tmp.path(), "a{b}.txt", b"x");
         let r = read_folder(tmp.path(), Keep::FoldersAndFiles, none).unwrap();
-        assert!(r.template.tree.is_empty() && r.files.is_empty());
+        assert!(r.template.tree.is_empty() && r.staged.is_empty());
         assert_eq!(r.skipped.len(), 2);
         assert!(r.skipped.iter().all(|s| s.reason == SkipReason::BadName));
     }
@@ -895,7 +914,7 @@ mod tests {
         assert_eq!(f.from, "ACME-W07_EXPORTS/SUMMER_CAMPAIGN_v1.prproj");
         assert_eq!(f.to, "{jobCode}_EXPORTS/{name|caps}_v1.prproj");
         // The manifest is read, never copied or listed.
-        assert!(!r.files.iter().any(|f| f.contains("project.json")));
+        assert!(!r.staged.names().iter().any(|f| f.contains("project.json")));
         assert!(r.skipped.is_empty());
     }
 
@@ -977,7 +996,8 @@ mod tests {
         file(tmp.path(), "old.nest.json", b"{}"); // would break the template folder
         mk(tmp.path(), "Selects.");
         let r = read_folder(tmp.path(), Keep::FoldersAndFiles, none).unwrap();
-        let files: Vec<_> = r.files.iter().map(String::as_str).collect();
+        let names = r.staged.names();
+        let files: Vec<_> = names.iter().map(String::as_str).collect();
         assert_eq!(files, ["Edit v2.aep", "Final.prproj"]);
         assert_eq!(folders(&r.template), ["Selects"]);
         let bad: Vec<_> = r
@@ -996,7 +1016,7 @@ mod tests {
         file(tmp.path(), "Edit.txt", b"x");
         file(tmp.path(), "Edit?.txt", b"x");
         let r = read_folder(tmp.path(), Keep::FoldersAndFiles, none).unwrap();
-        assert_eq!(r.files.len(), 1);
+        assert_eq!(r.staged.len(), 1);
         assert_eq!(r.skipped[0].reason, SkipReason::BadName);
     }
 
@@ -1007,9 +1027,11 @@ mod tests {
         file(tmp.path(), &format!("A/{nfd}"), b"hi");
         let r = read_folder(tmp.path(), Keep::FoldersAndFiles, none).unwrap();
         assert_eq!(r.template.files[0].from, "A/촬영노트.md");
-        assert!(r.files.contains("A/촬영노트.md"));
+        assert!(r.staged.contains("A/촬영노트.md"));
         let out = tempfile::tempdir().unwrap();
-        r.copy_files(&r.template, out.path()).unwrap();
+        r.staged
+            .copy_used(&r.template, &Default::default(), out.path())
+            .unwrap();
         let copied: Vec<_> = fs::read_dir(out.path().join("A"))
             .unwrap()
             .map(|e| e.unwrap().file_name().to_string_lossy().into_owned())
@@ -1036,8 +1058,11 @@ mod tests {
         let mut draft = r.template.clone();
         draft.files[0].from = "../../etc/passwd".into();
         let out = tempfile::tempdir().unwrap();
-        let e = r.copy_files(&draft, out.path()).unwrap_err();
-        assert!(e.contains("isn't one of the files"), "{e}");
+        let e = r
+            .staged
+            .copy_used(&draft, &Default::default(), out.path())
+            .unwrap_err();
+        assert!(e.contains("isn't one of this template's files"), "{e}");
         assert_eq!(fs::read_dir(out.path()).unwrap().count(), 0);
     }
 
@@ -1052,8 +1077,11 @@ mod tests {
         fs::remove_dir_all(tmp.path().join("A")).unwrap();
         std::os::unix::fs::symlink(outside.path(), tmp.path().join("A")).unwrap();
         let out = tempfile::tempdir().unwrap();
-        let e = r.copy_files(&r.template, out.path()).unwrap_err();
-        assert!(e.contains("changed since the folder was read"), "{e}");
+        let e = r
+            .staged
+            .copy_used(&r.template, &Default::default(), out.path())
+            .unwrap_err();
+        assert!(e.contains("changed since it was added"), "{e}");
     }
 
     #[test]

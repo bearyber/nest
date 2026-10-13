@@ -7,7 +7,8 @@ import { Button } from "../../components/ui";
 import {
   deleteTemplate,
   exportTemplate,
-  closeFolderDraft,
+  editorClose,
+  editorOpen,
   importTemplate,
   listTemplates,
   previewTemplate,
@@ -117,15 +118,16 @@ export default function TemplatesTab({ run }: TabProps) {
   );
 
   const open = async (mode: SaveMode, key: string, step: EditorStep = "questions", empty = false) => {
-    const d = await run(templateDraft(key));
-    if (!d) return;
+    const opened = await run(editorOpen(key));
+    if (!opened) return;
+    const d = opened.draft;
     let start = d.template;
     if (mode === "new") {
       start = empty
         ? { ...start, name: "New template", description: "", tree: [] }
         : { ...start, name: `${start.name} (copy)` };
     }
-    setEditing({ sourceKey: key, mode, start, starterFiles: d.starterFiles, step });
+    setEditing({ sourceKey: opened.key, mode, start, starterFiles: d.starterFiles, step });
   };
 
   const fromFolder = async (path: string | null) => {
@@ -367,7 +369,7 @@ export default function TemplatesTab({ run }: TabProps) {
         <TemplateEditor
           {...editing}
           onClose={() => {
-            if (editing.sourceKey.startsWith("folder:")) void closeFolderDraft(editing.sourceKey).catch(() => {});
+            void editorClose(editing.sourceKey).catch(() => {});
             setEditing(null);
           }}
           onSaved={({ info, binned, binProblem }) => {

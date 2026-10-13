@@ -297,6 +297,19 @@ export interface Skipped {
   reason: SkipReason;
 }
 
+/** An open editor (Rust `EditorOpened`): `key` goes to preview / save / add files. */
+export interface EditorOpened {
+  key: string;
+  draft: TemplateDraft;
+}
+
+/** Files added in the editor (Rust `AddedFiles`): new folders (template paths) and file entries. */
+export interface AddedFiles {
+  folders: string[];
+  files: FileEntry[];
+  skipped: Skipped[];
+}
+
 /** A template read from a folder (Rust `FolderDraft`). `key` goes to preview / save. */
 export interface FolderDraft {
   key: string;

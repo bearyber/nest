@@ -165,7 +165,7 @@ fn a_file_that_grew_since_reading_is_refused_and_nothing_is_saved() {
         &Example::new(TODAY),
     )
     .unwrap_err();
-    assert!(e.contains("changed since the folder was read"), "{e}");
+    assert!(e.contains("changed since it was added"), "{e}");
     assert_eq!(fs::read_dir(&user).unwrap().count(), 0);
 }
 
@@ -265,4 +265,146 @@ fn every_kind_of_folder_previews_without_problems() {
             assert!(p.problems.is_empty(), "{}: {:?}", dir.display(), p.problems);
         }
     }
+}
+
+// ───────────── Files added in the editor (one-screen editor, PLAN 2026-10-13) ─────────────
+
+use nest_lib::template::TreeEntry;
+use nest_lib::template_edit::{save_session, EditorSession, SaveMode};
+use nest_lib::template_from_folder::read_dropped;
+
+#[test]
+fn files_dropped_in_the_editor_are_saved_with_the_template() {
+    let tmp = tempfile::tempdir().unwrap();
+    let user = tmp.path().join("templates");
+    let desk = tmp.path().join("Desktop");
+    file(&desk, "grade.cube", b"LUT");
+    file(&desk, "Brand/logo.png", b"PNG");
+    file(&desk, "Brand/fonts/font.otf", b"OTF");
+    file(&desk, "Brand/.DS_Store", b"x");
+    file(&tmp.path().join("Other"), "grade.cube", b"LUT 2");
+
+    let all = installed(&user);
+    let blank = all
+        .iter()
+        .find(|t| t.loaded.template.id == "blank")
+        .unwrap();
+    let mut session = EditorSession::from_template(blank);
+    let mut draft = blank.loaded.template.clone();
+
+    // A LUT and a brand folder onto 02_GRADE; another file with the same name onto the top.
+    let d = read_dropped(&[desk.join("grade.cube"), desk.join("Brand")], 1, 0).unwrap();
+    assert_eq!(d.skipped.len(), 1, "{:?}", d.skipped); // .DS_Store
+    let (folders, files) = session.add_dropped("02_GRADE", d.files, &d.folders);
+    assert_eq!(folders, ["02_GRADE/Brand", "02_GRADE/Brand/fonts"]);
+    let d2 = read_dropped(&[tmp.path().join("Other/grade.cube")], 5, 0).unwrap();
+    let (_, top) = session.add_dropped("", d2.files, &d2.folders);
+    assert_eq!(top[0].from, "files/2/grade.cube"); // its own name: no clash with the first
+    assert_eq!(top[0].to, "grade.cube");
+
+    draft.tree.push(TreeEntry::Folder("02_GRADE".into()));
+    draft
+        .tree
+        .extend(folders.into_iter().map(TreeEntry::Folder));
+    draft.files.extend(files);
+    draft.files.extend(top);
+    draft.name = "Grade".into();
+
+    let ex = Example::new(TODAY);
+    let saved = save_session(
+        &draft,
+        SaveMode::New,
+        &session,
+        &all,
+        &user,
+        BUILT_IN_IDS,
+        &ex,
+    )
+    .unwrap();
+    assert_eq!(
+        fs::read(saved.dir.join("files/grade.cube")).unwrap(),
+        b"LUT"
+    );
+    assert_eq!(
+        fs::read(saved.dir.join("files/2/grade.cube")).unwrap(),
+        b"LUT 2"
+    );
+    assert!(saved.dir.join("files/Brand/fonts/font.otf").is_file());
+    assert!(
+        saved.dir.join("starter/NOTES.md").is_file(),
+        "Blank's own starter file"
+    );
+    let p = preview(&saved.template, &saved, &ex);
+    assert!(p.problems.is_empty(), "{:?}", p.problems);
+    for f in [
+        "02_GRADE/grade.cube",
+        "02_GRADE/Brand/logo.png",
+        "02_GRADE/Brand/fonts/font.otf",
+        "NOTES.md",
+    ] {
+        assert!(
+            p.files.iter().any(|x| x.ends_with(f)),
+            "{f} in {:?}",
+            p.files
+        );
+    }
+    assert!(p.files.iter().filter(|x| x.ends_with("grade.cube")).count() == 2);
+    // The originals are untouched.
+    assert_eq!(fs::read(desk.join("grade.cube")).unwrap(), b"LUT");
+}
+
+#[test]
+fn dropping_too_much_counts_what_the_template_already_holds() {
+    let tmp = tempfile::tempdir().unwrap();
+    file(tmp.path(), "a.txt", b"x");
+    let e = read_dropped(&[tmp.path().join("a.txt")], 2000, 0).unwrap_err();
+    assert!(e.contains("more than 2000"), "{e}");
+    let f = fs::File::create(tmp.path().join("big.bin")).unwrap();
+    f.set_len(MAX_FILE_BYTES).unwrap();
+    let e = read_dropped(&[tmp.path().join("big.bin")], 0, 150 * 1024 * 1024).unwrap_err();
+    assert!(e.contains("more than 200 MB"), "{e}");
+}
+
+#[test]
+fn editing_a_template_keeps_its_starter_files_and_refuses_unknown_ones() {
+    let tmp = tempfile::tempdir().unwrap();
+    let user = tmp.path().join("templates");
+    let all = installed(&user);
+    let video = all
+        .iter()
+        .find(|t| t.loaded.template.id == "video")
+        .unwrap();
+    let session = EditorSession::from_template(video);
+    let ex = Example::new(TODAY);
+    let mut draft = video.loaded.template.clone();
+    let saved = save_session(
+        &draft,
+        SaveMode::Customize,
+        &session,
+        &all,
+        &user,
+        BUILT_IN_IDS,
+        &ex,
+    )
+    .unwrap();
+    assert_eq!(saved.template.files, video.loaded.template.files);
+    let user2 = tmp.path().join("templates2");
+    for (from, says) in [
+        ("../elsewhere.md", "isn't allowed"),
+        ("other.md", "isn't one of this template's files"),
+    ] {
+        draft.files[0].from = from.into();
+        let e = save_session(
+            &draft,
+            SaveMode::New,
+            &session,
+            &all,
+            &user2,
+            BUILT_IN_IDS,
+            &ex,
+        )
+        .unwrap_err();
+        assert!(e.contains(says), "{from}: {e}");
+    }
+    assert!(!user2.exists() || fs::read_dir(&user2).unwrap().count() == 0);
 }

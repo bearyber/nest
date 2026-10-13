@@ -7,7 +7,7 @@
 //! Starter files are copied from the source template. A draft the preview finds a problem with
 //! is refused, so a saved template always plans cleanly.
 
-use std::collections::{BTreeMap, HashSet};
+use std::collections::{BTreeMap, BTreeSet, HashSet};
 use std::fs;
 use std::path::{Path, PathBuf};
 
@@ -16,10 +16,11 @@ use unicode_normalization::UnicodeNormalization;
 
 use crate::names::DEFAULT_CODE_PATTERN;
 use crate::plan::{plan_project, ClientValue, Date, FieldValue, Level, PlanContext, Values};
+use crate::staged::{OnDisk, Staged};
 use crate::template::{
-    load_dir, FieldKind, LoadedTemplate, Template, TEMPLATE_SCHEMA, TEMPLATE_SUFFIX,
+    load_dir, FieldKind, FileEntry, LoadedTemplate, Template, TEMPLATE_SCHEMA, TEMPLATE_SUFFIX,
 };
-use crate::template_from_folder::FolderTemplate;
+use crate::template_from_folder::{fills, FolderTemplate};
 use crate::template_io::{copy_starters, delete, free_folder, write_new, Installed};
 
 /// What the editor opens.
@@ -203,6 +204,98 @@ pub enum SaveMode {
     New,
 }
 
+/// What an open editor works on: the template it started from (none for a draft read from a
+/// project folder) and the files waiting to come along (from that folder, or added in the
+/// editor). Kept by Rust; the UI only has its key.
+#[derive(Debug, Clone)]
+pub struct EditorSession {
+    pub source: Option<Installed>,
+    /// The template's folder, or the project folder a draft was read from.
+    pub dir: PathBuf,
+    pub staged: Staged,
+}
+
+impl EditorSession {
+    pub fn from_template(t: &Installed) -> Self {
+        EditorSession {
+            source: Some(t.clone()),
+            dir: t.loaded.dir.clone(),
+            staged: Staged::default(),
+        }
+    }
+
+    pub fn from_folder(f: &FolderTemplate) -> Self {
+        EditorSession {
+            source: None,
+            dir: f.dir.clone(),
+            staged: f.staged.clone(),
+        }
+    }
+
+    /// The source template's own starter files.
+    pub fn starters(&self) -> BTreeSet<String> {
+        self.source
+            .as_ref()
+            .map(|t| t.loaded.files.clone())
+            .unwrap_or_default()
+    }
+
+    /// Every file name the draft can use: starter files and staged ones.
+    pub fn file_names(&self) -> BTreeSet<String> {
+        let mut all = self.starters();
+        all.extend(self.staged.names());
+        all
+    }
+
+    /// Stage files dropped into the template folder `into` (a template path; empty = the project
+    /// folder itself). Each gets a name of its own in the template's folder (`files/…`), so two
+    /// files with the same name in different folders never clash. Returns the new folders (from
+    /// a dropped folder) and file entries for the draft.
+    pub fn add_dropped(
+        &mut self,
+        into: &str,
+        files: Vec<(String, OnDisk)>,
+        folders: &[String],
+    ) -> (Vec<String>, Vec<FileEntry>) {
+        let inside = |rel: &str| match into {
+            "" => rel.to_string(),
+            _ => format!("{into}/{rel}"),
+        };
+        let mut taken = self.file_names();
+        let mut entries = vec![];
+        for (rel, on_disk) in files {
+            let name = (1..)
+                .map(|n| match n {
+                    1 => format!("files/{rel}"),
+                    n => format!("files/{n}/{rel}"),
+                })
+                .find(|n| !taken.contains(n))
+                .unwrap_or_default();
+            taken.insert(name.clone());
+            entries.push(FileEntry {
+                from: name.clone(),
+                to: inside(&rel),
+                fill: fills(&rel, on_disk.size),
+            });
+            self.staged.insert(name, on_disk);
+        }
+        (folders.iter().map(|f| inside(f)).collect(), entries)
+    }
+
+    /// `draft` with every file it can use, for the planner (preview and the check on save).
+    pub fn loaded(&self, draft: Template) -> LoadedTemplate {
+        let id = match &self.source {
+            Some(t) => t.loaded.template.id.clone(),
+            None => "from-folder".into(), // Rust picks the real id on save
+        };
+        LoadedTemplate {
+            template: Template { id, ..draft },
+            dir: self.dir.clone(),
+            files: self.file_names(),
+        }
+    }
+}
+
 /// Save `draft` as one of your templates. `source` is the template the editor started from
 /// (found by Rust from its key); its starter files are copied along.
 pub fn save(
@@ -214,18 +307,57 @@ pub fn save(
     built_in_ids: &[&str],
     ex: &Example,
 ) -> Result<LoadedTemplate, String> {
-    let source_id = source.loaded.template.id.clone();
-    let (id, version) = match mode {
-        SaveMode::Edit => {
+    let session = EditorSession::from_template(source);
+    save_session(draft, mode, &session, installed, user_dir, built_in_ids, ex)
+}
+
+/// Save a draft made from a folder on disk as a new template of yours.
+pub fn save_from_folder(
+    draft: &Template,
+    folder: &FolderTemplate,
+    installed: &[Installed],
+    user_dir: &Path,
+    built_in_ids: &[&str],
+    ex: &Example,
+) -> Result<LoadedTemplate, String> {
+    let session = EditorSession::from_folder(folder);
+    save_session(
+        draft,
+        SaveMode::New,
+        &session,
+        installed,
+        user_dir,
+        built_in_ids,
+        ex,
+    )
+}
+
+/// Save an editor's draft. Rust picks the id and version from the mode (a draft from a folder
+/// is always new). The source template's starter files are copied along, then the staged files
+/// the draft uses, each checked again (see `Staged::copy_used`).
+pub fn save_session(
+    draft: &Template,
+    mode: SaveMode,
+    session: &EditorSession,
+    installed: &[Installed],
+    user_dir: &Path,
+    built_in_ids: &[&str],
+    ex: &Example,
+) -> Result<LoadedTemplate, String> {
+    let (id, version) = match (&session.source, mode) {
+        (None, _) | (Some(_), SaveMode::New) => {
+            (new_template_id(draft, installed, user_dir, built_in_ids), 1)
+        }
+        (Some(source), SaveMode::Edit) => {
+            let source_id = source.loaded.template.id.clone();
             if source.built_in {
                 return Err("Built-in templates can't be edited. Customize it instead.".into());
             }
-            (
-                source_id.clone(),
-                yours_max(installed, &source_id).unwrap_or(0) + 1,
-            )
+            let next = yours_max(installed, &source_id).unwrap_or(0) + 1;
+            (source_id, next)
         }
-        SaveMode::Customize => {
+        (Some(source), SaveMode::Customize) => {
+            let source_id = source.loaded.template.id.clone();
             if !source.built_in {
                 return Err("That one is already yours. Edit it instead.".into());
             }
@@ -235,37 +367,25 @@ pub fn save(
                     source.loaded.template.name
                 ));
             }
-            (source_id.clone(), source.loaded.template.version + 1)
+            (source_id, source.loaded.template.version + 1)
         }
-        SaveMode::New => (new_template_id(draft, installed, user_dir, built_in_ids), 1),
     };
+    let starters = session.starters();
     write_template(
         draft,
         &id,
         version,
-        &source.loaded,
+        &session.loaded(draft.clone()),
         installed,
         user_dir,
         ex,
-        |tmp| copy_starters(&source.loaded.dir, tmp),
+        |tmp| {
+            if let Some(source) = &session.source {
+                copy_starters(&source.loaded.dir, tmp)?;
+            }
+            session.staged.copy_used(draft, &starters, tmp)
+        },
     )
-}
-
-/// Save a draft made from a folder on disk as a new template of yours. Only the folder's files
-/// the draft still uses are copied, each checked again (see `FolderTemplate::copy_files`).
-pub fn save_from_folder(
-    draft: &Template,
-    folder: &FolderTemplate,
-    installed: &[Installed],
-    user_dir: &Path,
-    built_in_ids: &[&str],
-    ex: &Example,
-) -> Result<LoadedTemplate, String> {
-    let id = new_template_id(draft, installed, user_dir, built_in_ids);
-    let source = folder.loaded(draft.clone());
-    write_template(draft, &id, 1, &source, installed, user_dir, ex, |tmp| {
-        folder.copy_files(draft, tmp)
-    })
 }
 
 fn yours_max(installed: &[Installed], id: &str) -> Option<u32> {

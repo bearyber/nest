@@ -22,8 +22,10 @@ use crate::error::{bin_name, io_reason, AppError, AppResult};
 use crate::index::scan_root;
 use crate::plan::Date;
 use crate::settings::{self, Settings};
-use crate::template::Template;
-use crate::template_edit::{self, Example, SaveMode, TemplateDraft, TemplatePreview};
+use crate::template::{FileEntry, Template};
+use crate::template_edit::{
+    self, EditorSession, Example, SaveMode, TemplateDraft, TemplatePreview,
+};
 use crate::template_from_folder::{self, Keep, Skipped};
 use crate::template_io::{self, TemplateInfo, BUILT_IN_IDS, LIMITS, PACKAGE_EXT};
 use crate::window;
@@ -684,10 +686,10 @@ pub fn preview_template(
     draft: Template,
 ) -> AppResult<TemplatePreview> {
     let ex = example(&state)?;
-    if let Some(folder) = lock(&state.folder_drafts)?.get(&key) {
+    if let Some(session) = lock(&state.editor_sessions)?.get(&key) {
         return Ok(template_edit::preview(
             &draft,
-            &folder.loaded(draft.clone()),
+            &session.loaded(draft.clone()),
             &ex,
         ));
     }
@@ -706,30 +708,21 @@ pub fn save_template(
     mode: SaveMode,
 ) -> AppResult<Saved> {
     let installed = lock(&state.templates)?.clone();
-    let folder = lock(&state.folder_drafts)?.get(&key).cloned();
-    let saved = match &folder {
-        Some(folder) => template_edit::save_from_folder(
-            &draft,
-            folder,
-            &installed,
-            &state.user_templates,
-            BUILT_IN_IDS,
-            &example(&state)?,
-        ),
-        None => template_edit::save(
-            &draft,
-            mode,
-            &find_template(&state, &key)?,
-            &installed,
-            &state.user_templates,
-            BUILT_IN_IDS,
-            &example(&state)?,
-        ),
-    }
+    let session = match lock(&state.editor_sessions)?.get(&key).cloned() {
+        Some(s) => s,
+        None => EditorSession::from_template(&find_template(&state, &key)?),
+    };
+    let saved = template_edit::save_session(
+        &draft,
+        mode,
+        &session,
+        &installed,
+        &state.user_templates,
+        BUILT_IN_IDS,
+        &example(&state)?,
+    )
     .map_err(AppError::new)?;
-    if folder.is_some() {
-        lock(&state.folder_drafts)?.remove(&key);
-    }
+    lock(&state.editor_sessions)?.remove(&key);
     // Hiding is per template id, and your customized version shares the built-in's id: show it,
     // since you just made it to use it.
     if mode == SaveMode::Customize {
@@ -839,28 +832,110 @@ pub fn template_from_folder(
             .map(|t| t.loaded.template.clone())
     })
     .map_err(AppError::new)?;
-    let key = format!("folder:{}", uuid::Uuid::new_v4().simple());
+    let session = EditorSession::from_folder(&folder);
     let out = FolderDraft {
-        key: key.clone(),
+        key: new_session(&state, session)?,
         draft: TemplateDraft {
             template: folder.template.clone(),
             built_in: false,
             replaced: false,
-            starter_files: folder.files.iter().cloned().collect(),
+            starter_files: folder.staged.names().into_iter().collect(),
         },
         skipped: folder.skipped.clone(),
         from_project: folder.from_project,
     };
-    let mut drafts = lock(&state.folder_drafts)?;
-    drafts.clear(); // one editor at a time: an older unsaved one is dropped
-    drafts.insert(key, folder);
     Ok(Some(out))
 }
 
-/// The editor closed without saving a folder draft: forget it.
+/// Keep an editor session; one editor at a time, so an older unsaved one is dropped.
+fn new_session(state: &AppState, session: EditorSession) -> AppResult<String> {
+    let key = format!("editor:{}", uuid::Uuid::new_v4().simple());
+    let mut sessions = lock(&state.editor_sessions)?;
+    sessions.clear();
+    sessions.insert(key.clone(), session);
+    Ok(key)
+}
+
+/// An open editor: its session key (for preview, save and adding files) and the draft.
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct EditorOpened {
+    pub key: String,
+    pub draft: TemplateDraft,
+}
+
+/// Open an installed template in the editor.
 #[tauri::command(async)]
-pub fn close_folder_draft(state: State<'_, AppState>, key: String) -> AppResult<()> {
-    lock(&state.folder_drafts)?.remove(&key);
+pub fn editor_open(state: State<'_, AppState>, key: String) -> AppResult<EditorOpened> {
+    let t = find_template(&state, &key)?;
+    Ok(EditorOpened {
+        draft: template_edit::draft(&t),
+        key: new_session(&state, EditorSession::from_template(&t))?,
+    })
+}
+
+/// Files dropped on (or picked for) a folder in the editor, ready to go into the draft.
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AddedFiles {
+    /// New folders (from a dropped folder), as template paths inside `into`.
+    pub folders: Vec<String>,
+    /// New file entries: `from` is the staged name, `to` is inside `into`.
+    pub files: Vec<FileEntry>,
+    pub skipped: Vec<Skipped>,
+}
+
+/// Add files (and folders of files) to the editor's draft, into the template folder `into`
+/// (a template path; empty = the project folder itself). `paths` are what was dropped; `None`
+/// asks with a file picker. Nothing is copied until Save. `None` back if the picker was
+/// cancelled.
+#[tauri::command(async)]
+pub fn editor_add_files(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    key: String,
+    into: String,
+    paths: Option<Vec<String>>,
+) -> AppResult<Option<AddedFiles>> {
+    let paths: Vec<PathBuf> = match paths {
+        Some(p) => p.into_iter().map(PathBuf::from).collect(),
+        None => {
+            let Some(picked) = app
+                .dialog()
+                .file()
+                .set_title("Add files to the template")
+                .blocking_pick_files()
+            else {
+                return Ok(None);
+            };
+            picked
+                .into_iter()
+                .filter_map(|p| p.into_path().ok())
+                .collect()
+        }
+    };
+    let mut sessions = lock(&state.editor_sessions)?;
+    let session = sessions
+        .get_mut(&key)
+        .ok_or_else(|| AppError::new("The editor was closed. Open the template again."))?;
+    let dropped = template_from_folder::read_dropped(
+        &paths,
+        session.file_names().len(),
+        session.staged.bytes(),
+    )
+    .map_err(AppError::new)?;
+    let (folders, files) = session.add_dropped(&into, dropped.files, &dropped.folders);
+    Ok(Some(AddedFiles {
+        folders,
+        files,
+        skipped: dropped.skipped,
+    }))
+}
+
+/// The editor closed without saving: forget its session.
+#[tauri::command(async)]
+pub fn editor_close(state: State<'_, AppState>, key: String) -> AppResult<()> {
+    lock(&state.editor_sessions)?.remove(&key);
     Ok(())
 }
 

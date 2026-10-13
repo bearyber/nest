@@ -12,6 +12,7 @@ pub mod plan;
 pub mod settings;
 mod settings_cmd;
 pub mod sizes;
+pub mod staged;
 pub mod template;
 pub mod template_edit;
 pub mod template_from_folder;
@@ -154,7 +155,9 @@ pub fn run() {
             settings_cmd::preview_template,
             settings_cmd::save_template,
             settings_cmd::template_from_folder,
-            settings_cmd::close_folder_draft,
+            settings_cmd::editor_open,
+            settings_cmd::editor_add_files,
+            settings_cmd::editor_close,
             settings_cmd::set_template_hidden,
             settings_cmd::reveal_templates_folder,
             settings_cmd::open_logs_folder,
@@ -230,6 +233,6 @@ fn init_state(app: &tauri::App) -> Result<AppState, Box<dyn std::error::Error>> 
         notice: Default::default(),
         devices: Default::default(),
         status_lock: Default::default(),
-        folder_drafts: Default::default(),
+        editor_sessions: Default::default(),
     })
 }

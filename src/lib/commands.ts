@@ -2,6 +2,7 @@
 // Project actions take a project key; Rust looks up the folder itself.
 import { invoke } from "@tauri-apps/api/core";
 import type {
+  AddedFiles,
   Created,
   NewProjectContext,
   Plan,
@@ -14,6 +15,7 @@ import type {
   SettingsView,
   Sizes,
   DevicesView,
+  EditorOpened,
   FolderDraft,
   SaveMode,
   Saved,
@@ -122,7 +124,12 @@ export const saveTemplate = (key: string, draft: Template, mode: SaveMode) =>
 /** Make a template from a folder (`null` = pick one). `null` back if cancelled. */
 export const templateFromFolder = (path: string | null) =>
   s<FolderDraft | null>("template_from_folder", { path });
-export const closeFolderDraft = (key: string) => s<void>("close_folder_draft", { key });
+/** Open a template in the editor: a session key (for preview, save, adding files) + the draft. */
+export const editorOpen = (key: string) => s<EditorOpened>("editor_open", { key });
+/** Add files dropped on (or picked for, when `paths` is null) the template folder `into`. */
+export const editorAddFiles = (key: string, into: string, paths: string[] | null) =>
+  s<AddedFiles | null>("editor_add_files", { key, into, paths });
+export const editorClose = (key: string) => s<void>("editor_close", { key });
 export const takeNotice = () => invoke<string | null>("take_notice");
 export const devicesView = () => s<DevicesView>("devices_view");
 export const devicesDetect = () => invoke<SyncedFolder[]>("devices_detect");
