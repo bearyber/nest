@@ -1,7 +1,7 @@
 // Drag to move, built on pointer events. HTML5 drag-and-drop is swallowed by Tauri's file-drop
 // handler in the Windows webview; pointer events behave the same on both OSes.
 import { useRef, useState } from "react";
-import type { DropWhere } from "../../../lib/templateDraft";
+import type { DropWhere } from "../../lib/templateDraft";
 
 export interface DropTarget {
   id: string;

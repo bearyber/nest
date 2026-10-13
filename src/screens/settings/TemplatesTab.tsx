@@ -30,15 +30,13 @@ import type {
   TemplatePreview,
 } from "../../lib/types";
 import type { TabProps } from "../Settings";
-import TemplateEditor, { type EditorStep } from "./editor/TemplateEditor";
+import TemplateEditor from "../templates/TemplateEditor";
 import styles from "./settings.module.css";
 
 interface Editing {
   sourceKey: string;
   mode: SaveMode;
   start: Template;
-  starterFiles: string[];
-  step: EditorStep;
   note?: string;
 }
 
@@ -117,7 +115,7 @@ export default function TemplatesTab({ run }: TabProps) {
     [templates],
   );
 
-  const open = async (mode: SaveMode, key: string, step: EditorStep = "questions", empty = false) => {
+  const open = async (mode: SaveMode, key: string, empty = false) => {
     const opened = await run(editorOpen(key));
     if (!opened) return;
     const d = opened.draft;
@@ -127,7 +125,7 @@ export default function TemplatesTab({ run }: TabProps) {
         ? { ...start, name: "New template", description: "", tree: [] }
         : { ...start, name: `${start.name} (copy)` };
     }
-    setEditing({ sourceKey: opened.key, mode, start, starterFiles: d.starterFiles, step });
+    setEditing({ sourceKey: opened.key, mode, start });
   };
 
   const fromFolder = async (path: string | null) => {
@@ -138,8 +136,6 @@ export default function TemplatesTab({ run }: TabProps) {
       sourceKey: made.key,
       mode: "new",
       start: made.draft.template,
-      starterFiles: made.draft.starterFiles,
-      step: "folders",
       note: folderNote(made.skipped, made.fromProject),
     });
   };
@@ -176,7 +172,7 @@ export default function TemplatesTab({ run }: TabProps) {
             id: "empty",
             text: "Start empty",
             enabled: !!blank,
-            action: () => blank && void open("new", blank.key, "questions", true),
+            action: () => blank && void open("new", blank.key, true),
           },
           ...(copies.length > 0
             ? [
@@ -203,8 +199,8 @@ export default function TemplatesTab({ run }: TabProps) {
     if (current.builtIn) {
       const yours = yoursFor(current.id);
       if (yours) setSelected(yours.key);
-      else void open("customize", current.key, "folders");
-    } else void open("edit", current.key, "folders");
+      else void open("customize", current.key);
+    } else void open("edit", current.key);
   };
 
   return (
