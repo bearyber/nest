@@ -5,7 +5,7 @@
 //! tells every window via a `settings-changed` event.
 
 use std::fs;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::atomic::Ordering;
 
 use chrono::{Datelike, Local};
@@ -1138,6 +1138,7 @@ fn folder_info(path: PathBuf) -> FolderInfo {
 
 /// First run: save the choices (this creates the settings file) and open the main window.
 #[tauri::command(async)]
+#[allow(clippy::too_many_arguments)] // one flat command; the UI sends each choice by name
 pub fn complete_first_run(
     app: AppHandle,
     state: State<'_, AppState>,
@@ -1146,6 +1147,7 @@ pub fn complete_first_run(
     no_client_spaces: Vec<String>,
     hidden_templates: Vec<String>,
     marker: String,
+    first_template: Option<String>,
 ) -> AppResult<SettingsView> {
     // Only once: afterwards this would wipe the jobs folders and spaces you set up.
     if !state.first_run.load(Ordering::SeqCst) {
@@ -1195,10 +1197,73 @@ pub fn complete_first_run(
         Ok(())
     })?;
     state.first_run.store(false, Ordering::SeqCst);
+    // The folder you copy for every job becomes your first template. This never blocks setup:
+    // if it fails, the main window says why.
+    if let Some(folder) = first_template.filter(|p| !p.trim().is_empty()) {
+        let folder = PathBuf::from(folder);
+        if let Err(note) = first_template_from(&app, &state, &folder) {
+            if let Ok(mut n) = state.notice.lock() {
+                *n = Some(note);
+            }
+            let _ = app.emit("notice", ());
+        }
+    }
     Ok(SettingsView {
         first_run: false,
         ..v
     })
+}
+
+fn first_template_from(app: &AppHandle, state: &AppState, folder: &Path) -> Result<(), String> {
+    let _one = lock(&state.templates_lock).map_err(|e| failed_note(folder, &e.message))?;
+    reload_templates(state).map_err(|e| failed_note(folder, &e.message))?;
+    let installed = lock(&state.templates)
+        .map_err(|e| failed_note(folder, &e.message))?
+        .clone();
+    let ex = example(state).map_err(|e| failed_note(folder, &e.message))?;
+    let saved = save_first_template(folder, &installed, &state.user_templates, &ex)?;
+    crate::template_sync_cmd::note_saved(state, &saved.template.id, saved.template.version, true);
+    templates_changed(app, state).map_err(|e| failed_note(folder, &e.message))
+}
+
+fn failed_note(folder: &Path, reason: &str) -> String {
+    let name = folder
+        .file_name()
+        .map(|n| n.to_string_lossy().into_owned())
+        .unwrap_or_else(|| folder.display().to_string());
+    format!(
+        "Couldn't make a template from \u{201c}{name}\u{201d}: {}. You can try again in Templates.",
+        reason.trim_end_matches('.')
+    )
+}
+
+/// Read a folder (folders and files, never changed) and save it as a new template of yours,
+/// named after the folder. The error is the whole note for the main window.
+fn save_first_template(
+    folder: &Path,
+    installed: &[template_io::Installed],
+    user_dir: &Path,
+    ex: &Example,
+) -> Result<crate::template::LoadedTemplate, String> {
+    let read = template_from_folder::read_folder(folder, Keep::FoldersAndFiles, |id| {
+        installed
+            .iter()
+            .filter(|t| t.loaded.template.id == id)
+            .max_by_key(|t| (!t.built_in, t.loaded.template.version))
+            .map(|t| t.loaded.template.clone())
+    })
+    .map_err(|e| failed_note(folder, &e))?;
+    template_edit::save_from_folder(&read.template, &read, installed, user_dir, BUILT_IN_IDS, ex)
+        .map_err(|e| failed_note(folder, &e))
+}
+
+/// First run: pick the folder you copy for every job (nothing is read until setup finishes).
+#[tauri::command(async)]
+pub fn first_run_pick_template_folder(app: AppHandle) -> AppResult<Option<String>> {
+    Ok(
+        pick_folder(&app, "Choose the folder you copy for every job")?
+            .map(|p| p.to_string_lossy().into_owned()),
+    )
 }
 
 /// One settings change from elsewhere in the app (Devices), through the same safe `edit` path.
@@ -1240,4 +1305,50 @@ pub(crate) fn edit_settings_quietly(
     settings::save(&state.config_dir, &next)?;
     *current = next;
     Ok(())
+}
+
+#[cfg(test)]
+mod first_template_tests {
+    use super::*;
+    use crate::template_io::load_installed;
+
+    fn ex() -> Example {
+        Example::new(Date {
+            year: 2026,
+            month: 3,
+            day: 2,
+        })
+    }
+
+    fn bundled() -> PathBuf {
+        Path::new(env!("CARGO_MANIFEST_DIR")).join("templates")
+    }
+
+    #[test]
+    fn a_folder_becomes_your_first_template_named_after_it() {
+        let tmp = tempfile::tempdir().unwrap();
+        let src = tmp.path().join("Acme Job");
+        let user = tmp.path().join("templates");
+        fs::create_dir_all(src.join("01_BRIEF")).unwrap();
+        fs::write(src.join("01_BRIEF/notes.md"), "hello").unwrap();
+        let installed = load_installed(&user, &bundled(), BUILT_IN_IDS);
+        let saved = save_first_template(&src, &installed, &user, &ex()).unwrap();
+        assert_eq!(saved.template.name, "Acme Job");
+        assert!(saved.dir.join("01_BRIEF/notes.md").is_file());
+        assert!(
+            src.join("01_BRIEF/notes.md").is_file(),
+            "your folder is not changed"
+        );
+    }
+
+    #[test]
+    fn a_folder_that_cannot_be_read_gives_a_plain_note() {
+        let tmp = tempfile::tempdir().unwrap();
+        let user = tmp.path().join("templates");
+        let installed = load_installed(&user, &bundled(), BUILT_IN_IDS);
+        let gone = tmp.path().join("Missing Folder");
+        let note = save_first_template(&gone, &installed, &user, &ex()).unwrap_err();
+        assert!(note.starts_with("Couldn't make a template from \u{201c}Missing Folder\u{201d}: "));
+        assert!(note.ends_with("You can try again in Templates."));
+    }
 }

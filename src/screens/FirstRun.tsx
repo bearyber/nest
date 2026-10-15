@@ -1,60 +1,78 @@
 import { useEffect, useState } from "react";
+import { getCurrentWebview } from "@tauri-apps/api/webview";
 import Icon from "../components/Icon";
 import { Button } from "../components/ui";
-import { completeFirstRun, firstRunCreateFolder, firstRunPickFolder, getSettings, listTemplates } from "../lib/commands";
+import {
+  completeFirstRun,
+  firstRunCreateFolder,
+  firstRunPickFolder,
+  firstRunPickTemplateFolder,
+  getSettings,
+} from "../lib/commands";
 import { isMac } from "../lib/platform";
-import { errorMessage, type FolderInfo, type TemplateInfo } from "../lib/types";
+import { errorMessage, type FolderInfo } from "../lib/types";
 import styles from "./FirstRun.module.css";
 
-type Step = "welcome" | "folder" | "templates" | "spaces" | "letter";
-const STEPS: Step[] = ["welcome", "folder", "templates", "spaces", "letter"];
+type Step = "folder" | "template";
+const STEPS: Step[] = ["folder", "template"];
 
-interface SpaceDraft {
-  name: string;
-  noClient: boolean;
+/** The last part of a folder path, for showing its name (works for / and \). */
+function folderName(path: string): string {
+  const parts = path.split(/[\\/]/).filter(Boolean);
+  return parts[parts.length - 1] ?? path;
 }
 
-/** First run (build spec §3.4): shown when there's no settings file yet. */
+/** First run: two screens. Where jobs live, then (optionally) the folder you copy for every job. */
 export default function FirstRun({ onDone }: { onDone: () => void }) {
-  const [step, setStep] = useState<Step>("welcome");
+  const [step, setStep] = useState<Step>("folder");
   const [folder, setFolder] = useState<FolderInfo | null>(null);
-  const [templates, setTemplates] = useState<TemplateInfo[]>([]);
-  const [hidden, setHidden] = useState<Set<string>>(new Set());
-  const [spaces, setSpaces] = useState<SpaceDraft[]>([
-    { name: "Work", noClient: false },
-    { name: "Personal", noClient: true },
-  ]);
-  const [newSpace, setNewSpace] = useState("");
+  const [template, setTemplate] = useState<string | null>(null);
+  const [over, setOver] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
-  const [marker, setMarker] = useState("");
+  const [marker, setMarker] = useState(isMac() ? "M" : "W");
 
   useEffect(() => {
-    listTemplates()
-      .then((all) => setTemplates(all.filter((t) => !t.superseded)))
-      .catch(() => {});
     getSettings()
-      .then((v) => setMarker(v.suggestedMarker))
-      .catch(() => setMarker(isMac() ? "M" : "W"));
+      .then((v) => v.suggestedMarker && setMarker(v.suggestedMarker))
+      .catch(() => {});
   }, []);
 
-  const go = (s: Step) => {
-    setError(null);
-    setStep(s);
-  };
+  // A folder dropped anywhere on the window counts, on the second screen.
+  useEffect(() => {
+    if (step !== "template") return;
+    let unlisten: (() => void) | undefined;
+    getCurrentWebview()
+      .onDragDropEvent((e) => {
+        const t = e.payload.type;
+        if (t === "enter" || t === "over") setOver(true);
+        else if (t === "leave") setOver(false);
+        else if (t === "drop") {
+          setOver(false);
+          if (e.payload.paths.length > 0) {
+            setError(null);
+            setTemplate(e.payload.paths[0]);
+          }
+        }
+      })
+      .then((u) => (unlisten = u))
+      .catch(() => {});
+    return () => unlisten?.();
+  }, [step]);
+
   const tryFolder = (p: Promise<FolderInfo | null>) =>
     p.then((f) => f && setFolder(f)).catch((e) => setError(errorMessage(e)));
+  const pickTemplate = () =>
+    firstRunPickTemplateFolder()
+      .then((p) => p && setTemplate(p))
+      .catch((e) => setError(errorMessage(e)));
 
-  const finish = () => {
+  const finish = (withTemplate: boolean) => {
     if (!folder) return;
     setSaving(true);
-    completeFirstRun(
-      folder.path,
-      spaces.map((s) => s.name),
-      spaces.filter((s) => s.noClient).map((s) => s.name),
-      [...hidden],
-      marker,
-    )
+    // Spaces (Work, and Personal with no client), all starter templates and this computer's
+    // letter are the defaults. All of them can be changed in Settings.
+    completeFirstRun(folder.path, ["Work", "Personal"], ["Personal"], [], marker, withTemplate ? template : null)
       .then(onDone)
       .catch((e) => {
         setError(errorMessage(e));
@@ -73,23 +91,11 @@ export default function FirstRun({ onDone }: { onDone: () => void }) {
           ))}
         </ol>
 
-        {step === "welcome" && (
-          <>
-            <Icon name="folder" className={styles.bigIcon} />
-            <h1>Welcome to Nest</h1>
-            <p>Every job gets a home: one click makes the folders, starter files and job code, the same way every time.</p>
-            <div className={styles.buttons}>
-              <Button variant="primary" onClick={() => go("folder")}>
-                Get started
-              </Button>
-            </div>
-          </>
-        )}
-
         {step === "folder" && (
           <>
+            <p className={styles.welcome}>Welcome to Nest</p>
             <h1>Where do your jobs live?</h1>
-            <p>Pick the folder new projects go in, like D:\Jobs or a folder in Documents. You can add more later.</p>
+            <p>Every job gets a home: one click makes the folders, starter files and job code.</p>
             {folder && (
               <div className={styles.picked}>
                 <Icon name="folder" className={styles.folderIcon} />
@@ -102,131 +108,59 @@ export default function FirstRun({ onDone }: { onDone: () => void }) {
               </div>
             )}
             <div className={styles.buttons}>
-              <Button onClick={() => tryFolder(firstRunPickFolder())}>Choose folder…</Button>
               <Button onClick={() => tryFolder(firstRunCreateFolder())}>Make a "Nest Jobs" folder in Documents</Button>
+              <Button onClick={() => tryFolder(firstRunPickFolder())}>Choose folder…</Button>
             </div>
             <div className={styles.nav}>
-              <Button onClick={() => go("welcome")}>Back</Button>
-              <Button variant="primary" disabled={!folder} onClick={() => go("templates")}>
+              <span />
+              <Button
+                variant="primary"
+                disabled={!folder}
+                onClick={() => {
+                  setError(null);
+                  setStep("template");
+                }}
+              >
                 Continue
               </Button>
             </div>
           </>
         )}
 
-        {step === "templates" && (
+        {step === "template" && (
           <>
-            <h1>Starter templates</h1>
-            <p>Untick any you won't use. You can show them again in Settings.</p>
-            <div className={styles.list}>
-              {templates.map((t) => (
-                <label key={t.key} className={styles.check}>
-                  <input
-                    type="checkbox"
-                    checked={!hidden.has(t.id)}
-                    onChange={(e) =>
-                      setHidden((h) => {
-                        const next = new Set(h);
-                        if (e.target.checked) next.delete(t.id);
-                        else next.add(t.id);
-                        return next;
-                      })
-                    }
-                  />
-                  <span>
-                    <b>{t.name}</b> <span className={styles.sub}>{t.description}</span>
-                  </span>
-                </label>
-              ))}
+            <h1>Got a folder you copy for every job?</h1>
+            <p>Drop it here and Nest makes the same folders for every new project. Your folder isn't changed.</p>
+            <div className={over ? `${styles.drop} ${styles.dropOver}` : styles.drop}>
+              {template ? (
+                <>
+                  <Icon name="folder" className={styles.folderIcon} />
+                  <b>{folderName(template)}</b>
+                  <button type="button" className={styles.link} onClick={() => void pickTemplate()}>
+                    Change
+                  </button>
+                </>
+              ) : (
+                <>
+                  <span className={styles.sub}>Drop a folder here</span>
+                  <Button onClick={() => void pickTemplate()}>Choose a folder…</Button>
+                </>
+              )}
             </div>
             <div className={styles.nav}>
-              <Button onClick={() => go("folder")}>Back</Button>
-              <Button variant="primary" onClick={() => go("spaces")}>
-                Continue
+              <Button disabled={saving} onClick={() => setStep("folder")}>
+                Back
               </Button>
-            </div>
-          </>
-        )}
-
-        {step === "spaces" && (
-          <>
-            <h1>Spaces</h1>
-            <p>Spaces are groups for your projects, like Work and Personal. Tick "No client" for projects nobody pays you for.</p>
-            <div className={styles.list}>
-              {spaces.map((s, i) => (
-                <div key={i} className={styles.spaceRow}>
-                  <input
-                    className={styles.input}
-                    value={s.name}
-                    aria-label="Space name"
-                    onChange={(e) => setSpaces((all) => all.map((x, j) => (j === i ? { ...x, name: e.target.value } : x)))}
-                  />
-                  <label className={styles.check}>
-                    <input
-                      type="checkbox"
-                      checked={s.noClient}
-                      onChange={(e) =>
-                        setSpaces((all) => all.map((x, j) => (j === i ? { ...x, noClient: e.target.checked } : x)))
-                      }
-                    />
-                    No client
-                  </label>
-                  <Button disabled={spaces.length === 1} onClick={() => setSpaces((all) => all.filter((_, j) => j !== i))}>
-                    Remove
+              <span className={styles.navRight}>
+                {!template && (
+                  <Button disabled={saving} onClick={() => finish(false)}>
+                    Skip, use Nest's templates
                   </Button>
-                </div>
-              ))}
-              <div className={styles.spaceRow}>
-                <input
-                  className={styles.input}
-                  placeholder="Add a space"
-                  value={newSpace}
-                  aria-label="New space"
-                  onChange={(e) => setNewSpace(e.target.value)}
-                />
-                <Button
-                  disabled={!newSpace.trim()}
-                  onClick={() => {
-                    setSpaces((all) => [...all, { name: newSpace.trim(), noClient: false }]);
-                    setNewSpace("");
-                  }}
-                >
-                  Add
+                )}
+                <Button variant="primary" disabled={saving || !template} onClick={() => finish(true)}>
+                  {saving ? "Setting up…" : "Finish"}
                 </Button>
-              </div>
-            </div>
-            <div className={styles.nav}>
-              <Button onClick={() => go("templates")}>Back</Button>
-              <Button variant="primary" disabled={spaces.every((s) => !s.name.trim())} onClick={() => go("letter")}>
-                Continue
-              </Button>
-            </div>
-          </>
-        )}
-
-        {step === "letter" && (
-          <>
-            <h1>A letter for this computer</h1>
-            <p>
-              Each of your computers gets a letter, so two never make the same job code (like{" "}
-              <b className={styles.mono}>ACME-{marker || "W"}04</b>). We picked one; you can keep it.
-            </p>
-            <label className={styles.letterRow}>
-              <span>Letter for this computer</span>
-              <input
-                className={`${styles.input} ${styles.letter}`}
-                value={marker}
-                maxLength={1}
-                aria-label="Letter for this computer"
-                onChange={(e) => setMarker(e.target.value.toUpperCase().replace(/[^A-Z]/g, ""))}
-              />
-            </label>
-            {marker === "J" && <p className={styles.sub}>J is reserved. Pick another letter.</p>}
-            <div className={styles.nav}>
-              <Button onClick={() => go("spaces")}>Back</Button>
-              <Button variant="primary" disabled={saving || !marker || marker === "J"} onClick={finish}>
-                {saving ? "Setting up…" : "Start using Nest"}
-              </Button>
+              </span>
             </div>
           </>
         )}

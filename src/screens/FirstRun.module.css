@@ -161,3 +161,44 @@
   font-size: 18px;
   text-align: center;
 }
+
+.welcome {
+  font-size: var(--text-small);
+  font-weight: 600;
+  color: var(--accent) !important;
+}
+
+.drop {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: center;
+  gap: var(--space-3);
+  padding: var(--space-6) var(--space-4);
+  border: 1.5px dashed var(--control-border);
+  border-radius: 10px;
+  background: var(--card-bg);
+}
+
+.dropOver {
+  border-color: var(--accent);
+  background: var(--accent-soft);
+}
+
+.navRight {
+  display: flex;
+  gap: var(--space-2);
+}
+
+.link {
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--accent);
+  font: inherit;
+  cursor: default;
+}
+
+.link:hover {
+  text-decoration: underline;
+}
