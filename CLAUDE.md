@@ -46,11 +46,16 @@ src-tauri/
     index.rs         SQLite index + rescan
     devices.rs       Devices: this computer's list, reading other computers' lists, Google Drive detection
     devices_cmd.rs   Devices commands + background sync (launch, every minute, focus, after changes, quit)
+    template_sync.rs template sync between your computers (own folder per computer in the synced folder; pure decisions + file work)
+    template_sync_cmd.rs  template sync glue: lock, settings, notice, events
     template_edit.rs template editor: preview, save (Rust picks id/version), one copy per template (T-A)
     template_from_folder.rs  make a template from a folder (read-only walk, skip rules, answers back to blanks)
     settings.rs      settings file
     sizes.rs         folder sizes per subfolder and file type (read-only walk; cached in the index)
     staged.rs        files waiting to go into a template (checked again and copied on save)
+    kits.rs          client kits: find a client's kit folder, list it read-only, fingerprint
+    kits_cmd.rs      client kit commands, cache, Create progress + Cancel
+    whats_new.rs     What's new (bundled src/whats-new.json; shown once after an update)
     archive.rs       Archive / Unarchive: one rename, same drive only (moves project folders)
     error.rs         AppError (user-facing message)
     menu.rs          macOS menu bar (Windows has none: shortcuts + context menus)

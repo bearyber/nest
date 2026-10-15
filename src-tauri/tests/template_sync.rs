@@ -549,3 +549,26 @@ fn new_ids_are_never_windows_device_names() {
     assert_eq!(new_id("Console", &none, tmp.path()), "console");
     assert_eq!(new_id("com10", &none, tmp.path()), "com10");
 }
+
+#[test]
+fn a_template_with_a_client_kit_folder_syncs_whole() {
+    let w = World::new();
+    let mut pc = w.computer(PC);
+    let mut mac = w.computer(MAC);
+    pc.save("promo", 1, "Promo", "kit", T1);
+    // Mark a folder as the client kit's place (v0.5 client kits), like the editor would.
+    let json = pc.user.join("promo-v1/promo.nest.json");
+    let mut t: serde_json::Value =
+        serde_json::from_str(&fs::read_to_string(&json).unwrap()).unwrap();
+    t["tree"] = serde_json::json!(["01_BRIEF", { "name": "02_BRAND", "kit": true }]);
+    fs::write(&json, t.to_string()).unwrap();
+
+    assert!(pc.sync(&w, true).problem.is_none());
+    let r = mac.sync(&w, true);
+    assert_eq!(r.got.len(), 1);
+    let got = serde_json::to_value(mac.get("promo").unwrap()).unwrap();
+    assert_eq!(
+        got["tree"][1],
+        serde_json::json!({ "name": "02_BRAND", "kit": true })
+    );
+}
