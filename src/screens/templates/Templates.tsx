@@ -2,35 +2,22 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { listen } from "@tauri-apps/api/event";
 import { getCurrentWebview } from "@tauri-apps/api/webview";
 import { Menu } from "@tauri-apps/api/menu";
-import PreviewTree from "../../components/PreviewTree";
-import { Button } from "../../components/ui";
+import { Button, IconButton } from "../../components/ui";
 import {
-  deleteTemplate,
-  exportTemplate,
   editorClose,
   editorOpen,
+  exportTemplate,
   importTemplate,
   listTemplates,
-  previewTemplate,
-  resetTemplate,
+  removeTemplate,
+  restoreBuiltinTemplates,
   setTemplateHidden,
-  templateDraft,
   templateFromFolder,
 } from "../../lib/commands";
 import { isMac } from "../../lib/platform";
-import { asPlan } from "../../lib/templateDraft";
-import type {
-  FolderDraft,
-  SaveMode,
-  Skipped,
-  SkipReason,
-  Template,
-  TemplateDraft,
-  TemplateInfo,
-  TemplatePreview,
-} from "../../lib/types";
+import type { FolderDraft, SaveMode, Skipped, SkipReason, Template, TemplateInfo } from "../../lib/types";
 import TemplateEditor from "./TemplateEditor";
-import styles from "../settings/settings.module.css";
+import styles from "./Templates.module.css";
 
 interface Editing {
   sourceKey: string;
@@ -58,8 +45,11 @@ export function folderNote(skipped: Skipped[], fromProject: boolean): string {
   return `${answers}${left} Your folder wasn't changed.`;
 }
 
-/** Templates: what each one makes, Customize / Edit in the app, new ones, sharing between
- *  computers, and taking yours away (to the Recycle Bin / Trash). */
+/** On Windows "&" marks a menu shortcut letter; "&&" shows one "&". */
+const menuText = (s: string) => (isMac() ? s : s.replace(/&/g, "&&"));
+
+/** Templates (main window → sidebar → Templates): drop a job folder to make one, click one to
+ *  change it, right-click (or ⋯) for the rest. */
 interface Props {
   /** Run a command: shows its error, or `ok` when it worked. */
   run: <T>(p: Promise<T>, ok?: string) => Promise<T | undefined>;
@@ -69,21 +59,14 @@ interface Props {
 
 export default function Templates({ run, onNewProject }: Props) {
   const [templates, setTemplates] = useState<TemplateInfo[]>([]);
-  const [selected, setSelected] = useState<string | null>(null);
-  // Loaded for one key; shown only while that key is selected (no stale details).
-  const [loaded, setLoaded] = useState<{ key: string; draft: TemplateDraft; preview: TemplatePreview | null } | null>(null);
-  const draft = loaded?.key === selected ? loaded.draft : null;
-  const preview = loaded?.key === selected ? loaded.preview : null;
   const [editing, setEditing] = useState<Editing | null>(null);
+  const [dragging, setDragging] = useState(false);
   const bin = isMac() ? "Trash" : "Recycle Bin";
 
   const load = useCallback(
     () =>
       listTemplates()
-        .then((all) => {
-          setTemplates(all);
-          setSelected((s) => (s && all.some((t) => t.key === s) ? s : (all.find((t) => !t.superseded)?.key ?? null)));
-        })
+        .then(setTemplates)
         .catch(() => {}),
     [],
   );
@@ -96,36 +79,15 @@ export default function Templates({ run, onNewProject }: Props) {
     return () => unlisten?.();
   }, [load]);
 
-  // What the selected template makes.
-  useEffect(() => {
-    if (!selected) return;
-    let live = true;
-    templateDraft(selected)
-      .then((d) =>
-        previewTemplate(selected, d.template)
-          .then((p) => live && setLoaded({ key: selected, draft: d, preview: p }))
-          .catch(() => live && setLoaded({ key: selected, draft: d, preview: null })),
-      )
-      .catch(() => {});
-    return () => {
-      live = false;
-    };
-  }, [selected, templates]);
-
-  const current = templates.find((t) => t.key === selected) ?? null;
-  const yoursFor = (id: string) => templates.find((t) => !t.builtIn && !t.superseded && t.id === id);
-  const replacesBuiltIn = (t: TemplateInfo) => !t.builtIn && templates.some((b) => b.builtIn && b.replaced && b.id === t.id);
-  const listed = useMemo(
-    // One copy per template (T-A): older copies left over after a failed bin move stay hidden.
-    () => templates.filter((t) => !t.superseded || t.replaced),
-    [templates],
-  );
+  // One card per template: yours, and Nest's that you haven't replaced (your version is listed
+  // instead) or removed. Older copies of yours (T-A) stay out of the list.
+  const listed = useMemo(() => templates.filter((t) => !t.superseded && !(t.builtIn && t.hidden)), [templates]);
+  const nestsHidden = templates.some((t) => t.builtIn && t.hidden);
 
   const open = async (mode: SaveMode, key: string, empty = false) => {
     const opened = await run(editorOpen(key));
     if (!opened) return;
-    const d = opened.draft;
-    let start = d.template;
+    let start = opened.draft.template;
     if (mode === "new") {
       start = empty
         ? { ...start, name: "New template", description: "", tree: [] }
@@ -146,52 +108,71 @@ export default function Templates({ run, onNewProject }: Props) {
     });
   };
 
-  // Drop a folder on this tab to make a template from it.
+  // Drop a folder anywhere on this view to make a template from it.
   const fromFolderRef = useRef(fromFolder);
+  const editingRef = useRef(false);
   useEffect(() => {
     fromFolderRef.current = fromFolder;
+    editingRef.current = editing !== null;
   });
   useEffect(() => {
     let unlisten: (() => void) | undefined;
     getCurrentWebview()
       .onDragDropEvent((e) => {
-        if (e.payload.type === "drop" && e.payload.paths.length > 0) void fromFolderRef.current(e.payload.paths[0]);
+        const p = e.payload;
+        if (p.type === "drop") {
+          setDragging(false);
+          if (p.paths.length > 0) void fromFolderRef.current(p.paths[0]);
+        } else if (p.type === "leave") setDragging(false);
+        else if (!editingRef.current) setDragging(true);
       })
       .then((u) => (unlisten = u))
       .catch(() => {});
     return () => unlisten?.();
   }, []);
 
-  const newMenu = async () => {
-    const blank = templates.find((t) => t.builtIn && t.id === "blank") ?? templates.find((t) => !t.superseded);
+  const changeTemplate = (t: TemplateInfo) => void open(t.builtIn ? "customize" : "edit", t.key);
+
+  const remove = async (t: TemplateInfo) => {
+    const done = await run(removeTemplate(t.key));
+    if (!done) return;
+    void run(
+      Promise.resolve(null),
+      t.builtIn ? `Removed “${t.name}”. “Bring back Nest's templates” shows it again.` : `Moved “${t.name}” to the ${bin}.`,
+    );
+  };
+
+  const templateMenu = async (t: TemplateInfo) => {
     try {
-      // Start empty, or from a copy of any template you have (e.g. Grading: MV → a short-film one).
-      const copies = templates.filter((t) => !t.superseded && !t.replaced && t.id !== "blank");
       const menu = await Menu.new({
         items: [
           {
-            id: "folder",
-            text: "From one of your project folders…",
-            action: () => void fromFolder(null),
+            id: "new-project",
+            text: "New project from this",
+            enabled: !!onNewProject && !t.hidden,
+            action: () => onNewProject?.(t.id),
           },
+          { id: "duplicate", text: "Duplicate", action: () => void open("new", t.key) },
           {
-            id: "empty",
-            text: "Start empty",
-            enabled: !!blank,
-            action: () => blank && void open("new", blank.key, true),
+            id: "export",
+            text: "Export…",
+            action: async () => {
+              if (await run(exportTemplate(t.key)))
+                void run(Promise.resolve(null), `Saved “${t.name}” as a file. On your other computer: Templates → Import…`);
+            },
           },
-          ...(copies.length > 0
+          // Older Nest versions could hide your own templates: let them come back.
+          ...(!t.builtIn && t.hidden
             ? [
-                { item: "Separator" as const },
-                { id: "copy-label", text: "Start from a copy of:", enabled: false },
+                {
+                  id: "show",
+                  text: "Show in New Project",
+                  action: () => void run(setTemplateHidden(t.id, false)),
+                },
               ]
             : []),
-          ...copies.map((t) => ({
-            id: `copy:${t.key}`,
-            // On Windows "&" marks a menu shortcut letter; "&&" shows one "&".
-            text: `    ${isMac() ? t.name : t.name.replace(/&/g, "&&")}`,
-            action: () => void open("new", t.key),
-          })),
+          { item: "Separator" as const },
+          { id: "remove", text: t.builtIn ? "Remove" : "Remove…", action: () => void remove(t) },
         ],
       });
       await menu.popup();
@@ -200,174 +181,88 @@ export default function Templates({ run, onNewProject }: Props) {
     }
   };
 
-  const changeFolders = () => {
-    if (!current) return;
-    if (current.builtIn) {
-      const yours = yoursFor(current.id);
-      if (yours) setSelected(yours.key);
-      else void open("customize", current.key);
-    } else void open("edit", current.key);
+  const newMenu = async () => {
+    const blank = templates.find((t) => t.builtIn && t.id === "blank") ?? listed[0];
+    try {
+      // Start empty, or from a copy of any template you have (e.g. Grading: MV → a short-film one).
+      const copies = listed.filter((t) => t.id !== "blank");
+      const menu = await Menu.new({
+        items: [
+          {
+            id: "empty",
+            text: "Start empty",
+            enabled: !!blank,
+            action: () => blank && void open("new", blank.key, true),
+          },
+          {
+            id: "copy",
+            text: "From a copy of…",
+            enabled: copies.length > 0,
+            items: copies.map((t) => ({
+              id: `copy:${t.key}`,
+              text: menuText(t.name),
+              action: () => void open("new", t.key),
+            })),
+          },
+        ],
+      });
+      await menu.popup();
+    } catch {
+      /* the menu couldn't open: nothing to do */
+    }
   };
 
   return (
     <>
-      <p className={styles.hint}>
-        A template decides which folders and starter files a new project gets, and what New Project asks (client,
-        project name, start date…). Drop one of your project folders here to make a template from it.
-      </p>
-      <div className={styles.actions}>
+      <div className={styles.head}>
         <Button variant="primary" onClick={() => void newMenu()}>
-          New template…
+          New template
         </Button>
         <Button
           title="Opens a .nesttemplate file made with Export… (on this or another computer)"
           onClick={async () => {
             const t = await run(importTemplate());
-            if (t) {
-              setSelected(t.key);
-              void run(Promise.resolve(null), `Added “${t.name}”.`);
-            }
+            if (t) void run(Promise.resolve(null), `Added “${t.name}”.`);
           }}
         >
           Import…
         </Button>
       </div>
 
-      <div className={`${styles.card} ${styles.tlist}`} role="listbox" aria-label="Templates">
-        {listed.map((t) => (
-          <button
-            key={t.key}
-            type="button"
-            role="option"
-            aria-selected={t.key === selected}
-            className={styles.titem}
-            onClick={() => setSelected(t.key)}
-          >
-            <span className={styles.tname}>{t.name}</span>
-            <span className={styles.tdesc}>
-              {t.replaced
-                ? "Nest's original (you use your own version)"
-                : replacesBuiltIn(t)
-                  ? `Your version of Nest's “${t.name}”`
-                  : t.description}
-            </span>
-            {/* Two badges only: it came with Nest, or it's yours (made or changed by you). */}
-            <span className={t.builtIn ? styles.pillMuted : styles.pill}>{t.builtIn ? "Included" : "Yours"}</span>
-            {t.hidden && !t.replaced && <span className={styles.tflag}>Hidden</span>}
-          </button>
-        ))}
+      <div className={styles.drop} data-dragging={dragging || undefined}>
+        <p className={styles.dropText}>Drop a job folder here to make a template from it</p>
+        <Button onClick={() => void fromFolder(null)}>Choose a folder…</Button>
       </div>
 
-      {current && (
-        <section key={current.key} className={`${styles.card} ${styles.detail}`} aria-label={current.name}>
-          <div className={styles.detailHead}>
-            <h3 className={styles.detailTitle}>{current.name}</h3>
-            <label className={styles.check}>
-              <input
-                type="checkbox"
-                checked={!current.hidden && !current.replaced && !current.superseded}
-                disabled={current.replaced || current.superseded}
-                onChange={(e) => void run(setTemplateHidden(current.id, !e.target.checked))}
-              />
-              Show in the New Project list
-            </label>
-          </div>
-          <p className={styles.hint}>
-            {current.replaced
-              ? "You're using your own version of this template. This is Nest's original, kept so you can go back."
-              : current.superseded
-                ? "An older version, kept on disk. New Project uses the newest one."
-                : current.hidden
-                  ? "Hidden from the New Project list. Nothing is deleted; tick the box to show it again."
-                  : "You'll see it when you click New Project. Untick if you never use it; nothing is deleted."}
-          </p>
+      <ul className={styles.list} aria-label="Templates">
+        {listed.map((t) => (
+          <li
+            key={t.key}
+            className={styles.card}
+            onContextMenu={(e) => {
+              e.preventDefault();
+              void templateMenu(t);
+            }}
+          >
+            <button type="button" className={styles.open} onClick={() => changeTemplate(t)}>
+              <span className={styles.name}>{t.name}</span>
+              <span className={styles.meta}>
+                {t.builtIn ? "Nest's" : "Yours"} · {t.folders} folder{t.folders === 1 ? "" : "s"}
+                {!t.builtIn && t.hidden ? " · Not in New Project" : ""}
+              </span>
+            </button>
+            <IconButton icon="more" label={`More for ${t.name}`} onClick={() => void templateMenu(t)} />
+          </li>
+        ))}
+      </ul>
 
-          {preview && (
-            <>
-              <div className={styles.section}>
-                <h4 className={styles.sectionTitle}>Project folder name</h4>
-                <div className={`${styles.example} ${styles.mono}`}>{preview.folderName}</div>
-              </div>
-              {draft && (
-                <div className={styles.section}>
-                  <h4 className={styles.sectionTitle}>Asks you for</h4>
-                  <div className={styles.qs}>
-                    {draft.template.fields.map((f) => (
-                      <span key={f.key} className={styles.q}>
-                        {f.type === "client" ? "Client" : f.label}
-                      </span>
-                    ))}
-                  </div>
-                </div>
-              )}
-              <div className={styles.section}>
-                <div className={styles.rowBetween}>
-                  <h4 className={styles.sectionTitle}>Makes these folders</h4>
-                  {!current.replaced && (
-                    <Button className={styles.linkButton} onClick={changeFolders}>
-                      Change folders…
-                    </Button>
-                  )}
-                </div>
-                <PreviewTree plan={asPlan(preview)} />
-              </div>
-            </>
-          )}
-
-          <div className={styles.actions}>
-            {current.builtIn && !current.replaced && (
-              <Button variant="primary" onClick={() => void open("customize", current.key)}>
-                Customize…
-              </Button>
-            )}
-            {current.replaced && (
-              <Button variant="primary" onClick={() => setSelected(yoursFor(current.id)?.key ?? null)}>
-                Open your version
-              </Button>
-            )}
-            {!current.builtIn && (
-              <Button variant="primary" onClick={() => void open("edit", current.key)}>
-                Edit…
-              </Button>
-            )}
-            {onNewProject && !current.replaced && !current.hidden && (
-              <Button onClick={() => onNewProject(current.id)}>New project from this</Button>
-            )}
-            <Button onClick={() => void open("new", current.key)}>Duplicate</Button>
-            <Button
-              title="Saves this template as one .nesttemplate file. Open it on another computer with Import…"
-              onClick={async () => {
-                if (await run(exportTemplate(current.key)))
-                  void run(
-                    Promise.resolve(null),
-                    `Saved “${current.name}” as a file. On your other computer: Templates → Import…`,
-                  );
-              }}
-            >
-              Export…
-            </Button>
-            {!current.builtIn && replacesBuiltIn(current) && (
-              <Button
-                onClick={async () => {
-                  if (await run(resetTemplate(current.key)))
-                    void run(Promise.resolve(null), `Back to Nest's original “${current.name}”. Yours is in the ${bin}.`);
-                }}
-              >
-                Go back to Nest's original…
-              </Button>
-            )}
-            {!current.builtIn && !replacesBuiltIn(current) && (
-              <Button
-                onClick={async () => {
-                  if (await run(deleteTemplate(current.key)))
-                    void run(Promise.resolve(null), `Moved “${current.name}” to the ${bin}.`);
-                }}
-              >
-                Move to {bin}…
-              </Button>
-            )}
-          </div>
-        </section>
+      {nestsHidden && (
+        <Button
+          className={styles.link}
+          onClick={() => void run(restoreBuiltinTemplates(), "Nest's templates are back.")}
+        >
+          Bring back Nest's templates
+        </Button>
       )}
 
       {editing && (
@@ -379,12 +274,9 @@ export default function Templates({ run, onNewProject }: Props) {
           }}
           onSaved={({ info, binned, binProblem }) => {
             setEditing(null);
-            setSelected(info.key);
             void load();
             const first =
-              editing.mode === "customize"
-                ? `Saved. New Project now uses your version of “${info.name}”. Nest's original is kept.`
-                : `Saved “${info.name}”.`;
+              editing.mode === "customize" ? "Saved as yours. Nest's original is kept." : `Saved “${info.name}”.`;
             // Decision T-A: one copy per template; say where the previous one went.
             const previous = binProblem
               ? ` ${binProblem}`

@@ -18,7 +18,7 @@ use zip::write::SimpleFileOptions;
 use zip::{CompressionMethod, ZipArchive, ZipWriter};
 
 use crate::names::sanitize_segment;
-use crate::template::{load_dir, LoadedTemplate, TEMPLATE_SUFFIX};
+use crate::template::{load_dir, LoadedTemplate, Template, TEMPLATE_SUFFIX};
 
 pub const PACKAGE_EXT: &str = "nesttemplate";
 
@@ -75,6 +75,8 @@ pub struct TemplateInfo {
     pub replaced: bool,
     pub hidden: bool,
     pub folder: PathBuf,
+    /// How many folders a new project gets (the Templates list shows it).
+    pub folders: usize,
 }
 
 pub fn info(t: &Installed, hidden: &[String]) -> TemplateInfo {
@@ -90,7 +92,55 @@ pub fn info(t: &Installed, hidden: &[String]) -> TemplateInfo {
         replaced: t.replaced,
         hidden: hidden.contains(&tpl.id),
         folder: t.loaded.dir.clone(),
+        folders: folder_count(tpl),
     }
+}
+
+/// How many folders a template makes: each folder in its tree, plus any parent folder a path
+/// implies (`02_FOOTAGE/A_CAM` alone is two folders).
+pub fn folder_count(t: &Template) -> usize {
+    let mut seen = HashSet::new();
+    for entry in &t.tree {
+        let mut path = String::new();
+        for seg in entry.name().split('/').filter(|s| !s.is_empty()) {
+            if !path.is_empty() {
+                path.push('/');
+            }
+            path.push_str(seg);
+            seen.insert(path.clone());
+        }
+    }
+    seen.len()
+}
+
+/// What Remove does to a template in the Templates list.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Removal {
+    /// One of Nest's: hidden everywhere ("Bring back Nest's templates" shows it again).
+    Hide(String),
+    /// Yours: every version goes to the Recycle Bin / Trash. `hide_original`: it was your
+    /// version of one of Nest's, so Nest's original is hidden too instead of taking its place.
+    Bin { id: String, hide_original: bool },
+}
+
+pub fn removal(t: &Installed, installed: &[Installed]) -> Removal {
+    let id = t.loaded.template.id.clone();
+    if t.built_in {
+        return Removal::Hide(id);
+    }
+    let hide_original = installed
+        .iter()
+        .any(|i| i.built_in && i.loaded.template.id == id);
+    Removal::Bin { id, hide_original }
+}
+
+/// The hidden template ids with Nest's own taken out ("Bring back Nest's templates").
+pub fn without_built_ins(hidden: &[String], built_in_ids: &[&str]) -> Vec<String> {
+    hidden
+        .iter()
+        .filter(|id| !built_in_ids.contains(&id.as_str()))
+        .cloned()
+        .collect()
 }
 
 /// The templates Nest ships. Only these load from the bundled folder: an app update on Windows

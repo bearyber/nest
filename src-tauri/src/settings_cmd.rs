@@ -12,9 +12,7 @@ use chrono::{Datelike, Local};
 use serde::Serialize;
 use tauri::{AppHandle, Emitter, Manager, State, WebviewUrl, WebviewWindowBuilder};
 use tauri_plugin_autostart::ManagerExt as _;
-use tauri_plugin_dialog::{
-    DialogExt, MessageDialogButtons, MessageDialogKind, MessageDialogResult,
-};
+use tauri_plugin_dialog::{DialogExt, MessageDialogButtons, MessageDialogKind};
 use tauri_plugin_opener::OpenerExt;
 
 use crate::commands::{lock, reload_templates, AppState};
@@ -26,7 +24,7 @@ use crate::template::{FileEntry, Template};
 use crate::template_edit::{
     self, EditorSession, Example, SaveMode, TemplateDraft, TemplatePreview,
 };
-use crate::template_from_folder::{self, Keep, Skipped};
+use crate::template_from_folder::{self, Skipped};
 use crate::template_io::{self, TemplateInfo, BUILT_IN_IDS, LIMITS, PACKAGE_EXT};
 use crate::window;
 
@@ -605,6 +603,17 @@ pub fn delete_template(app: AppHandle, state: State<'_, AppState>, key: String) 
             "Built-in templates can't be deleted, only hidden",
         ));
     }
+    bin_yours(&app, &state, &t, "")
+}
+
+/// The native confirm, then every version of one of yours to the Recycle Bin / Trash.
+/// `false` if cancelled. The caller holds the templates lock.
+fn bin_yours(
+    app: &AppHandle,
+    state: &AppState,
+    t: &template_io::Installed,
+    extra: &str,
+) -> AppResult<bool> {
     let installed = lock(&state.templates)?.clone();
     let id = t.loaded.template.id.clone();
     let count = template_edit::your_versions(&id, &installed).len();
@@ -612,7 +621,7 @@ pub fn delete_template(app: AppHandle, state: State<'_, AppState>, key: String) 
     let confirmed = app
         .dialog()
         .message(format!(
-            "\"{}\"{} will be moved to the {bin}. You can restore it from there. Projects made with it aren't affected.",
+            "\"{}\"{} will be moved to the {bin}. You can restore it from there. Projects made with it aren't affected.{extra}",
             t.loaded.template.name,
             versions_phrase(count)
         ))
@@ -625,9 +634,58 @@ pub fn delete_template(app: AppHandle, state: State<'_, AppState>, key: String) 
     }
     let result = template_edit::trash_all_versions(&id, &installed, &state.user_templates);
     // Refresh either way (some versions may have moved), but report the bin's error first.
-    let refreshed = templates_changed(&app, &state);
+    let refreshed = templates_changed(app, state);
     result.map_err(AppError::new)?;
     refreshed.map(|_| true)
+}
+
+/// Remove from the Templates list: one of Nest's is hidden everywhere (no question: "Bring back
+/// Nest's templates" undoes it); yours goes to the Recycle Bin / Trash after a confirm. Your
+/// version of one of Nest's goes to the bin and Nest's original is hidden too, so removing
+/// it doesn't bring the original back in its place. `false` if cancelled.
+#[tauri::command(async)]
+pub fn remove_template(app: AppHandle, state: State<'_, AppState>, key: String) -> AppResult<bool> {
+    let _one = lock(&state.templates_lock)?; // one change to your templates at a time
+    let t = find_template(&state, &key)?;
+    let installed = lock(&state.templates)?.clone();
+    match template_io::removal(&t, &installed) {
+        template_io::Removal::Hide(id) => {
+            edit(&app, &state, |s| {
+                s.set_template_hidden(&id, true);
+                Ok(())
+            })?;
+            Ok(true)
+        }
+        template_io::Removal::Bin { id, hide_original } => {
+            let extra = if hide_original {
+                " Nest's original stays hidden; \"Bring back Nest's templates\" shows it again."
+            } else {
+                ""
+            };
+            if !bin_yours(&app, &state, &t, extra)? {
+                return Ok(false);
+            }
+            if hide_original {
+                edit(&app, &state, |s| {
+                    s.set_template_hidden(&id, true);
+                    Ok(())
+                })?;
+            }
+            Ok(true)
+        }
+    }
+}
+
+/// "Bring back Nest's templates": every hidden one of Nest's shows again.
+#[tauri::command(async)]
+pub fn restore_builtin_templates(
+    app: AppHandle,
+    state: State<'_, AppState>,
+) -> AppResult<SettingsView> {
+    edit(&app, &state, |s| {
+        s.hidden_templates = template_io::without_built_ins(&s.hidden_templates, BUILT_IN_IDS);
+        Ok(())
+    })
 }
 
 /// "Go back to Nest's original": your version of a built-in goes to the Recycle Bin / Trash.
@@ -807,9 +865,9 @@ pub struct FolderDraft {
 }
 
 /// Make a template from a folder: `path` is a folder dropped on the list, or `None` to pick
-/// one. Asks whether files come along, then reads the folder (read-only: it's never changed).
-/// The draft lives in Rust until it's saved or the editor closes; the UI only gets its key.
-/// `None` if a picker or the question was cancelled.
+/// one. Reads the folder with its files (read-only: it's never changed); only if they're over
+/// the 200 MB limit, asks to make it from the folders alone. The draft lives in Rust until
+/// it's saved or the editor closes; the UI only gets its key. `None` if cancelled.
 #[tauri::command(async)]
 pub fn template_from_folder(
     app: AppHandle,
@@ -832,37 +890,30 @@ pub fn template_from_folder(
                 .map_err(|e| AppError::new(e.to_string()))?
         }
     };
-    const FILES: &str = "Folders and files";
-    const FOLDERS: &str = "Folders only";
-    let answer = app
-        .dialog()
-        .message(
-            "Files under 100 MB come along as they are: project files (Premiere, After Effects), \
-             LUTs, logos, briefs. Footage, caches and auto-saves stay behind.",
-        )
-        .title("Bring the files too?")
-        .buttons(MessageDialogButtons::YesNoCancelCustom(
-            FILES.into(),
-            FOLDERS.into(),
-            "Cancel".into(),
-        ))
-        .blocking_show_with_result();
-    let keep = match answer {
-        MessageDialogResult::Yes => Keep::FoldersAndFiles,
-        MessageDialogResult::No => Keep::Folders,
-        MessageDialogResult::Custom(label) if label == FILES => Keep::FoldersAndFiles,
-        MessageDialogResult::Custom(label) if label == FOLDERS => Keep::Folders,
-        _ => return Ok(None),
-    };
+    // Always folders and files; only a folder over the 200 MB limit asks about folders only.
     let installed = lock(&state.templates)?.clone();
-    let folder = template_from_folder::read_folder(&path, keep, |id| {
-        installed
-            .iter()
-            .filter(|t| t.loaded.template.id == id)
-            .max_by_key(|t| (!t.built_in, t.loaded.template.version))
-            .map(|t| t.loaded.template.clone())
-    })
-    .map_err(AppError::new)?;
+    let folders_only = || {
+        app.dialog()
+            .message("That folder's files add up to more than 200 MB. Make the template from its folders only?")
+            .title("Folder too big")
+            .buttons(MessageDialogButtons::OkCancelCustom(
+                "Folders only".into(),
+                "Cancel".into(),
+            ))
+            .blocking_show()
+    };
+    let Some(folder) =
+        template_from_folder::read_folder_or_folders_only(&path, folders_only, |id| {
+            installed
+                .iter()
+                .filter(|t| t.loaded.template.id == id)
+                .max_by_key(|t| (!t.built_in, t.loaded.template.version))
+                .map(|t| t.loaded.template.clone())
+        })
+        .map_err(AppError::new)?
+    else {
+        return Ok(None);
+    };
     let session = EditorSession::from_folder(&folder);
     let out = FolderDraft {
         key: new_session(&state, session)?,

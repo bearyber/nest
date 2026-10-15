@@ -156,6 +156,8 @@ pub fn run() {
             settings_cmd::export_template,
             settings_cmd::duplicate_template,
             settings_cmd::delete_template,
+            settings_cmd::remove_template,
+            settings_cmd::restore_builtin_templates,
             settings_cmd::reset_template,
             settings_cmd::template_draft,
             settings_cmd::preview_template,

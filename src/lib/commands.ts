@@ -129,6 +129,10 @@ export const importTemplate = () => s<TemplateInfo | null>("import_template");
 export const exportTemplate = (key: string) => s<boolean>("export_template", { key });
 export const duplicateTemplate = (key: string) => s<void>("duplicate_template", { key });
 export const deleteTemplate = (key: string) => s<boolean>("delete_template", { key });
+/** Templates list → Remove: hides one of Nest's, or moves yours to the bin (after a confirm). `false` if cancelled. */
+export const removeTemplate = (key: string) => s<boolean>("remove_template", { key });
+/** Bring back Nest's templates: shows every hidden one of Nest's again. */
+export const restoreBuiltinTemplates = () => s<SettingsView>("restore_builtin_templates");
 export const setTemplateHidden = (id: string, hidden: boolean) => s<SettingsView>("set_template_hidden", { id, hidden });
 export const revealTemplatesFolder = () => s<void>("reveal_templates_folder");
 export const resetTemplate = (key: string) => s<boolean>("reset_template", { key });
