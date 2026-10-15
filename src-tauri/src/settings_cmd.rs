@@ -1177,6 +1177,8 @@ pub fn complete_first_run(
         fresh.personal_root = None; // starts like other new projects; chosen later in Settings
         fresh.hidden_templates = hidden_templates.clone();
         fresh.local_marker = crate::settings::check_marker(&marker)?;
+        // A fresh install has no "what's new": remember this version silently.
+        fresh.last_seen_version = Some(env!("CARGO_PKG_VERSION").to_string());
         *s = fresh;
         Ok(())
     })?;

@@ -1,0 +1,62 @@
+.backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 20;
+  display: flex;
+  align-items: flex-start;
+  justify-content: center;
+  padding: 40px var(--space-4) var(--space-4);
+  background: var(--backdrop);
+  animation: fade var(--motion);
+}
+
+.sheet {
+  display: grid;
+  gap: var(--space-3);
+  width: 420px;
+  max-width: 100%;
+  max-height: calc(100vh - 56px);
+  padding: var(--space-4) 20px 0;
+  overflow: hidden;
+  border: var(--hairline) solid var(--separator);
+  border-radius: 12px;
+  background: var(--sheet-bg);
+  box-shadow: var(--shadow-sheet);
+  animation: drop var(--motion);
+}
+
+.title {
+  margin: 0;
+  font-size: var(--text-title);
+  font-weight: 600;
+}
+
+.list {
+  display: grid;
+  gap: var(--space-2);
+  margin: 0;
+  padding-left: var(--space-4);
+  overflow-y: auto;
+}
+
+.foot {
+  display: flex;
+  justify-content: flex-end;
+  margin: 0 -20px;
+  padding: var(--space-3) 20px;
+  border-top: var(--hairline) solid var(--separator);
+  background: var(--footer-bg);
+}
+
+@keyframes fade {
+  from {
+    opacity: 0;
+  }
+}
+
+@keyframes drop {
+  from {
+    opacity: 0;
+    transform: translateY(-8px);
+  }
+}

@@ -67,6 +67,15 @@ jobs:
             echo "::error::Versions don't match: tauri.conf.json $conf, package.json $pkg, Cargo.toml $cargo"
             exit 1
           fi
+          # The release notes: this version's lines from src/whats-new.json, one "- line" each.
+          # They go into the release body and into latest.json (the update bar shows them).
+          # The text only ever travels in files and env vars, never inside a script.
+          mkdir -p "$RUNNER_TEMP"
+          jq -r --arg v "$conf" '.[$v] // empty | .[] | "- " + .' src/whats-new.json > "$RUNNER_TEMP/notes.md"
+          if [ ! -s "$RUNNER_TEMP/notes.md" ]; then
+            echo "::error::src/whats-new.json has no lines for $conf. Add a \"$conf\" entry, commit, push, run again."
+            exit 1
+          fi
           echo "Releasing v$conf"
           echo "tag=v$conf" >> "$GITHUB_OUTPUT"
       - id: draft
@@ -80,9 +89,10 @@ jobs:
             exit 1
           fi
           # Drafts can't be looked up by tag, so keep the id straight from the create reply.
+          # -F body=@file reads the text from the file (it is not interpreted as a script).
           id=$(gh api "repos/$RELEASES_REPO/releases" \
             -f tag_name="$TAG" -f target_commitish=main -f name="Nest $TAG" \
-            -f body="Windows: Nest_*_x64-setup.exe · Mac: Nest_*_universal.dmg. Installed copies update themselves." \
+            -F body=@"$RUNNER_TEMP/notes.md" \
             -F draft=true --jq .id)
           if [ -z "$id" ]; then echo "::error::Couldn't create the draft release"; exit 1; fi
           echo "Draft release id: $id"
@@ -154,6 +164,24 @@ jobs:
 
       - run: npm ci
 
+      # The same lines for latest.json "notes" (the update bar). Passed as a step output with a
+      # random heredoc delimiter, and only used in `with:` below, never inside a script.
+      - id: notes
+        shell: bash
+        run: |
+          ver=$(jq -r .version src-tauri/tauri.conf.json)
+          lines=$(jq -r --arg v "$ver" '.[$v] // empty | .[] | "- " + .' src/whats-new.json)
+          if [ -z "$lines" ]; then
+            echo "::error::src/whats-new.json has no lines for $ver."
+            exit 1
+          fi
+          delim="NOTES_$(openssl rand -hex 8)"
+          {
+            echo "body<<$delim"
+            echo "$lines"
+            echo "$delim"
+          } >> "$GITHUB_OUTPUT"
+
       - uses: tauri-apps/tauri-action@84b9d35b5fc46c1e45415bdb6144030364f7ebc5 # v0
         env:
           GITHUB_TOKEN: ${{ secrets.RELEASES_TOKEN }}
@@ -164,6 +192,7 @@ jobs:
           repo: nest-releases
           # Empty for "build only": tauri-action then builds without uploading anything.
           releaseId: ${{ needs.create-release.outputs.release_id }}
+          releaseBody: ${{ steps.notes.outputs.body }}
           includeUpdaterJson: true
           args: ${{ matrix.args }}
 
