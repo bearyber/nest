@@ -1,9 +1,18 @@
 // @vitest-environment jsdom
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import type { Template, TemplatePreview } from "../../lib/types";
 
 const save = vi.fn(async (...args: [string, Template, string]) => ({ key: "user:video", name: args[1].name }));
+/** A stand-in for Rust's example names: the project folder, and answers typed into names. */
+const exampleNames = vi.fn(async (_key: string, _draft: Template, names: string[]) =>
+  names.map((n) =>
+    n === "{start|yymmdd}_{name|caps}"
+      ? "260302_SUMMER_CAMPAIGN"
+      : n.replace(/\{name\}/g, "SummerCampaign").replace(/\{client\}/g, "Acme").replace(/\{start\|yymmdd\}/g, "260302"),
+  ),
+);
+const menuNew = vi.fn(async () => ({ popup: async () => {} }));
 vi.mock("../../lib/commands", () => ({
   previewTemplate: vi.fn(
     async (): Promise<TemplatePreview> => ({
@@ -15,10 +24,11 @@ vi.mock("../../lib/commands", () => ({
       problems: [],
     }),
   ),
+  exampleNames: (key: string, draft: Template, names: string[]) => exampleNames(key, draft, names),
   saveTemplate: (key: string, draft: Template, mode: string) => save(key, draft, mode),
   editorAddFiles: vi.fn(),
 }));
-vi.mock("@tauri-apps/api/menu", () => ({ Menu: { new: vi.fn() } }));
+vi.mock("@tauri-apps/api/menu", () => ({ Menu: { new: () => menuNew() } }));
 vi.mock("@tauri-apps/api/webview", () => ({
   getCurrentWebview: () => ({ onDragDropEvent: async () => () => {} }),
 }));
@@ -45,10 +55,21 @@ const VIDEO: Template = {
 afterEach(() => {
   cleanup();
   save.mockClear();
+  exampleNames.mockClear();
+  menuNew.mockClear();
 });
 
 const open = (onSaved = vi.fn(), onClose = vi.fn()) =>
   render(<TemplateEditor sourceKey="editor:1" mode="customize" start={VIDEO} onClose={onClose} onSaved={onSaved} />);
+
+/** Open, and wait until the names show as the example project has them. */
+async function openWithExamples() {
+  open();
+  await screen.findByText("260302_SUMMER_CAMPAIGN");
+}
+
+const tree = () => screen.getByRole("tree");
+const row = (text: string) => screen.getByText(text).closest('[role="treeitem"]') as HTMLElement;
 
 async function saveAndGet(): Promise<Template> {
   const button = screen.getByRole("button", { name: "Save template" }) as HTMLButtonElement;
@@ -58,19 +79,101 @@ async function saveAndGet(): Promise<Template> {
   return save.mock.calls[0][1];
 }
 
+/** Commit a folder name with Enter, then let go of the new folder Enter starts below it. */
+async function enterAndStop(input: HTMLElement) {
+  fireEvent.keyDown(input, { key: "Enter" });
+  await act(async () => {});
+  const next = screen.queryByLabelText("Folder name");
+  if (next) fireEvent.keyDown(next, { key: "Escape" });
+}
+
 describe("TemplateEditor (one screen)", () => {
-  it("shows the whole template as a tree, blanks as chips, and what New Project asks", async () => {
+  it("shows the whole template as a tree, and what New Project asks", async () => {
     open();
+    expect(screen.getByText("A new project gets these folders. Click a name to change it.")).toBeTruthy();
     expect(screen.getByText("01_BRIEF")).toBeTruthy();
     expect(screen.getByText("A_CAM")).toBeTruthy();
     expect(screen.getByText("NOTES.md")).toBeTruthy();
     expect(screen.getByText("only if “Has graphics”")).toBeTruthy();
-    // The project folder name: chips, with the real example next to it.
-    expect(screen.getAllByRole("button", { name: "Start date" }).length).toBeGreaterThan(0);
-    expect(await screen.findByText("260302_SUMMER_CAMPAIGN")).toBeTruthy();
     const asks = screen.getByLabelText("What New Project asks");
-    expect(asks.textContent).toContain("Client");
-    expect(asks.textContent).toContain("Has graphics");
+    expect(asks.textContent).toBe("New Project will ask for:Client,Project name,Start date,Has graphicsAdd a question");
+  });
+
+  it("shows names as an example project until you click one to change it", async () => {
+    await openWithExamples();
+    // One call with every name the tree shows.
+    const names = exampleNames.mock.calls[exampleNames.mock.calls.length - 1][2];
+    expect(names).toEqual(expect.arrayContaining(["{start|yymmdd}_{name|caps}", "01_BRIEF", "A_CAM", "NOTES.md"]));
+    // No chips in the tree while not renaming.
+    expect(within(tree()).queryByRole("button", { name: "Start date" })).toBeNull();
+    // Click the name: it's the pattern again, with chips.
+    fireEvent.click(screen.getByText("260302_SUMMER_CAMPAIGN"));
+    const field = await screen.findByLabelText("Editing: Project folder name");
+    expect(within(field).getByRole("button", { name: "Start date" })).toBeTruthy();
+    expect(within(field).getByRole("button", { name: "Project name" })).toBeTruthy();
+    expect(screen.queryByText("260302_SUMMER_CAMPAIGN")).toBeNull();
+  });
+
+  it("puts New Project's answers in with the buttons under the name", async () => {
+    await openWithExamples();
+    fireEvent.click(screen.getByText("01_BRIEF"));
+    await screen.findByLabelText("Folder name");
+    // The template's own text, date and client questions, then More….
+    const line = screen.getByText("Fill in from New Project:").parentElement!;
+    expect(within(line).getAllByRole("button").map((b) => b.textContent)).toEqual([
+      "Client",
+      "Project name",
+      "Start date",
+      "More…",
+    ]);
+    fireEvent.click(within(line).getByRole("button", { name: "Project name" }));
+    fireEvent.click(within(line).getByRole("button", { name: "Start date" }));
+    // More… opens the full list.
+    fireEvent.click(within(line).getByRole("button", { name: "More…" }));
+    expect(await screen.findByLabelText("Find an answer, or name a new question")).toBeTruthy();
+    fireEvent.keyDown(screen.getByLabelText("Find an answer, or name a new question"), { key: "Escape" });
+
+    await enterAndStop(screen.getAllByLabelText("Folder name, more").slice(-1)[0]);
+    // Shown as the example project has it.
+    expect(await screen.findByText("01_BRIEFSummerCampaign260302")).toBeTruthy();
+    const t = await saveAndGet();
+    expect(t.tree).toContainEqual("01_BRIEF{name}{start|yymmdd}");
+  });
+
+  it("offers New Project's answer for selected text", async () => {
+    await openWithExamples();
+    fireEvent.click(screen.getByText("01_BRIEF"));
+    const box = (await screen.findByLabelText("Folder name")) as HTMLInputElement;
+    expect(screen.queryByRole("button", { name: "Use New Project's answer" })).toBeNull();
+    box.focus();
+    box.setSelectionRange(3, 8);
+    fireEvent.keyUp(box, { key: "ArrowLeft", shiftKey: true });
+    fireEvent.click(await screen.findByRole("button", { name: "Use New Project's answer" }));
+    // The picker opens with the selected text, ready to become a new question.
+    const find = (await screen.findByLabelText("Find an answer, or name a new question")) as HTMLInputElement;
+    expect(find.value).toBe("BRIEF");
+    fireEvent.click(screen.getByRole("option", { name: "Add “BRIEF” as a question" }));
+    await enterAndStop(screen.getAllByLabelText("Folder name, more").slice(-1)[0]);
+    const t = await saveAndGet();
+    expect(t.fields.map((f) => f.label)).toContain("BRIEF");
+    const key = t.fields.find((f) => f.label === "BRIEF")!.key;
+    expect(t.tree).toContainEqual(`01_{${key}}`);
+  });
+
+  it("never says “blank”", async () => {
+    await openWithExamples();
+    fireEvent.click(screen.getByRole("button", { name: "Has graphics" }));
+    fireEvent.click(screen.getByText("01_BRIEF"));
+    await screen.findByLabelText("Folder name");
+    fireEvent.click(within(screen.getByText("Fill in from New Project:").parentElement!).getByRole("button", { name: "More…" }));
+    const find = await screen.findByLabelText("Find an answer, or name a new question");
+    fireEvent.change(find, { target: { value: "Shoot day" } });
+    expect(screen.getByRole("option", { name: "Add “Shoot day” as a question" })).toBeTruthy();
+    const words = [document.body.textContent ?? ""];
+    document.body.querySelectorAll("*").forEach((el) => {
+      for (const a of ["aria-label", "placeholder", "title"]) words.push(el.getAttribute(a) ?? "");
+    });
+    expect(words.join(" ")).not.toMatch(/blank/i);
   });
 
   it("adds a folder inside a folder, named straight away, and saves it", async () => {
@@ -100,32 +203,29 @@ describe("TemplateEditor (one screen)", () => {
     expect(t.files).toEqual(VIDEO.files);
   });
 
-  it("types a blank into a name with {", async () => {
+  it("types an answer into a name with {", async () => {
     open();
     fireEvent.doubleClick(screen.getByText("01_BRIEF"));
     const box = await screen.findByLabelText("Folder name");
     fireEvent.change(box, { target: { value: "01_BRIEF_{" } });
-    const find = await screen.findByLabelText("Find or name a blank");
+    const find = await screen.findByLabelText("Find an answer, or name a new question");
     fireEvent.change(find, { target: { value: "proj" } });
     fireEvent.keyDown(find, { key: "Enter" });
-    // A new blank, made by typing a name that doesn't exist yet.
+    // A new question, made by typing a name that doesn't exist yet.
     const after = screen.getAllByLabelText("Folder name, more")[0];
     fireEvent.change(after, { target: { value: "_{" } });
-    const find2 = await screen.findByLabelText("Find or name a blank");
+    const find2 = await screen.findByLabelText("Find an answer, or name a new question");
     fireEvent.change(find2, { target: { value: "Shoot day" } });
-    fireEvent.click(screen.getByRole("option", { name: "Add “Shoot day” as a blank" }));
+    fireEvent.click(screen.getByRole("option", { name: "Add “Shoot day” as a question" }));
     fireEvent.keyDown(screen.getAllByLabelText("Folder name, more")[1], { key: "Escape" });
     // Escape cancels the whole rename: try again and commit with Enter instead.
     fireEvent.doubleClick(screen.getByText("01_BRIEF"));
     const box2 = await screen.findByLabelText("Folder name");
     fireEvent.change(box2, { target: { value: "01_{" } });
-    const find3 = await screen.findByLabelText("Find or name a blank");
+    const find3 = await screen.findByLabelText("Find an answer, or name a new question");
     fireEvent.change(find3, { target: { value: "Shoot" } });
     fireEvent.keyDown(find3, { key: "Enter" });
-    fireEvent.keyDown(screen.getAllByLabelText("Folder name, more")[0], { key: "Enter" });
-    await act(async () => {});
-    const box3 = screen.queryByLabelText("Folder name");
-    if (box3) fireEvent.keyDown(box3, { key: "Escape" });
+    await enterAndStop(screen.getAllByLabelText("Folder name, more")[0]);
     const t = await saveAndGet();
     expect(t.tree).toContainEqual("01_{shoot_day}");
     expect(t.fields.map((f) => f.label)).toContain("Shoot day");
@@ -133,30 +233,38 @@ describe("TemplateEditor (one screen)", () => {
 
   it("deletes without asking, and Undo brings it back", async () => {
     open();
-    fireEvent.click(screen.getByText("02_FOOTAGE"));
-    const tree = screen.getByRole("tree").parentElement!;
-    fireEvent.keyDown(tree, { key: "Delete" });
+    fireEvent.click(row("02_FOOTAGE"));
+    const treeBox = tree().parentElement!;
+    fireEvent.keyDown(treeBox, { key: "Delete" });
     expect(screen.queryByText("A_CAM")).toBeNull();
     expect(screen.getByRole("status").textContent).toContain("Deleted 02_FOOTAGE");
     fireEvent.click(screen.getByRole("button", { name: "Undo" }));
     expect(screen.getByText("A_CAM")).toBeTruthy();
     // And with the keyboard: Ctrl/Cmd+Z.
-    fireEvent.click(screen.getByText("01_BRIEF"));
-    fireEvent.keyDown(tree, { key: "Delete" });
+    fireEvent.click(row("01_BRIEF"));
+    fireEvent.keyDown(treeBox, { key: "Delete" });
     expect(screen.queryByText("01_BRIEF")).toBeNull();
     fireEvent.keyDown(window, { key: "z", ctrlKey: true, metaKey: true });
     expect(screen.getByText("01_BRIEF")).toBeTruthy();
   });
 
-  it("changes a blank's settings from the bottom line", () => {
+  it("opens the right-click menu from ⋯", async () => {
     open();
-    fireEvent.click(screen.getAllByRole("button", { name: "Has graphics" })[0]);
-    fireEvent.change(screen.getByLabelText("Blank name"), { target: { value: "Graphics" } });
+    fireEvent.click(screen.getByRole("button", { name: "More for 01_BRIEF" }));
+    await waitFor(() => expect(menuNew).toHaveBeenCalled());
+    expect(row("01_BRIEF").getAttribute("aria-selected")).toBe("true");
+  });
+
+  it("changes a question's settings from the bottom line", () => {
+    open();
+    fireEvent.click(screen.getByRole("button", { name: "Has graphics" }));
+    expect(screen.getByLabelText("Question: Has graphics")).toBeTruthy();
+    fireEvent.change(screen.getByLabelText("Question"), { target: { value: "Graphics" } });
     expect(screen.getByText("only if “Graphics”")).toBeTruthy();
-    fireEvent.click(screen.getByRole("button", { name: "Remove blank" }));
+    fireEvent.click(screen.getByRole("button", { name: "Remove question" }));
     // The folder stays, made always; Undo is offered.
     expect(screen.queryByText(/only if/)).toBeNull();
-    expect(screen.getByRole("status").textContent).toContain("Removed the blank");
+    expect(screen.getByRole("status").textContent).toContain("Removed the question");
   });
 
   it("asks before closing with unsaved changes", () => {

@@ -144,7 +144,11 @@ export const resetTemplate = (key: string) => s<boolean>("reset_template", { key
 export const templateDraft = (key: string) => s<TemplateDraft>("template_draft", { key });
 export const previewTemplate = (key: string, draft: Template) =>
   s<TemplatePreview>("preview_template", { key, draft });
-export const saveTemplate = (key: string, draft: Template, mode: SaveMode) =>
+/** The editor's names (single folder / file names, as typed) as the example project would have
+ *  them: the preview's example answers. Names that can't be written come back as typed. */
+export const exampleNames = (key: string, draft: Template, names: string[]) =>
+  s<string[]>("example_names", { key, draft, names });
+export const saveTemplate =(key: string, draft: Template, mode: SaveMode) =>
   s<Saved>("save_template", { key, draft, mode });
 /** Make a template from a folder (`null` = pick one). `null` back if cancelled. */
 export const templateFromFolder = (path: string | null) =>

@@ -15,7 +15,9 @@ use serde::{Deserialize, Serialize};
 use unicode_normalization::UnicodeNormalization;
 
 use crate::names::DEFAULT_CODE_PATTERN;
-use crate::plan::{plan_project, ClientValue, Date, FieldValue, Level, PlanContext, Values};
+use crate::plan::{
+    plan_project, render_names, ClientValue, Date, FieldValue, Level, PlanContext, Values,
+};
 use crate::staged::{OnDisk, Staged};
 use crate::template::{
     load_dir, FieldKind, FileEntry, LoadedTemplate, Template, TreeEntry, TreeRule, TEMPLATE_SCHEMA,
@@ -124,6 +126,25 @@ pub fn preview(draft: &Template, source: &LoadedTemplate, ex: &Example) -> Templ
         files: plan.files.into_iter().map(|f| f.to).collect(),
         problems,
     }
+}
+
+/// The editor shows every name as it comes out for the example project (the same answers as
+/// `preview`). `names` are single folder or file names as typed. A name with `{item}` that a
+/// "one folder for each" folder in the draft uses shows that question's first choice. Names
+/// that can't be written come back as typed.
+pub fn example_names(draft: &Template, ex: &Example, names: &[String]) -> Vec<String> {
+    let values = sample_values(draft, ex.today);
+    let first_choice = |name: &str| {
+        draft.tree.iter().find_map(|e| {
+            let key = e.each()?;
+            let last = e.name().rsplit('/').next().unwrap_or_default();
+            (last == name).then_some(())?;
+            draft.field(key)?.options.first().cloned()
+        })
+    };
+    let with_items: Vec<(String, Option<String>)> =
+        names.iter().map(|n| (n.clone(), first_choice(n))).collect();
+    render_names(draft, &values, &sample_ctx(ex), &with_items)
 }
 
 /// A plausible example answer for a text question: generic, never a real client or artist.

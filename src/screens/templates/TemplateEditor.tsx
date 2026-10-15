@@ -2,7 +2,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { Menu } from "@tauri-apps/api/menu";
 import { getCurrentWebview } from "@tauri-apps/api/webview";
 import { Button } from "../../components/ui";
-import { editorAddFiles, previewTemplate, saveTemplate } from "../../lib/commands";
+import { editorAddFiles, exampleNames, previewTemplate, saveTemplate } from "../../lib/commands";
 import {
   addFolder,
   formatName,
@@ -35,9 +35,9 @@ import {
   type FolderNode,
 } from "../../lib/templateDraft";
 import { errorMessage, type Field, type SaveMode, type Saved, type Template, type TemplatePreview } from "../../lib/types";
-import BlankSettings from "./BlankSettings";
 import { blankLabel } from "./NameField";
-import Tree, { fileRow, ROOT, rowOrder, type RowId } from "./Tree";
+import QuestionSettings from "./QuestionSettings";
+import Tree, { fileRow, ROOT, rowOrder, visibleNames, type RowId } from "./Tree";
 import styles from "./editor.module.css";
 
 /** Everything Undo can step back through. */
@@ -61,19 +61,22 @@ const NEW_FOLDER = "New folder";
 const isTyping = (t: EventTarget | null) => !!(t as HTMLElement | null)?.closest?.("input, textarea, select");
 const isMac = () => navigator.userAgent.includes("Mac");
 
-/** The template editor (PLAN 2026-10-13): one screen. The tree is the template; blanks are chips
- *  typed into names; right-click for the rest. Rust previews every change with the real planner
- *  and does the saving. */
+/** The template editor (PLAN 2026-10-13): one screen. The tree is the template, every name shown
+ *  as an example project would have it; click a name to change it, and New Project's answers go
+ *  in as chips. Right-click (or ⋯) for the rest. Rust previews every change with the real
+ *  planner and does the saving. */
 export default function TemplateEditor({ sourceKey, mode, start, note, onClose, onSaved }: Props) {
   const [hist, setHist] = useState<History<Doc>>(() => startHistory({ draft: start, nodes: toNodes(start.tree) }));
   const { draft, nodes } = hist.present;
   const [selected, setSelected] = useState<RowId | null>(null);
   const [renaming, setRenaming] = useState<RowId | null>(null);
+  const [newRow, setNewRow] = useState<RowId | null>(null);
   const [blank, setBlank] = useState<{ key: string; row?: RowId; index?: number } | null>(null);
   const [showMore, setShowMore] = useState(false);
   const [dropPath, setDropPath] = useState<string | null>(null);
   const [preview, setPreview] = useState<TemplatePreview | null>(null);
   const [previewFor, setPreviewFor] = useState<string | null>(null);
+  const [examples, setExamples] = useState<Record<string, string>>({});
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [toast, setToast] = useState<{ text: string; undo: boolean } | null>(null);
@@ -100,11 +103,14 @@ export default function TemplateEditor({ sourceKey, mode, start, note, onClose, 
 
   // Ask Rust what this draft would make (debounced). Only the reply to the latest draft counts,
   // and Save waits until it has arrived.
+  // With it, every name the tree shows as the example project has it (one call for all of them).
   const fullJson = JSON.stringify(full);
+  const namesJson = JSON.stringify(visibleNames(draft.folderName, nodes, files));
   useEffect(() => {
     let live = true;
     const t = setTimeout(() => {
-      previewTemplate(sourceKey, JSON.parse(fullJson) as Template)
+      const d = JSON.parse(fullJson) as Template;
+      previewTemplate(sourceKey, d)
         .then((p) => {
           if (!live) return;
           setPreview(p);
@@ -112,12 +118,24 @@ export default function TemplateEditor({ sourceKey, mode, start, note, onClose, 
           setError(null);
         })
         .catch((e) => live && setError(errorMessage(e)));
+      const names = JSON.parse(namesJson) as string[];
+      exampleNames(sourceKey, d, names)
+        .then((out) => {
+          if (!live) return;
+          const next: Record<string, string> = {};
+          names.forEach((n, i) => {
+            if (typeof out[i] === "string") next[n] = out[i];
+          });
+          setExamples(next);
+        })
+        // Names then show as typed; the preview reports anything that's really wrong.
+        .catch((e) => console.warn("Example names didn't come back", e));
     }, 200);
     return () => {
       live = false;
       clearTimeout(t);
     };
-  }, [fullJson, sourceKey]);
+  }, [fullJson, namesJson, sourceKey]);
   const fresh = previewFor === fullJson;
   const problems = [...tree.problems, ...(preview?.problems ?? [])];
 
@@ -130,9 +148,10 @@ export default function TemplateEditor({ sourceKey, mode, start, note, onClose, 
     draft: { ...d.draft, files: followMoves(d.draft.files ?? [], d.nodes, next) },
   });
 
-  const startRename = (id: RowId) => {
+  const startRename = (id: RowId, isNew = false) => {
     setSelected(id);
     setRenaming(id);
+    setNewRow(isNew ? id : null);
   };
 
   const addInside = (parent: string | null) => {
@@ -143,7 +162,7 @@ export default function TemplateEditor({ sourceKey, mode, start, note, onClose, 
       return { ...d, nodes: r.nodes };
     });
     // The new folder's name is ready to type over.
-    setTimeout(() => made && startRename(made), 0);
+    setTimeout(() => made && startRename(made, true), 0);
   };
 
   const rename = (id: RowId, value: string, then?: "below" | "in" | "out") => {
@@ -184,7 +203,7 @@ export default function TemplateEditor({ sourceKey, mode, start, note, onClose, 
           made = r.id;
           return { ...d, nodes: r.nodes };
         });
-        setTimeout(() => made && startRename(made), 0);
+        setTimeout(() => made && startRename(made, true), 0);
       } else if (then) setTimeout(() => startRename(id), 0);
       else treeRef.current?.focus();
     }
@@ -258,11 +277,11 @@ export default function TemplateEditor({ sourceKey, mode, start, note, onClose, 
       };
     });
 
-  // ── Blanks ──
+  // ── Questions (what New Project asks; their answers go into names) ──
 
-  /** A new blank (a question New Project asks), named `label`. Returns its key. */
+  /** A new question New Project asks, named `label`. Returns its key. */
   const newBlank = (label: string, kind: Field["type"] = /date/i.test(label) ? "date" : "text"): string => {
-    const name = label.trim() || "New blank";
+    const name = label.trim() || "New question";
     const key = newKey(
       name,
       draft.fields.map((f) => f.key),
@@ -282,7 +301,7 @@ export default function TemplateEditor({ sourceKey, mode, start, note, onClose, 
       return { draft: t, nodes: toNodes(t.tree) };
     });
     setBlank(null);
-    say(`Removed the blank “${label}” and the names that used it.`, true);
+    say(`Removed the question “${label}” and took its answer out of the names.`, true);
   };
 
   /** The name a chip sits in, and a way to change it. */
@@ -411,7 +430,7 @@ export default function TemplateEditor({ sourceKey, mode, start, note, onClose, 
             text: "Only make this if…",
             items: [
               ...ticks.map((f) => ({ text: `“${f.label}” is ticked`, action: () => setWhen(id, f.key) })),
-              { text: "A new yes / no blank", action: () => setWhen(id, newBlank(`Make ${folderLabel}?`, "bool")) },
+              { text: "A new yes / no question", action: () => setWhen(id, newBlank(`Make ${folderLabel}?`, "bool")) },
               ...(node.when ? [{ item: "Separator" as const }, { text: "Always make it", action: () => setWhen(id, null) }] : []),
             ],
           },
@@ -419,7 +438,7 @@ export default function TemplateEditor({ sourceKey, mode, start, note, onClose, 
             text: "One folder for each…",
             items: [
               ...picks.map((f) => ({ text: `choice in “${f.label}”`, action: () => setEach(id, f.key) })),
-              { text: "A new pick-several blank", action: () => setEach(id, newBlank(`${folderLabel} choices`, "multi")) },
+              { text: "A new pick-several question", action: () => setEach(id, newBlank(`${folderLabel} choices`, "multi")) },
               ...(eachKid ? [{ item: "Separator" as const }, { text: "Stop", action: () => setEach(id, null) }] : []),
             ],
           },
@@ -499,7 +518,6 @@ export default function TemplateEditor({ sourceKey, mode, start, note, onClose, 
   };
 
   const asks = draft.fields;
-  const example = preview && preview.problems.length === 0 ? preview.folderName : "";
 
   return (
     <div className={styles.scrim}>
@@ -547,15 +565,18 @@ export default function TemplateEditor({ sourceKey, mode, start, note, onClose, 
           </div>
         )}
 
+        <p className={styles.lead}>A new project gets these folders. Click a name to change it.</p>
+
         <div ref={treeRef} className={styles.tree} tabIndex={0} onKeyDown={onTreeKey}>
           <Tree
             folderName={draft.folderName}
-            example={example}
+            examples={examples}
             nodes={nodes}
             files={files}
             fields={draft.fields}
             selected={selected}
             renaming={renaming}
+            fresh={newRow}
             dropPath={dropPath}
             onSelect={setSelected}
             onStartRename={startRename}
@@ -585,8 +606,8 @@ export default function TemplateEditor({ sourceKey, mode, start, note, onClose, 
         </div>
 
         {blank && (
-          <BlankSettings
-            blankKey={blank.key}
+          <QuestionSettings
+            questionKey={blank.key}
             fields={draft.fields}
             written={chipTransform}
             onChange={updateField}
@@ -596,20 +617,29 @@ export default function TemplateEditor({ sourceKey, mode, start, note, onClose, 
         )}
 
         <div className={styles.asks} aria-label="What New Project asks">
-          <span className={styles.asksLabel}>Nest asks for:</span>
-          {asks.map((f) => (
-            <button key={f.key} type="button" className={styles.chip} onClick={() => setBlank({ key: f.key })}>
-              {blankLabel(f.key, draft.fields)}
-            </button>
+          <span className={styles.asksLabel}>New Project will ask for:</span>
+          {asks.length === 0 && <span>nothing yet</span>}
+          {asks.map((f, i) => (
+            <span key={f.key}>
+              <button
+                type="button"
+                className={`${styles.askLink} ${blank?.key === f.key ? styles.askOpen : ""}`}
+                aria-expanded={blank?.key === f.key}
+                onClick={() => setBlank(blank?.key === f.key ? null : { key: f.key })}
+              >
+                {blankLabel(f.key, draft.fields)}
+              </button>
+              {i < asks.length - 1 && ","}
+            </span>
           ))}
           <span className={styles.spacer} />
           <Button
             onClick={() => {
-              const key = newBlank("New blank");
+              const key = newBlank("New question");
               setBlank({ key });
             }}
           >
-            Add blank
+            Add a question
           </Button>
         </div>
 
@@ -625,7 +655,7 @@ export default function TemplateEditor({ sourceKey, mode, start, note, onClose, 
               </span>
             ) : (
               <span className={styles.hint}>
-                {note ?? "Right-click a folder for more. Changes apply to new projects only; projects you already made are never touched."}
+                {note ?? "Changes apply to new projects only. Projects you already made are never touched."}
               </span>
             )}
           </div>

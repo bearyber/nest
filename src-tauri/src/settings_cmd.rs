@@ -783,6 +783,23 @@ pub fn preview_template(
     Ok(template_edit::preview(&draft, &source.loaded, &ex))
 }
 
+/// The editor's names as the example project would have them (pure: writes nothing). `key` is
+/// the editor session; the example answers are the preview's, so the two always agree.
+#[tauri::command(async)]
+pub fn example_names(
+    state: State<'_, AppState>,
+    key: String,
+    draft: Template,
+    names: Vec<String>,
+) -> AppResult<Vec<String>> {
+    let _ = key; // same answers for every session; kept so the call matches preview_template
+    Ok(template_edit::example_names(
+        &draft,
+        &example(&state)?,
+        &names,
+    ))
+}
+
 /// Save the editor's draft as one of your templates. `key` is the template the editor started
 /// from; Rust picks the id and version.
 #[tauri::command(async)]

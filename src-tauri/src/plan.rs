@@ -596,6 +596,74 @@ fn listed(items: &[String]) -> String {
     }
 }
 
+/// Single names (one folder or file name each, no `/`) as the planner would write them with
+/// these answers: the same transforms (answers in pascal case unless the name says otherwise),
+/// gap tidying and sanitiser, and the first free job code. Each name comes with the choice its
+/// `{item}` stands for (a "one folder for each" folder), if any. A name that can't be written
+/// (broken braces, an unknown answer, `{item}` without a choice, or one that comes out empty
+/// or reserved) comes back as typed, so the editor can show it as it is. Pure.
+pub fn render_names(
+    t: &Template,
+    input: &Values,
+    ctx: &PlanContext,
+    names: &[(String, Option<String>)],
+) -> Vec<String> {
+    let today = format!(
+        "{:04}-{:02}-{:02}",
+        ctx.date.year, ctx.date.month, ctx.date.day
+    );
+    let no_client = ctx.own_code.is_some();
+    let values = resolve_values(t, input, &today, no_client, &mut Issues::default());
+    let client_code = match &ctx.own_code {
+        Some(own) => normalize_client_code(own).ok(),
+        None => t
+            .fields
+            .iter()
+            .find(|f| f.kind == FieldKind::Client)
+            .and_then(|f| match values.get(&f.key) {
+                Some(FieldValue::Client(c)) => Some(c.code.clone()),
+                _ => None,
+            }),
+    }
+    .unwrap_or_else(|| PLACEHOLDER_CODE.to_string());
+    let pattern = CodePattern::parse(&ctx.code_pattern)
+        .or_else(|_| CodePattern::parse(DEFAULT_CODE_PATTERN))
+        .expect("default pattern is valid");
+    let vars = Vars {
+        template: t,
+        values: &values,
+        builtins: builtins(t, ctx, &client_code),
+        job_code: pattern.format(&client_code, &ctx.marker, 1),
+        item: None,
+        all_optional: no_client,
+    };
+    names
+        .iter()
+        .map(|(name, item)| {
+            let Ok(pieces) = parse_pattern(name) else {
+                return name.clone();
+            };
+            let known = |key: &str| {
+                key == "jobCode"
+                    || vars.builtins.contains_key(key)
+                    || t.field(key).is_some()
+                    || (key == ITEM && item.is_some())
+            };
+            if pieces
+                .iter()
+                .any(|p| matches!(p, Piece::Var { name, .. } if !known(name)))
+            {
+                return name.clone();
+            }
+            let vars = match item {
+                Some(i) => vars.with_item(i),
+                None => vars.clone(),
+            };
+            sanitize_segment(&vars.render(&pieces, Mode::Name)).unwrap_or_else(|_| name.clone())
+        })
+        .collect()
+}
+
 /// Replace `{name}` / `{name|transform}` in a starter file's text with `fill` values.
 /// Unknown variables and stray braces are left untouched (spec §12a #11).
 pub fn fill_text(text: &str, fill: &BTreeMap<String, String>) -> String {
@@ -1819,6 +1887,111 @@ mod tests {
         );
         let plan = plan_project(&mv(), &v, &ctx());
         assert!(errors(&plan)[0].contains("2 to 5"), "{:?}", plan.issues);
+    }
+
+    fn names(list: &[(&str, Option<&str>)]) -> Vec<(String, Option<String>)> {
+        list.iter()
+            .map(|(n, i)| (n.to_string(), i.map(str::to_string)))
+            .collect()
+    }
+
+    #[test]
+    fn render_names_matches_the_planner() {
+        let mv = mv();
+        let v = values("KIRA", "summer nights");
+        let plan = plan_project(&mv, &v, &ctx());
+        let out = render_names(
+            &mv.template,
+            &v,
+            &ctx(),
+            &names(&[
+                (&mv.template.folder_name, None),
+                ("{artist|lower}-{song|upper}", None),
+                ("{song}", None),
+                ("{song|kebab}.txt", None),
+                ("01_REF", None),
+            ]),
+        );
+        assert_eq!(out[0], plan.folder_name);
+        assert_eq!(out[1], "kira-SUMMER NIGHTS");
+        // Answers are pascal case in names unless the name says otherwise.
+        assert_eq!(out[2], "SummerNights");
+        assert_eq!(out[3], "summer-nights.txt");
+        assert_eq!(out[4], "01_REF");
+    }
+
+    #[test]
+    fn render_names_tidies_empty_answers_and_cleans_names() {
+        let mv = mv();
+        let v = values("Kira", "");
+        let out = render_names(
+            &mv.template,
+            &v,
+            &ctx(),
+            &names(&[
+                ("{artist}: {song}?", None),
+                ("  {artist}.  ", None),
+                ("아이유_{artist}", None),
+                ("{lookdev}", None),
+            ]),
+        );
+        // A missing required answer shows its label (as in the planner's preview).
+        assert_eq!(out[0], "Kira Song");
+        // The sanitiser takes out what Windows can't have, and trailing dots and spaces.
+        assert_eq!(out[1], "Kira");
+        assert_eq!(out[2], "아이유_Kira");
+        assert_eq!(out[3], "No");
+
+        // No client: every answer is optional, and an empty one takes its separator with it.
+        let no_client = PlanContext {
+            own_code: Some("ME".into()),
+            ..ctx()
+        };
+        let out = render_names(
+            &mv.template,
+            &v,
+            &no_client,
+            &names(&[
+                ("{artist}_{song}_X", None),
+                ("A_{song}_B", None),
+                ("{song}", None),
+                ("{jobCode}", None),
+            ]),
+        );
+        assert_eq!(out[0], "Kira_X");
+        assert_eq!(out[1], "A_B");
+        // Comes out empty: shown as typed.
+        assert_eq!(out[2], "{song}");
+        assert_eq!(out[3], "ME-L01");
+    }
+
+    #[test]
+    fn render_names_item_and_unknown_or_broken_names_as_typed() {
+        let mv = mv();
+        let v = values("KIRA", "Song");
+        let out = render_names(
+            &mv.template,
+            &v,
+            &ctx(),
+            &names(&[
+                ("{item}", Some("16x9")),
+                ("{item|upper}_OUT", Some("9x16 vert")),
+                ("{item}", None),
+                ("{nope}_A", None),
+                ("{artist", None),
+                ("{artist|shout}", None),
+                ("CON", None),
+                ("{jobCode}", None),
+            ]),
+        );
+        assert_eq!(out[0], "16x9");
+        assert_eq!(out[1], "9X16 VERT_OUT");
+        assert_eq!(out[2], "{item}");
+        assert_eq!(out[3], "{nope}_A");
+        assert_eq!(out[4], "{artist");
+        assert_eq!(out[5], "{artist|shout}");
+        assert_eq!(out[6], "CON");
+        assert_eq!(out[7], "VX-L01");
     }
 
     #[test]

@@ -18,19 +18,19 @@ export const KINDS: { kind: FieldKind; label: string }[] = [
 const canRequire = (k: FieldKind) => k === "text" || k === "longtext" || k === "date" || k === "select";
 
 interface Props {
-  blankKey: string;
+  questionKey: string;
   fields: Field[];
-  /** Opened from a chip: how the blank is written there (its transform), and a way to change it. */
+  /** Opened from a chip: how the answer is written there (its transform), and a way to change it. */
   written?: { transform?: string; onChange: (transform: string | undefined) => void };
   onChange: (field: Field) => void;
   onRemove: (key: string) => void;
   onClose: () => void;
 }
 
-/** One blank's settings, under the tree: its name, what kind of answer it is, whether it must be
+/** One question's settings, under the tree: its name, what kind of answer it is, whether it must be
  *  filled in, its choices, and (opened from a chip) how it's written in that name. */
-export default function BlankSettings({ blankKey, fields, written, onChange, onRemove, onClose }: Props) {
-  const f = fields.find((x) => x.key === blankKey);
+export default function QuestionSettings({ questionKey, fields, written, onChange, onRemove, onClose }: Props) {
+  const f = fields.find((x) => x.key === questionKey);
   const builtin = !f;
   const isClient = f?.type === "client";
   const kind: FieldKind | "builtin" = f ? f.type : "builtin";
@@ -38,18 +38,19 @@ export default function BlankSettings({ blankKey, fields, written, onChange, onR
   const writtenChoices = builtin ? [] : styleChoices(styleKind as FieldKind);
 
   return (
-    <section className={styles.settings} aria-label={`Blank: ${blankLabel(blankKey, fields)}`}>
+    <section className={styles.settings} aria-label={`Question: ${blankLabel(questionKey, fields)}`}>
       <div className={styles.settingsRow}>
+        {!builtin && <span>Question:</span>}
         {f && !isClient ? (
           <input
             className={styles.input}
             value={f.label}
             maxLength={40}
-            aria-label="Blank name"
+            aria-label="Question"
             onChange={(e) => onChange({ ...f, label: e.target.value })}
           />
         ) : (
-          <strong>{blankLabel(blankKey, fields)}</strong>
+          <strong>{blankLabel(questionKey, fields)}</strong>
         )}
         {isClient && <span>Makes the job code. For personal jobs, tick “No client” in New Project.</span>}
         {builtin && <span>Filled in by Nest.</span>}
@@ -96,7 +97,7 @@ export default function BlankSettings({ blankKey, fields, written, onChange, onR
           </label>
         )}
         <span className={styles.spacer} />
-        {f && !isClient && <Button onClick={() => onRemove(f.key)}>Remove blank</Button>}
+        {f && !isClient && <Button onClick={() => onRemove(f.key)}>Remove question</Button>}
         <Button onClick={onClose}>Done</Button>
       </div>
       {f && !isClient && <Extras field={f} onChange={onChange} />}
