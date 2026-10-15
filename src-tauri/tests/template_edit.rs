@@ -7,8 +7,8 @@ use std::path::{Path, PathBuf};
 use nest_lib::plan::Date;
 use nest_lib::template::{Template, TreeEntry, TreeRule};
 use nest_lib::template_edit::{
-    new_id, preview, reset_to_original, retire_older_copies, save, tidy_all, trash_all_versions,
-    Example, SaveMode,
+    new_id, preview, reset_to_original, retire_older_copies, save, save_kit_folder, tidy_all,
+    trash_all_versions, with_kit_folder, Example, SaveMode,
 };
 use nest_lib::template_io::{import, load_installed, Installed, BUILT_IN_IDS, LIMITS};
 
@@ -468,4 +468,133 @@ fn nothing_is_binned_unless_the_new_copy_is_loaded() {
     let never = |_: &Installed| -> Result<(), String> { panic!("must not bin") };
     let missing = s.user.join("not-there");
     assert!(retire_older_copies(&v1.id, &missing, &s.installed(), &never).is_err());
+}
+
+/// Where the kit goes in a template: the folder names with `"kit": true`.
+fn kit_folders(t: &Template) -> Vec<&str> {
+    t.tree
+        .iter()
+        .filter(|e| e.kit())
+        .map(|e| e.name())
+        .collect()
+}
+
+/// New Project's "Put them in" (v0.6): one of Nest's templates becomes yours (same id) with a
+/// place for client files; choosing another folder moves it there as a new version, and the
+/// older copy goes to the bin.
+#[test]
+fn put_client_files_in_a_folder_saves_a_new_version() {
+    let s = Setup::new();
+    let video = s.get("video", true);
+    assert!(kit_folders(&video.loaded.template).is_empty());
+
+    // One of Nest's → yours, with the same id, like Customize.
+    let mine = save_kit_folder(
+        &video,
+        "01_BRIEF",
+        &s.installed(),
+        &s.user,
+        BUILT_IN_IDS,
+        &Example::new(TODAY),
+    )
+    .unwrap();
+    assert_eq!(mine.template.id, "video");
+    assert_eq!(mine.template.version, video.loaded.template.version + 1);
+    assert_eq!(kit_folders(&mine.template), ["01_BRIEF"]);
+    assert!(
+        mine.files.contains("starter/NOTES.md"),
+        "starter files came along"
+    );
+    let offered = s
+        .installed()
+        .into_iter()
+        .find(|t| !t.superseded && t.loaded.template.id == "video")
+        .unwrap();
+    assert!(!offered.built_in, "yours is offered now");
+
+    // Yours → its next version, with the kit on that folder only.
+    let v2 = save_kit_folder(
+        &offered,
+        "02_FOOTAGE",
+        &s.installed(),
+        &s.user,
+        BUILT_IN_IDS,
+        &Example::new(TODAY),
+    )
+    .unwrap();
+    assert_eq!(v2.template.version, mine.template.version + 1);
+    assert_eq!(kit_folders(&v2.template), ["02_FOOTAGE"]);
+    // The folder that had it is a plain folder again; everything else is unchanged.
+    assert_eq!(v2.template.tree[0], TreeEntry::Folder("01_BRIEF".into()));
+    assert_eq!(v2.template.tree.len(), video.loaded.template.tree.len());
+    assert_eq!(v2.template.fields, video.loaded.template.fields);
+
+    // One copy per template: the older one goes to the bin.
+    let bin = s.user.parent().unwrap().join("bin");
+    let moved = retire_older_copies("video", &v2.dir, &s.installed(), &stub_bin(&bin)).unwrap();
+    assert_eq!(moved, 1);
+    let yours: Vec<u32> = s
+        .installed()
+        .iter()
+        .filter(|i| !i.built_in && i.loaded.template.id == "video")
+        .map(|i| i.loaded.template.version)
+        .collect();
+    assert_eq!(yours, [v2.template.version]);
+    assert_eq!(std::fs::read_dir(&bin).unwrap().count(), 1);
+}
+
+#[test]
+fn put_client_files_refuses_folders_made_only_sometimes_or_not_there() {
+    let s = Setup::new();
+    let video = s.get("video", true);
+    for (folder, says) in [
+        ("06_GRAPHICS", "only made sometimes"), // only if a box is ticked
+        ("05_EXPORTS/{item}", "only made sometimes"), // one per choice
+        ("05_EXPORTS", "only made sometimes"),  // only the parent of a one-per folder
+        ("99_NOPE", "isn't one of this template's folders"),
+        ("", "Choose a folder"),
+    ] {
+        let err = save_kit_folder(
+            &video,
+            folder,
+            &s.installed(),
+            &s.user,
+            BUILT_IN_IDS,
+            &Example::new(TODAY),
+        )
+        .unwrap_err();
+        assert!(err.contains(says), "{folder}: {err}");
+    }
+    assert!(
+        s.installed().iter().all(|t| t.built_in),
+        "nothing was saved"
+    );
+}
+
+#[test]
+fn put_client_files_in_a_nested_folder_or_its_parent() {
+    let s = Setup::new();
+    let mut t = s.get("video", true).loaded.template;
+    t.tree
+        .insert(2, TreeEntry::Folder("02_FOOTAGE/DAY1".into()));
+    t.tree.push(TreeEntry::Rule(TreeRule {
+        name: "07_BRAND".into(),
+        kit: true,
+        ..TreeRule::default()
+    }));
+
+    // A nested folder listed in the template; the one that had it is plain again.
+    let nested = with_kit_folder(&t, "02_FOOTAGE/DAY1").unwrap();
+    assert_eq!(kit_folders(&nested), ["02_FOOTAGE/DAY1"]);
+    assert_eq!(
+        nested.tree.last(),
+        Some(&TreeEntry::Folder("07_BRAND".into()))
+    );
+
+    // A parent that's only there because of a folder inside it: added as its own entry.
+    t.tree.remove(1); // "02_FOOTAGE" itself
+    let parent = with_kit_folder(&t, "02_FOOTAGE").unwrap();
+    assert_eq!(kit_folders(&parent), ["02_FOOTAGE"]);
+    assert_eq!(parent.tree.len(), t.tree.len() + 1);
+    assert!(parent.validate().is_ok());
 }

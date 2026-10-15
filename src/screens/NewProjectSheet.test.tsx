@@ -21,6 +21,12 @@ vi.mock("../lib/commands", () => ({
             { key: "ratios", label: "Delivery ratios", type: "multi", options: ["16x9", "9x16"], default: ["16x9"] },
             { key: "lookdev", label: "Include look dev", type: "bool", default: false },
           ],
+          tree: [
+            "01_REF",
+            "02_BRAND/LOGOS",
+            { name: "03_LOOKDEV", when: "lookdev" },
+            { name: "04_DELIVERY/{item}", each: "ratios" },
+          ],
         },
       ],
       spaces: ["Work", "Personal"],
@@ -57,23 +63,30 @@ vi.mock("../lib/commands", () => ({
   }),
   createProject: vi.fn(),
   chooseJobsRoot: vi.fn(async () => null),
+  choosePersonalRoot: vi.fn(async () => null),
   chooseClientKit: vi.fn(async () => null),
+  setTemplateKitFolder: vi.fn(async () => {}),
   cancelCreate: vi.fn(async () => {}),
 }));
 
 vi.mock("@tauri-apps/api/event", () => ({ listen: vi.fn(async () => () => {}) }));
 
 import * as commands from "../lib/commands";
-import type { PlanKit } from "../lib/types";
-import NewProjectSheet from "./NewProjectSheet";
+import type { Issue, PlanKit } from "../lib/types";
+import NewProjectSheet, { clientFilePlaces, shortPath } from "./NewProjectSheet";
 
-/** Plans like the stand-in above, plus this client kit. Returns a way to go back. */
-function withKit(kit: PlanKit) {
+/** Plans like the stand-in above, plus these changes. Returns a way to go back. */
+function planWith(extra: Partial<Plan>) {
   const plan = vi.mocked(commands.planProject);
   const base = plan.getMockImplementation()!;
-  plan.mockImplementation(async (req) => ({ ...(await base(req)), kit }));
+  plan.mockImplementation(async (req) => {
+    const p = await base(req);
+    return { ...p, ...extra, issues: [...p.issues, ...(extra.issues ?? [])] };
+  });
   return () => plan.mockImplementation(base);
 }
+
+const withKit = (kit: PlanKit) => planWith({ kit });
 
 const KIT: PlanKit = {
   state: "ready",
@@ -87,7 +100,16 @@ const KIT: PlanKit = {
   sample: ["02_BRAND/logo.png"],
 };
 
-afterEach(cleanup);
+const NONE: PlanKit = { ...KIT, state: "missing", source: undefined, fingerprint: undefined, count: 0, bytes: 0, sample: [] };
+
+/** Everything the sheet shows as one string (lines made of several pieces read as a whole). */
+const shown = () => document.body.textContent ?? "";
+
+afterEach(() => {
+  cleanup();
+  sessionStorage.clear();
+  vi.clearAllMocks();
+});
 
 describe("NewProjectSheet", () => {
   it("renders fields from the template", async () => {
@@ -109,15 +131,56 @@ describe("NewProjectSheet", () => {
     expect(off.getAttribute("aria-pressed")).toBe("false");
     fireEvent.click(off);
     expect(off.getAttribute("aria-pressed")).toBe("true");
-    // Location has a real Change… button; space is a segmented control.
+  });
+
+  it("sums up where it goes in one line", async () => {
+    render(<NewProjectSheet onClose={() => {}} onCreated={() => {}} />);
+    await waitFor(() => expect(shown()).toContain("Goes in D:/NestDev · Work · VX-L01"));
+    // The controls stay out of the way until Change…
+    expect(screen.queryByRole("button", { name: "Work" })).toBeNull();
+    expect(screen.queryByText("Folder name")).toBeNull();
+    expect(screen.queryByLabelText("Edit job code")).toBeNull();
+  });
+
+  it("Change… shows the location, space, folder name and job code, and stays open", async () => {
+    render(<NewProjectSheet onClose={() => {}} onCreated={() => {}} />);
+    const change = await screen.findByRole("button", { name: "Change…" });
+    expect(change.getAttribute("aria-expanded")).toBe("false");
+    fireEvent.click(change);
+    // Location keeps its own Change… (the folder picker); Space is a segmented control.
+    expect(screen.getByText("Location")).toBeTruthy();
     expect(screen.getByRole("button", { name: "Change…" })).toBeTruthy();
     expect(screen.getByRole("button", { name: "Work" }).getAttribute("aria-pressed")).toBe("true");
+    expect(screen.getByText("Folder name")).toBeTruthy();
+    expect(screen.getByLabelText("Edit job code")).toBeTruthy();
+    const done = screen.getByRole("button", { name: "Done" });
+    expect(done.getAttribute("aria-expanded")).toBe("true");
+
+    // Remembered for the session: the next New Project opens with the controls showing.
+    cleanup();
+    render(<NewProjectSheet onClose={() => {}} onCreated={() => {}} />);
+    expect(await screen.findByRole("button", { name: "Done" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Work" })).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "Done" }));
+    expect(screen.queryByRole("button", { name: "Work" })).toBeNull();
+  });
+
+  it("shows a job code error without Change… and opens the controls", async () => {
+    const issue: Issue = { level: "error", field: "jobCode", message: 'Job code "VX-L01" is already used' };
+    const restore = planWith({ issues: [issue] });
+    render(<NewProjectSheet onClose={() => {}} onCreated={() => {}} />);
+    expect(await screen.findByText('Job code "VX-L01" is already used')).toBeTruthy();
+    // Open by itself, with nothing to close while the error stands.
+    expect(screen.getByRole("button", { name: "Work" })).toBeTruthy();
+    expect(screen.getByLabelText("Edit job code")).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "Done" })).toBeNull();
+    restore();
   });
 
   it("keeps Create disabled until required fields are valid", async () => {
     render(<NewProjectSheet onClose={() => {}} onCreated={() => {}} />);
     const create = await screen.findByRole("button", { name: /^Create/ });
-    // Shown twice: the Folder row and the preview tree's root.
+    // The preview tree's root.
     await screen.findAllByText("VX-L01_Artist");
     expect((create as HTMLButtonElement).disabled).toBe(true);
     expect(screen.getByText("Artist is required")).toBeTruthy(); // footer hint
@@ -133,18 +196,18 @@ describe("NewProjectSheet", () => {
     await screen.findAllByText("VX-L01_Artist");
     expect(create.disabled).toBe(true);
     expect(screen.getByText("D:/NestDev")).toBeTruthy();
-    expect(screen.queryByText("Your Personal folder")).toBeNull();
 
     fireEvent.click(screen.getByLabelText("No client (personal or passion project)"));
     // It goes to the Personal folder chosen in Settings (shown from the Plan, once it's back).
     expect(await screen.findByText("D:/Personal")).toBeTruthy();
-    expect(screen.getByText("Your Personal folder")).toBeTruthy();
     expect(screen.queryByPlaceholderText("Name")).toBeNull(); // the client name box is gone
     expect(screen.getByText(/Every question is optional/)).toBeTruthy();
     await screen.findAllByText("OWN-L01");
     await waitFor(() => expect(create.disabled).toBe(false));
 
     // In the Personal space it's always on and can't be unticked.
+    fireEvent.click(screen.getByRole("button", { name: "Change…" }));
+    expect(screen.getByText("Your Personal folder")).toBeTruthy();
     fireEvent.click(screen.getByRole("button", { name: "Personal" }));
     fireEvent.click(screen.getByLabelText("No client (personal or passion project)"));
     const box = screen.getByLabelText("No client (personal or passion project)") as HTMLInputElement;
@@ -163,17 +226,28 @@ describe("NewProjectSheet", () => {
     expect((screen.getByLabelText("Client code") as HTMLInputElement).value).toBe("VX");
   });
 
-  it("shows the client kit and sends its fingerprint with Create", async () => {
+  it("says nothing about client files until there's a client with some", async () => {
+    render(<NewProjectSheet onClose={() => {}} onCreated={() => {}} />);
+    await screen.findAllByText("VX-L01_Artist");
+    expect(shown()).not.toContain("'s files");
+    expect(shown()).not.toMatch(/kit/i);
+  });
+
+  it("shows the client's files under the Client field and sends their fingerprint with Create", async () => {
     const restore = withKit(KIT);
     const create = vi.mocked(commands.createProject);
     create.mockResolvedValue({ key: "k", jobCode: "VX-L01", title: "KIRA", root: "D:/NestDev/x", bumped: false });
     const onCreated = vi.fn();
     render(<NewProjectSheet onClose={() => {}} onCreated={onCreated} />);
-    expect(await screen.findByText(/Client kit: Vertex Studio · 38 files · 1\.2 GB/)).toBeTruthy();
+    expect(await screen.findByText(/^Vertex Studio's files: 38 files · 1\.2 GB ·/)).toBeTruthy();
     expect(screen.getByText(/Online-only files will be downloaded while copying/)).toBeTruthy();
-    // The kit's first files show in the preview, inside its folder; the rest are counted.
+    expect(shown()).not.toMatch(/kit/i);
+    // Their first files show in the preview, inside their folder; the rest are counted.
     expect(screen.getByText("logo.png")).toBeTruthy();
-    expect(screen.getByText("…and 37 more files from the kit")).toBeTruthy();
+    expect(screen.getByText("…and 37 more files")).toBeTruthy();
+    // Change = choose another folder for this client.
+    fireEvent.click(screen.getByRole("button", { name: "Change" }));
+    await waitFor(() => expect(commands.chooseClientKit).toHaveBeenCalledWith("VX", "Vertex Studio"));
 
     fireEvent.change(screen.getByLabelText(/^Artist/), { target: { value: "KIRA" } });
     const button = (await screen.findByRole("button", { name: /^Create/ })) as HTMLButtonElement;
@@ -184,18 +258,57 @@ describe("NewProjectSheet", () => {
     restore();
   });
 
-  it("offers to choose a kit folder when the client has none, and explains a template without a place", async () => {
-    const restore = withKit({ ...KIT, state: "missing", source: undefined, fingerprint: undefined, count: 0, bytes: 0, sample: [] });
+  it("offers Add… when the client has no files, and hides the line for No client", async () => {
+    const restore = withKit(NONE);
     render(<NewProjectSheet onClose={() => {}} onCreated={() => {}} />);
-    expect(await screen.findByText(/No kit for Vertex Studio/)).toBeTruthy();
+    expect(await screen.findByText(/^Vertex Studio's files: none ·/)).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "Add…" }));
+    await waitFor(() => expect(commands.chooseClientKit).toHaveBeenCalledWith("VX", "Vertex Studio"));
+
+    fireEvent.click(screen.getByLabelText("No client (personal or passion project)"));
+    expect(screen.queryByText(/Vertex Studio's files/)).toBeNull();
+    restore();
+  });
+
+  it("asks where to put the client's files when the template has no place, and saves the choice", async () => {
+    const restore = withKit({ ...NONE, state: "noPlace", source: "D:/Kits/VX" });
+    render(<NewProjectSheet onClose={() => {}} onCreated={() => {}} />);
+    const select = (await screen.findByLabelText(/Vertex Studio's files · Put them in/)) as HTMLSelectElement;
+    // Folders that are always made, top-level and nested; not "only if" or "one per" ones.
+    const options = Array.from(select.options).map((o) => o.value);
+    expect(options).toEqual(["", "01_REF", "02_BRAND", "02_BRAND/LOGOS"]);
+    const contexts = vi.mocked(commands.newProjectContext).mock.calls.length;
+    const plans = vi.mocked(commands.planProject).mock.calls.length;
+
+    fireEvent.change(select, { target: { value: "02_BRAND" } });
+    await waitFor(() => expect(commands.setTemplateKitFolder).toHaveBeenCalledWith("grading-mv", "02_BRAND"));
+    // Then the template is read again and the preview planned again.
+    await waitFor(() => expect(vi.mocked(commands.newProjectContext).mock.calls.length).toBe(contexts + 1));
+    await waitFor(() => expect(vi.mocked(commands.planProject).mock.calls.length).toBeGreaterThan(plans));
+    restore();
+  });
+
+  it("says when the client's files couldn't be read", async () => {
+    const restore = withKit({ ...NONE, state: "unreadable", source: "E:/Kits/VX" });
+    render(<NewProjectSheet onClose={() => {}} onCreated={() => {}} />);
+    expect(await screen.findByText(/^Couldn't read Vertex Studio's files ·/)).toBeTruthy();
     fireEvent.click(screen.getByRole("button", { name: "Choose a folder…" }));
     await waitFor(() => expect(commands.chooseClientKit).toHaveBeenCalledWith("VX", "Vertex Studio"));
     restore();
-    cleanup();
+  });
+});
 
-    const restore2 = withKit({ ...KIT, state: "noPlace", fingerprint: undefined, count: 0, bytes: 0, sample: [] });
-    render(<NewProjectSheet onClose={() => {}} onCreated={() => {}} />);
-    expect(await screen.findByText(/This template has no place for a client kit/)).toBeTruthy();
-    restore2();
+describe("helpers", () => {
+  it("lists the folders client files can go in", () => {
+    expect(clientFilePlaces(undefined)).toEqual([]);
+    expect(
+      clientFilePlaces(["A", "A/B", { name: "C/D", kit: true }, { name: "E", when: "x" }, { name: "F/{item}", each: "y" }]),
+    ).toEqual(["A", "A/B", "C", "C/D"]);
+  });
+
+  it("shortens long folder paths and keeps short ones", () => {
+    expect(shortPath("D:\\Jobs")).toBe("D:\\Jobs");
+    expect(shortPath("D:\\Work\\Clients\\Everything\\2026\\Jobs")).toBe("D:\\…\\2026\\Jobs");
+    expect(shortPath("/Users/me/Library/CloudStorage/Drive/Jobs")).toBe("/…/Drive/Jobs");
   });
 });

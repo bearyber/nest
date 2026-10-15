@@ -15,8 +15,10 @@ use crate::kits::{find_kit, list_kit, KitListing, KitSource};
 use crate::names::normalize_client_code;
 use crate::plan::{FieldValue, KitFound, KitInput};
 use crate::settings::Settings;
-use crate::settings_cmd::{edit_settings, pick_folder, SettingsView};
+use crate::settings_cmd::{edit_settings, example, pick_folder, templates_changed, SettingsView};
 use crate::template::{FieldKind, Template};
+use crate::template_edit;
+use crate::template_io::{self, BUILT_IN_IDS};
 
 #[derive(Default)]
 pub struct Kits {
@@ -209,8 +211,8 @@ pub fn choose_client_kit(
     name: String,
 ) -> AppResult<Option<SettingsView>> {
     let title = match name.trim() {
-        "" => "Choose the client's kit folder".to_string(),
-        name => format!("Choose {name}'s kit folder"),
+        "" => "Choose the folder with the client's files".to_string(),
+        name => format!("Choose the folder with {name}'s files"),
     };
     let Some(path) = pick_folder(&app, &title)? else {
         return Ok(None);
@@ -230,6 +232,50 @@ pub fn clear_client_kit(
     let v = edit_settings(&app, |s| s.set_client_kit(&code, None))?;
     kits.forget();
     Ok(v)
+}
+
+/// New Project's "Put them in": the template gets a place for client files (`folder`, a
+/// template tree path) and keeps it. Saved as a new version through the normal save (one copy
+/// per template: the older copy goes to the Recycle Bin / Trash); one of Nest's own becomes
+/// yours with the same id, like Customize. `template_key` is a template's key, or the id of the
+/// template New Project offers. The sheet plans again on `settings-changed`.
+#[tauri::command(async)]
+pub fn set_template_kit_folder(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    template_key: String,
+    folder: String,
+) -> AppResult<()> {
+    let _one = lock(&state.templates_lock)?; // one change to your templates at a time
+    let installed = lock(&state.templates)?.clone();
+    let source = installed
+        .iter()
+        .find(|t| t.key() == template_key)
+        .or_else(|| {
+            installed
+                .iter()
+                .find(|t| !t.superseded && t.loaded.template.id == template_key)
+        })
+        .cloned()
+        .ok_or_else(|| AppError::new("That template isn't installed any more"))?;
+    let saved = template_edit::save_kit_folder(
+        &source,
+        &folder,
+        &installed,
+        &state.user_templates,
+        BUILT_IN_IDS,
+        &example(&state)?,
+    )
+    .map_err(AppError::new)?;
+    crate::template_sync_cmd::note_saved(&state, &saved.template.id, saved.template.version, false);
+    templates_changed(&app, &state)?;
+    // Decision T-A: one copy per template. If the older copy can't go to the bin, both stay.
+    let installed = lock(&state.templates)?.clone();
+    let bin = |t: &template_io::Installed| template_io::delete(t, &state.user_templates);
+    let retired =
+        template_edit::retire_older_copies(&saved.template.id, &saved.dir, &installed, &bin);
+    templates_changed(&app, &state)?;
+    retired.map(|_| ()).map_err(AppError::new)
 }
 
 /// Cancel a running Create: it stops at the next file and undoes what it made.

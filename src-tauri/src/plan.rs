@@ -457,7 +457,7 @@ fn plan_kit(
             kit.source = Some(dir.clone());
             issues.error(
                 None,
-                format!("{who}'s kit wasn't read. Close New Project and open it again."),
+                format!("{who}'s files weren't read. Close New Project and open it again."),
             );
             return Some(kit);
         }
@@ -465,7 +465,7 @@ fn plan_kit(
             kit.state = KitState::Unreadable;
             kit.source = Some(dir.clone());
             issues.warning(format!(
-                "{message} The project will be created without {who}'s kit."
+                "{message} The project will be created without {who}'s files."
             ));
             return Some(kit);
         }
@@ -548,7 +548,7 @@ fn plan_kit(
         issues.error(
             None,
             format!(
-                "Some names in {who}'s kit can't be used on Windows and Mac: {}. Rename them in the kit.",
+                "Some names in {who}'s files can't be used on Windows and Mac: {}. Rename them in {who}'s folder.",
                 listed(&bad)
             ),
         );
@@ -557,14 +557,14 @@ fn plan_kit(
         issues.error(
             None,
             format!(
-                "{who}'s kit has names that clash with the template's own files or folders (or with each other once cleaned up for Windows and Mac): {}. Rename them in the kit or the template.",
+                "{who}'s files have names that clash with the template's own files or folders (or with each other once cleaned up for Windows and Mac): {}. Rename them in {who}'s folder or in the template.",
                 listed(&clashes.iter().map(|c| format!("\"{c}\"")).collect::<Vec<_>>())
             ),
         );
     }
     if !renamed.is_empty() {
         issues.warning(format!(
-            "Some names in {who}'s kit will be changed so they work on Windows and Mac: {}.",
+            "Some names in {who}'s files will be changed so they work on Windows and Mac: {}.",
             listed(&renamed)
         ));
     }
@@ -582,7 +582,7 @@ fn plan_kit(
         })
         .collect();
     if !left_out.is_empty() {
-        issues.warning(format!("Left out of {who}'s kit: {}.", listed(&left_out)));
+        issues.warning(format!("Left out of {who}'s files: {}.", listed(&left_out)));
     }
     Some(kit)
 }

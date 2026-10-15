@@ -32,7 +32,7 @@ describe("buildTree", () => {
       },
     });
     const apl = tree[0].children[0];
-    expect(apl.children.map((n) => n.name)).toEqual(["Logos", "Guide.pdf", "…and 38 more files from the kit"]);
+    expect(apl.children.map((n) => n.name)).toEqual(["Logos", "Guide.pdf", "…and 38 more files"]);
     expect(apl.children[0].children[0].name).toBe("logo.png");
   });
 

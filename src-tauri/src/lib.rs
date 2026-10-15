@@ -190,6 +190,7 @@ pub fn run() {
             kits_cmd::clear_kits_folder,
             kits_cmd::choose_client_kit,
             kits_cmd::clear_client_kit,
+            kits_cmd::set_template_kit_folder,
             kits_cmd::cancel_create,
         ])
         .build(tauri::generate_context!())

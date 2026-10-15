@@ -124,13 +124,13 @@ pub fn find_kit(
 pub fn list_kit(dir: &Path) -> Result<KitListing, String> {
     let meta = fs::metadata(dir).map_err(|e| {
         format!(
-            "Couldn't open the kit folder {} ({}). Is its drive connected?",
+            "Couldn't open the client's folder {} ({}). Is its drive connected?",
             dir.display(),
             crate::error::io_reason(&e)
         )
     })?;
     if !meta.is_dir() {
-        return Err(format!("The kit {} isn't a folder", dir.display()));
+        return Err(format!("{} isn't a folder", dir.display()));
     }
     let mut walk = Walk::default();
     walk.dir(dir, "", 0)?;
@@ -160,7 +160,7 @@ impl Walk {
             Ok(e) => e,
             Err(e) if depth == 0 => {
                 return Err(format!(
-                    "Couldn't read the kit folder {} ({})",
+                    "Couldn't read the client's folder {} ({})",
                     dir.display(),
                     crate::error::io_reason(&e)
                 ))
@@ -184,7 +184,7 @@ impl Walk {
             self.seen += 1;
             if self.seen > MAX_ITEMS {
                 return Err(format!(
-                    "That kit holds more than {MAX_ITEMS} items. Choose the client's kit folder itself."
+                    "That folder holds more than {MAX_ITEMS} items. Choose the folder with just the client's files."
                 ));
             }
             let os_name = e.file_name();
@@ -207,7 +207,7 @@ impl Walk {
             if meta.is_dir() {
                 if depth + 1 >= MAX_DEPTH {
                     return Err(format!(
-                        "That kit goes more than {MAX_DEPTH} folders deep. Choose the client's kit folder itself."
+                        "That folder goes more than {MAX_DEPTH} folders deep. Choose the folder with just the client's files."
                     ));
                 }
                 self.folders.push(path.clone());
@@ -281,7 +281,7 @@ pub fn kit_to_copy(plan: &Plan, previewed: Option<&str>) -> Result<Option<PathBu
             .as_ref()
             .map_or("The client", |k| k.client.as_str());
         return Err(format!(
-            "{who}'s kit changed since the preview. Check it and click Create again."
+            "{who}'s files changed since the preview. Check them and click Create again."
         ));
     }
     Ok(kit.and_then(|k| k.source.clone()))

@@ -29,7 +29,7 @@ export function buildTree(plan: Pick<Plan, "folders" | "files" | "kit">): TreeNo
   if (kit?.state === "ready") {
     kit.sample.forEach((p) => insert(p, true));
     const more = kit.count - kit.sample.length;
-    if (more > 0) insert(`${kit.folder}/…and ${more} more file${more === 1 ? "" : "s"} from the kit`, true);
+    if (more > 0) insert(`${kit.folder}/…and ${more} more file${more === 1 ? "" : "s"}`, true);
   }
   return root.children;
 }
