@@ -505,6 +505,7 @@ pub fn import_template(
     app: AppHandle,
     state: State<'_, AppState>,
 ) -> AppResult<Option<TemplateInfo>> {
+    let _one = lock(&state.templates_lock)?; // one change to your templates at a time
     let Some(file) = app
         .dialog()
         .file()
@@ -568,6 +569,7 @@ pub fn duplicate_template(
     state: State<'_, AppState>,
     key: String,
 ) -> AppResult<()> {
+    let _one = lock(&state.templates_lock)?; // one change to your templates at a time
     let t = find_template(&state, &key)?;
     let installed = lock(&state.templates)?.clone();
     template_io::duplicate(&t.loaded, &state.user_templates, &installed).map_err(AppError::new)?;
@@ -586,6 +588,7 @@ fn versions_phrase(n: usize) -> String {
 /// native confirm that says how many versions go (spec §12a #16, extended 2026-10-02).
 #[tauri::command(async)]
 pub fn delete_template(app: AppHandle, state: State<'_, AppState>, key: String) -> AppResult<bool> {
+    let _one = lock(&state.templates_lock)?; // one change to your templates at a time
     let t = find_template(&state, &key)?;
     if t.built_in {
         return Err(AppError::new(
@@ -620,6 +623,7 @@ pub fn delete_template(app: AppHandle, state: State<'_, AppState>, key: String) 
 /// "Go back to Nest's original": your version of a built-in goes to the Recycle Bin / Trash.
 #[tauri::command(async)]
 pub fn reset_template(app: AppHandle, state: State<'_, AppState>, key: String) -> AppResult<bool> {
+    let _one = lock(&state.templates_lock)?; // one change to your templates at a time
     let t = find_template(&state, &key)?;
     let installed = lock(&state.templates)?.clone();
     let id = t.loaded.template.id.clone();
@@ -721,6 +725,7 @@ pub fn save_template(
     draft: Template,
     mode: SaveMode,
 ) -> AppResult<Saved> {
+    let _one = lock(&state.templates_lock)?; // one change to your templates at a time
     let installed = lock(&state.templates)?.clone();
     let session = match lock(&state.editor_sessions)?.get(&key).cloned() {
         Some(s) => s,

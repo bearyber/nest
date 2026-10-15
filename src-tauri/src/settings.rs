@@ -59,9 +59,33 @@ pub struct Settings {
     /// v0.4.2: where Personal-space and "No client" projects go. One of `jobs_roots` (so it's
     /// watched); None = the first jobs folder, like every other new project.
     pub personal_root: Option<PathBuf>,
+    /// v0.5 What's new: the last version whose note was shown (or recorded silently on a fresh
+    /// install). None in a settings file from before 0.5 = updated from 0.4.x: show the note.
+    pub last_seen_version: Option<String>,
+    /// v0.5 template sync (needs Devices): keep your templates the same on all your computers.
+    pub sync_templates: bool,
+    /// v0.5 template sync: the highest version this computer has had of each template id, so
+    /// a delete (or "go back to original") sticks until a newer version is saved elsewhere.
+    pub template_versions_seen: std::collections::BTreeMap<String, u32>,
+    /// v0.5 template sync: per template id, when it was saved (RFC 3339, the saving computer's
+    /// clock, kept as received) and its lineage (random, made at first sync).
+    pub template_sync_meta: std::collections::BTreeMap<String, TemplateSyncMeta>,
+    /// v0.5 client kits: a folder holding one folder per client (named by code or name).
+    pub kits_folder: Option<PathBuf>,
+    /// v0.5 client kits: a kit folder chosen for one client, by client code. Wins over
+    /// `kits_folder`.
+    pub client_kits: std::collections::BTreeMap<String, PathBuf>,
     /// Keys this version doesn't know (e.g. written by a newer Nest): kept on every save.
     #[serde(flatten)]
     pub other: serde_json::Map<String, serde_json::Value>,
+}
+
+/// Template sync bookkeeping for one template id (kept in settings, never in the template).
+#[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", default)]
+pub struct TemplateSyncMeta {
+    pub saved_at: String,
+    pub lineage: String,
 }
 
 impl Default for Settings {
@@ -92,6 +116,12 @@ impl Default for Settings {
             archive_dismissed: vec![],
             past_archive_folders: vec![],
             personal_root: None,
+            last_seen_version: None,
+            sync_templates: false,
+            template_versions_seen: Default::default(),
+            template_sync_meta: Default::default(),
+            kits_folder: None,
+            client_kits: Default::default(),
             other: serde_json::Map::new(),
         }
     }

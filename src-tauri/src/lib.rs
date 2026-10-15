@@ -235,5 +235,6 @@ fn init_state(app: &tauri::App) -> Result<AppState, Box<dyn std::error::Error>> 
         devices: Default::default(),
         status_lock: Default::default(),
         editor_sessions: Default::default(),
+        templates_lock: Default::default(),
     })
 }

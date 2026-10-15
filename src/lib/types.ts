@@ -230,6 +230,12 @@ export interface Settings {
   personalRoot: string | null;
   /** Archive folders used before, newest first. */
   pastArchiveFolders: string[];
+  /** v0.5: keep your templates the same on all your computers (needs Devices). */
+  syncTemplates: boolean;
+  /** v0.5 client kits: a folder with one folder per client (by code or name); null = none. */
+  kitsFolder: string | null;
+  /** v0.5 client kits: a kit folder chosen for one client, by client code (wins over kitsFolder). */
+  clientKits: Record<string, string>;
 }
 
 export interface SettingsView {

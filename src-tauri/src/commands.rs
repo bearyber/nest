@@ -56,6 +56,9 @@ pub struct AppState {
     pub devices: crate::devices_cmd::Devices,
     /// One project status change at a time (a click here, or a request from another computer).
     pub status_lock: Mutex<()>,
+    /// One change to your templates folder at a time: save, import, duplicate, delete, reset
+    /// and template sync all hold this (v0.5 sync; reviewer 2026-10-15).
+    pub templates_lock: Mutex<()>,
     /// The open template editor (key `editor:<uuid>`): where its draft came from and the files
     /// waiting to come along. Dropped on save or close.
     pub editor_sessions: Mutex<HashMap<String, crate::template_edit::EditorSession>>,
