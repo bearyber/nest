@@ -1,7 +1,7 @@
 {
   "0.5.0": [
     "Templates have their own place in the sidebar",
-    "A new template editor: your folders as a tree, add a folder anywhere, blanks right in the names",
+    "A new template editor: your folders as a tree, add a folder anywhere, answers from New Project right in the names",
     "Make a template from one of your project folders",
     "Client kits: a client's brand files come along into new projects (Settings → Client kits)",
     "Keep your templates the same on all your computers (Settings → Devices)"

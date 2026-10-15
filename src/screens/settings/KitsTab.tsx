@@ -29,11 +29,11 @@ export default function KitsTab({ view, run }: TabProps) {
   const folder = view.settings.kitsFolder;
 
   const status = (c: KitClient) => {
-    if (!c.kit) return <span className={styles.sub}>No kit</span>;
+    if (!c.kit) return <span className={styles.sub}>No files yet</span>;
     if (c.missing) return <span className={styles.sub}>Can't find {c.kit}</span>;
     return (
       <span className={`${styles.sub} ${styles.mono}`} title={c.kit}>
-        {c.source === "chosen" ? <PathText path={c.kit} /> : `Kits folder → ${lastPart(c.kit)}`}
+        {c.source === "chosen" ? <PathText path={c.kit} /> : `Clients folder → ${lastPart(c.kit)}`}
       </span>
     );
   };
@@ -41,11 +41,11 @@ export default function KitsTab({ view, run }: TabProps) {
   return (
     <>
       <section className={styles.section}>
-        <h3 className={styles.sectionTitle}>Kits folder</h3>
+        <h3 className={styles.sectionTitle}>Folder with all your clients</h3>
         <p className={styles.hint}>
-          A folder with one folder per client, named after the client's code or name (for example Kits/APL or
-          Kits/Apple). In New Project, the client's folder is copied into the template's client kit folder. Nothing
-          in it is ever changed.
+          Optional: a folder with one folder per client, named after the client's code or name (for example
+          Clients/APL or Clients/Apple). New Project copies that client's files into the new project. Nothing in it is
+          ever changed. You can also pick a client's folder right in New Project.
         </p>
         {folder ? (
           <div className={styles.card}>
@@ -56,14 +56,14 @@ export default function KitsTab({ view, run }: TabProps) {
               </span>
               {kits?.kitsFolderMissing && <span className={styles.pillMuted}>Not found</span>}
               <Button onClick={() => run(chooseKitsFolder())}>Change…</Button>
-              <Button onClick={() => run(clearKitsFolder(), "Nest stopped using the Kits folder. Nothing on disk changed.")}>
+              <Button onClick={() => run(clearKitsFolder(), "Nest stopped using that folder. Nothing on disk changed.")}>
                 Stop using
               </Button>
             </div>
           </div>
         ) : (
           <div className={styles.actions}>
-            <Button onClick={() => run(chooseKitsFolder())}>Choose Kits folder…</Button>
+            <Button onClick={() => run(chooseKitsFolder())}>Choose a folder…</Button>
           </div>
         )}
       </section>
@@ -71,7 +71,7 @@ export default function KitsTab({ view, run }: TabProps) {
       <section className={styles.section}>
         <h3 className={styles.sectionTitle}>Clients</h3>
         <p className={styles.hint}>
-          A folder chosen for a client wins over the Kits folder. Only on this computer.
+          A folder chosen for one client wins over the folder above. Only on this computer.
         </p>
         {problem && <p className={styles.hint}>{problem}</p>}
         {kits && kits.clients.length === 0 && (
@@ -92,11 +92,11 @@ export default function KitsTab({ view, run }: TabProps) {
                     onClick={() =>
                       run(
                         clearClientKit(c.code),
-                        folder ? `${c.name} uses the Kits folder again.` : `${c.name} has no kit now.`,
+                        folder ? `${c.name} uses the clients folder again.` : `${c.name} has no files folder now.`,
                       )
                     }
                   >
-                    Use the Kits folder
+                    Use the clients folder
                   </Button>
                 )}
               </div>

@@ -17,7 +17,7 @@ describe("folderNote", () => {
 
   it("says when everything came along, and when answers became blanks", () => {
     expect(folderNote([{ path: "Thumbs.db", reason: "clutter" }], true)).toBe(
-      "This was a Nest project: its answers became blanks. Everything came along. Your folder wasn't changed.",
+      "This was a Nest project: its answers became questions New Project asks. Everything came along. Your folder wasn't changed.",
     );
   });
 });

@@ -256,7 +256,7 @@ export default function TemplateEditor({ sourceKey, mode, start, note, onClose, 
   const setKit = (id: string | null) => {
     change((d) => ({ ...d, nodes: setKitFolder(d.nodes, id) }));
     if (id) say(`New projects get the client's kit in ${locate(nodes, id)?.path ?? "this folder"}.`, true);
-    else say("New projects from this template won't get a client kit.", true);
+    else say("New projects from this template won't get the client's files.", true);
   };
 
   /** "One folder for each…": a `{item}` folder inside this one, made once per picked choice. */
@@ -443,8 +443,8 @@ export default function TemplateEditor({ sourceKey, mode, start, note, onClose, 
             ],
           },
           node.kit
-            ? { text: "No client kit here", action: () => setKit(null) }
-            : { text: "Put the client kit here", action: () => setKit(id), enabled: canHoldKit(nodes, id) },
+            ? { text: "No client files here", action: () => setKit(null) }
+            : { text: "Put the client's files here", action: () => setKit(id), enabled: canHoldKit(nodes, id) },
           { item: "Separator" },
           { text: "Delete", action: () => remove(id) },
         );

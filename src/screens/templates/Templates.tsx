@@ -40,7 +40,7 @@ export function folderNote(skipped: Skipped[], fromProject: boolean): string {
     const n = skipped.filter((s) => s.reason === reason).length;
     return n ? [`${n} ${LEFT_OUT[reason][n === 1 ? 0 : 1]}`] : [];
   });
-  const answers = fromProject ? "This was a Nest project: its answers became blanks. " : "";
+  const answers = fromProject ? "This was a Nest project: its answers became questions New Project asks. " : "";
   const left = parts.length ? `Left out: ${parts.join(", ")}.` : "Everything came along.";
   return `${answers}${left} Your folder wasn't changed.`;
 }

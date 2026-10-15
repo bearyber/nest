@@ -18,7 +18,7 @@ const TABS: { id: Tab; label: string }[] = [
   { id: "general", label: "General" },
   { id: "codes", label: "Job codes" },
   { id: "spaces", label: "Spaces" },
-  { id: "kits", label: "Client kits" },
+  { id: "kits", label: "Client files" },
   { id: "devices", label: "Devices" },
   { id: "appearance", label: "Appearance" },
   { id: "about", label: "About" },

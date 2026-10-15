@@ -200,7 +200,7 @@ export default function Tree(p: Props) {
           <Icon name="folder" className={styles.folderIcon} />
           {n.each ? example(id, n.name, false) : nameOrField(id, n.name, "Folder name", { below: true, tab: true })}
           {n.each && <span className={styles.tag}>one folder for each {each ? `“${each.label}”` : "choice"}</span>}
-          {n.kit && <span className={styles.tag}>client kit</span>}
+          {n.kit && <span className={styles.tag}>client's files</span>}
           {n.when && (
             <span className={styles.tag}>
               only if {n.when.startsWith("!") ? `not “${labelOf(n.when.slice(1))}”` : `“${labelOf(n.when)}”`}
