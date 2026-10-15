@@ -151,7 +151,8 @@ fn preview_shows_every_folder_with_example_answers() {
     ] {
         assert!(p.folders.contains(&f.to_string()), "{f} in {:?}", p.folders);
     }
-    assert_eq!(p.files, ["NOTES.md"]);
+    // Nest's own templates bring no files (v0.6: you add your own).
+    assert!(p.files.is_empty(), "{:?}", p.files);
 }
 
 #[test]
@@ -258,8 +259,8 @@ fn customizing_a_built_in_replaces_it_in_new_project() {
         .find(|t| t.built_in && t.loaded.template.id == "video")
         .unwrap();
     assert!(original.replaced);
-    // Starter files came along.
-    assert!(offered[0].loaded.files.contains("starter/NOTES.md"));
+    // The customized copy carries the same (now empty) set of starter files.
+    assert_eq!(offered[0].loaded.files, original.loaded.files);
     // Customizing again is refused: edit yours instead.
     assert!(s
         .save(&t, SaveMode::Customize, &s.get("video", true))
@@ -501,10 +502,7 @@ fn put_client_files_in_a_folder_saves_a_new_version() {
     assert_eq!(mine.template.id, "video");
     assert_eq!(mine.template.version, video.loaded.template.version + 1);
     assert_eq!(kit_folders(&mine.template), ["01_BRIEF"]);
-    assert!(
-        mine.files.contains("starter/NOTES.md"),
-        "starter files came along"
-    );
+    assert_eq!(mine.files, video.loaded.files, "starter files came along");
     let offered = s
         .installed()
         .into_iter()

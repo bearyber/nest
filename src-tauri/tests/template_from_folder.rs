@@ -330,17 +330,12 @@ fn files_dropped_in_the_editor_are_saved_with_the_template() {
         b"LUT 2"
     );
     assert!(saved.dir.join("files/Brand/fonts/font.otf").is_file());
-    assert!(
-        saved.dir.join("starter/NOTES.md").is_file(),
-        "Blank's own starter file"
-    );
     let p = preview(&saved.template, &saved, &ex);
     assert!(p.problems.is_empty(), "{:?}", p.problems);
     for f in [
         "02_GRADE/grade.cube",
         "02_GRADE/Brand/logo.png",
         "02_GRADE/Brand/fonts/font.otf",
-        "NOTES.md",
     ] {
         assert!(
             p.files.iter().any(|x| x.ends_with(f)),
@@ -393,7 +388,11 @@ fn editing_a_template_keeps_its_starter_files_and_refuses_unknown_ones() {
         ("../elsewhere.md", "isn't allowed"),
         ("other.md", "isn't one of this template's files"),
     ] {
-        draft.files[0].from = from.into();
+        draft.files = vec![nest_lib::template::FileEntry {
+            from: from.into(),
+            to: "x.md".into(),
+            fill: false,
+        }];
         let e = save_session(
             &draft,
             SaveMode::New,

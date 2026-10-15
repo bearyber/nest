@@ -106,10 +106,12 @@ fn bundled_templates_plan_without_issues() {
         for f in &plan.folders {
             assert!(convention(f), "{}: folder {f}", t.template.id);
         }
+        // v0.6: Nest's own templates make folders only; files are yours to add.
         assert!(
-            plan.files.iter().any(|f| f.to == "NOTES.md" && f.fill),
-            "{} has NOTES.md",
-            t.template.id
+            plan.files.is_empty(),
+            "{} adds files: {:?}",
+            t.template.id,
+            plan.files
         );
     }
 }

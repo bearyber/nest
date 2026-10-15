@@ -2,7 +2,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { Menu } from "@tauri-apps/api/menu";
 import { getCurrentWebview } from "@tauri-apps/api/webview";
 import { Button } from "../../components/ui";
-import { editorAddFiles, exampleNames, previewTemplate, saveTemplate } from "../../lib/commands";
+import { editorAddFiles, editorAddTextFile, exampleNames, previewTemplate, saveTemplate } from "../../lib/commands";
 import {
   addFolder,
   formatName,
@@ -34,7 +34,15 @@ import {
   toNodes,
   type FolderNode,
 } from "../../lib/templateDraft";
-import { errorMessage, type Field, type SaveMode, type Saved, type Template, type TemplatePreview } from "../../lib/types";
+import {
+  errorMessage,
+  type AddedFiles,
+  type Field,
+  type SaveMode,
+  type Saved,
+  type Template,
+  type TemplatePreview,
+} from "../../lib/types";
 import { blankLabel } from "./NameField";
 import QuestionSettings from "./QuestionSettings";
 import Tree, { fileRow, ROOT, rowOrder, visibleNames, type RowId } from "./Tree";
@@ -352,6 +360,49 @@ export default function TemplateEditor({ sourceKey, mode, start, note, onClose, 
 
   // ── Files from Finder / Explorer ──
 
+  /** Put files Rust staged into the draft (with any folders they came in). */
+  const takeAdded = (added: AddedFiles) =>
+    change((d) => ({
+      nodes: added.folders.length ? toNodes([...fromNodes(d.nodes).tree, ...added.folders]) : d.nodes,
+      draft: { ...d.draft, files: [...(d.draft.files ?? []), ...added.files] },
+    }));
+
+  /** "Project info": a short text file with the template's own answers filled in on Create. */
+  const addProjectInfo = async (into: string) => {
+    const lines = ["Job code: {jobCode}"];
+    for (const f of draft.fields) {
+      if (f.type === "client") lines.push(`Client: {${f.key}}`);
+      else if (f.type === "text" || f.type === "date" || f.type === "select") lines.push(`${f.label}: {${f.key}}`);
+    }
+    for (const f of draft.fields.filter((x) => x.type === "longtext")) lines.push("", `${f.label}:`, `{${f.key}}`);
+    lines.push("", "Made with Nest on {date} from the \u201c{templateName}\u201d template.", "");
+    try {
+      const added = await editorAddTextFile(sourceKey, into, "Project info.txt", lines.join("\n"));
+      takeAdded(added);
+      say("Added Project info.txt. New projects get it with their answers filled in.", true);
+    } catch (e) {
+      say(errorMessage(e));
+    }
+  };
+
+  /** "+ Add a file": your own, or the one ready-made file. */
+  const addFileMenu = async (into: string) => {
+    try {
+      const m = await Menu.new({
+        items: [
+          { text: "Your own file…", action: () => void addFiles(into, null) },
+          { text: "Project info (job code, client, project, dates)", action: () => void addProjectInfo(into) },
+          { item: "Separator" },
+          { text: "Tip: you can also drag files here from Finder or Explorer", enabled: false },
+        ],
+      });
+      await m.popup();
+    } catch (e) {
+      console.warn("Add a file: menu didn't open", e);
+      void addFiles(into, null);
+    }
+  };
+
   const addFiles = async (into: string, paths: string[] | null) => {
     try {
       const added = await editorAddFiles(sourceKey, into, paths);
@@ -583,6 +634,7 @@ export default function TemplateEditor({ sourceKey, mode, start, note, onClose, 
             onRename={rename}
             onCancelRename={() => setRenaming(null)}
             onAddInside={addInside}
+            onAddFile={(path) => void addFileMenu(path)}
             onMenu={(id) => void menu(id)}
             onMove={move}
             onChip={(row, key, index) => setBlank({ key, row, index })}

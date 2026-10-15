@@ -1031,6 +1031,47 @@ pub fn editor_add_files(
     }))
 }
 
+/// Add a small ready-made text file (e.g. "Project info.txt") to the editor's draft, into the
+/// template folder `into`. Rust writes it into Nest's own app folder (`<config>/extras/…`) and
+/// stages it like a file you dropped; nothing is copied into the template until Save.
+#[tauri::command(async)]
+pub fn editor_add_text_file(
+    state: State<'_, AppState>,
+    key: String,
+    into: String,
+    name: String,
+    contents: String,
+) -> AppResult<AddedFiles> {
+    if contents.len() > 64 * 1024 {
+        return Err(AppError::new("That file is too long to add."));
+    }
+    let name = crate::names::sanitize_segment(&name).map_err(|e| AppError::new(e.to_string()))?;
+    let dir = state
+        .config_dir
+        .join("extras")
+        .join(uuid::Uuid::new_v4().simple().to_string());
+    fs::create_dir_all(&dir).map_err(|e| AppError::new(format!("Couldn't add the file: {e}")))?;
+    let path = dir.join(&name);
+    template_io::write_new(&path, contents.as_bytes())
+        .map_err(|e| AppError::new(format!("Couldn't add the file: {e}")))?;
+    let mut sessions = lock(&state.editor_sessions)?;
+    let session = sessions
+        .get_mut(&key)
+        .ok_or_else(|| AppError::new("The editor was closed. Open the template again."))?;
+    let dropped = template_from_folder::read_dropped(
+        &[path],
+        session.file_names().len(),
+        session.staged.bytes(),
+    )
+    .map_err(AppError::new)?;
+    let (folders, files) = session.add_dropped(&into, dropped.files, &dropped.folders);
+    Ok(AddedFiles {
+        folders,
+        files,
+        skipped: dropped.skipped,
+    })
+}
+
 /// The editor closed without saving: forget its session.
 #[tauri::command(async)]
 pub fn editor_close(state: State<'_, AppState>, key: String) -> AppResult<()> {

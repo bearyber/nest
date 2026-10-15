@@ -29,6 +29,8 @@ interface Props {
   onRename: (id: RowId, value: string, then?: "below" | "in" | "out") => void;
   onCancelRename: () => void;
   onAddInside: (folderId: string | null) => void;
+  /** "+ Add a file" in a folder (template path; "" = the project folder). */
+  onAddFile: (path: string) => void;
   onMenu: (id: RowId) => void;
   onMove: (id: string, target: string, where: "before" | "after" | "inside") => void;
   onChip: (row: RowId, key: string, index: number) => void;
@@ -157,10 +159,14 @@ export default function Tree(p: Props) {
     filesIn(p.files, path).map((f) => {
       const id = fileRow(f.from);
       return (
-        <div key={id} className={`${styles.row} ${p.selected === id ? styles.selected : ""}`} {...rowProps(id)}>
+        <div
+          key={id}
+          className={`${styles.row} ${p.selected === id ? styles.selected : ""}`}
+          title={f.fill ? "New projects get this file with New Project's answers filled in." : undefined}
+          {...rowProps(id)}
+        >
           <Icon name="file" className={styles.fileIcon} />
           {nameOrField(id, baseName(f.to), "File name")}
-          {f.fill && <span className={styles.tag}>fills in answers</span>}
           {more(id, baseName(f.to))}
         </div>
       );
@@ -170,6 +176,9 @@ export default function Tree(p: Props) {
     <div className={`${styles.row} ${styles.addRow}`} data-drop-path={path}>
       <button type="button" className={styles.addLink} onClick={() => p.onAddInside(parent)}>
         + Add folder
+      </button>
+      <button type="button" className={styles.addLink} onClick={() => p.onAddFile(path)}>
+        + Add a file
       </button>
       {empty && <span className={styles.dropHint}>or drop files here</span>}
     </div>

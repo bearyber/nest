@@ -171,15 +171,14 @@
   border-left: 1px solid var(--separator);
 }
 
-/* "Add folder": always in an empty folder; elsewhere only while the pointer is over that
-   folder (not one inside it), so big templates stay calm. */
+/* "Add folder / Add a file": always at the bottom (the project folder); in a folder only while
+   the pointer is over it (not one inside it), so templates stay calm (Bernard, 2026-10-15). */
 .addRow {
   display: none;
   color: var(--text-tertiary);
   font-size: var(--text-small);
 }
 
-.empty > .kids > .addRow,
 .always > .kids > .addRow,
 .group:hover:not(:has(.group:hover)) > .kids > .addRow {
   display: flex;
@@ -254,7 +253,7 @@
   margin-left: var(--space-1);
 }
 
-.empty:hover > .kids > .addRow > .dropHint,
+.empty:hover:not(:has(.group:hover)) > .kids > .addRow > .dropHint,
 .always:hover:not(:has(.group:hover)) > .kids > .addRow > .dropHint {
   display: inline;
 }

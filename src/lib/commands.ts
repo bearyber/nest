@@ -158,6 +158,9 @@ export const editorOpen = (key: string) => s<EditorOpened>("editor_open", { key 
 /** Add files dropped on (or picked for, when `paths` is null) the template folder `into`. */
 export const editorAddFiles = (key: string, into: string, paths: string[] | null) =>
   s<AddedFiles | null>("editor_add_files", { key, into, paths });
+/** Add a small ready-made text file (e.g. "Project info.txt") into the template folder `into`. */
+export const editorAddTextFile = (key: string, into: string, name: string, contents: string) =>
+  s<AddedFiles>("editor_add_text_file", { key, into, name, contents });
 export const editorClose = (key: string) => s<void>("editor_close", { key });
 /** Show the main window's Templates view (from Settings). */
 export const openTemplates = () => s<void>("open_templates");

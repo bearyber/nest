@@ -1,9 +1,9 @@
 {
   "schema": 1,
   "id": "blank",
-  "version": 4,
+  "version": 5,
   "name": "Blank",
-  "description": "Just a project folder and a notes file",
+  "description": "Just a project folder",
   "fields": [
     {
       "key": "client",
@@ -31,12 +31,5 @@
       "type": "longtext"
     }
   ],
-  "folderName": "{start|yymmdd}_{name|caps}",
-  "files": [
-    {
-      "from": "starter/NOTES.md",
-      "to": "NOTES.md",
-      "fill": true
-    }
-  ]
+  "folderName": "{start|yymmdd}_{name|caps}"
 }

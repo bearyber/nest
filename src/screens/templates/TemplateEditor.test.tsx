@@ -12,7 +12,13 @@ const exampleNames = vi.fn(async (_key: string, _draft: Template, names: string[
       : n.replace(/\{name\}/g, "SummerCampaign").replace(/\{client\}/g, "Acme").replace(/\{start\|yymmdd\}/g, "260302"),
   ),
 );
-const menuNew = vi.fn(async () => ({ popup: async () => {} }));
+type MenuOpts = { items: { text?: string; action?: () => void }[] };
+const menuNew = vi.fn(async (opts?: MenuOpts) => ({ popup: async () => {}, opts }));
+const addText = vi.fn(async (...[, into, name]: [string, string, string, string]) => ({
+  folders: [],
+  files: [{ from: `files/${name}`, to: into ? `${into}/${name}` : name, fill: true }],
+  skipped: [],
+}));
 vi.mock("../../lib/commands", () => ({
   previewTemplate: vi.fn(
     async (): Promise<TemplatePreview> => ({
@@ -27,8 +33,9 @@ vi.mock("../../lib/commands", () => ({
   exampleNames: (key: string, draft: Template, names: string[]) => exampleNames(key, draft, names),
   saveTemplate: (key: string, draft: Template, mode: string) => save(key, draft, mode),
   editorAddFiles: vi.fn(),
+  editorAddTextFile: (key: string, into: string, name: string, contents: string) => addText(key, into, name, contents),
 }));
-vi.mock("@tauri-apps/api/menu", () => ({ Menu: { new: () => menuNew() } }));
+vi.mock("@tauri-apps/api/menu", () => ({ Menu: { new: (opts: MenuOpts) => menuNew(opts) } }));
 vi.mock("@tauri-apps/api/webview", () => ({
   getCurrentWebview: () => ({ onDragDropEvent: async () => () => {} }),
 }));
@@ -275,5 +282,22 @@ describe("TemplateEditor (one screen)", () => {
     expect(close).not.toHaveBeenCalled();
     fireEvent.click(screen.getByRole("button", { name: "Close without saving" }));
     expect(close).toHaveBeenCalled();
+  });
+  it("adds a file from the Add a file menu: Project info with the template's answers", async () => {
+    open();
+    const links = screen.getAllByRole("button", { name: "+ Add a file" });
+    fireEvent.click(links[links.length - 1]); // the one always shown, for the project folder
+    await waitFor(() => expect(menuNew).toHaveBeenCalled());
+    const items = (menuNew.mock.calls[menuNew.mock.calls.length - 1][0] as MenuOpts).items;
+    expect(items.some((x) => x.text === "Your own file…")).toBe(true);
+    await act(async () => items.find((x) => x.text?.startsWith("Project info"))!.action!());
+    expect(addText).toHaveBeenCalled();
+    const [, into, name, contents] = addText.mock.calls[0];
+    expect(into).toBe("");
+    expect(name).toBe("Project info.txt");
+    expect(contents).toContain("Job code: {jobCode}");
+    expect(contents).toContain("Client: {client}");
+    expect(contents).toContain("Project name: {name}");
+    expect(await screen.findByText("Project info.txt")).toBeTruthy();
   });
 });
