@@ -170,6 +170,7 @@ pub fn run() {
             settings_cmd::open_logs_folder,
             settings_cmd::first_run_pick_folder,
             settings_cmd::first_run_create_folder,
+            settings_cmd::first_run_pick_template_folder,
             settings_cmd::complete_first_run,
             settings_cmd::take_notice,
             settings_cmd::settings_ready,

@@ -168,7 +168,10 @@ export const completeFirstRun = (
   noClientSpaces: string[],
   hiddenTemplates: string[],
   marker: string,
-) => s<SettingsView>("complete_first_run", { jobsRoot, spaces, noClientSpaces, hiddenTemplates, marker });
+  firstTemplate: string | null,
+) => s<SettingsView>("complete_first_run", { jobsRoot, spaces, noClientSpaces, hiddenTemplates, marker, firstTemplate });
+/** First run: pick the folder you copy for every job. `null` if cancelled. */
+export const firstRunPickTemplateFolder = () => s<string | null>("first_run_pick_template_folder");
 export const settingsReady = () => invoke<void>("settings_ready");
 export const requestStatus = (key: string, status: "active" | "done") => invoke<void>("request_status", { key, status });
 
