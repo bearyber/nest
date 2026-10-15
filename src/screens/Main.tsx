@@ -224,6 +224,8 @@ export default function Main() {
       .catch(fail)
       .finally(() => setChecking(false));
   }, [fail, version]);
+  /** The update bar's notes, folded away until "What's new" is clicked. */
+  const [showNotes, setShowNotes] = useState(false);
   const restartToUpdate = () => {
     setInstalling(true);
     installUpdate().catch((e) => {
@@ -702,20 +704,34 @@ export default function Main() {
         </header>
 
         {update && (
-          <div className={styles.update} role="status">
-            <span className={styles.updateText}>
-              <span>
-                <b>Nest {update.version}</b> is ready.
+          <div className={`${styles.updateBar} nest-in`} role="status">
+            <div className={styles.updateRow}>
+              <span className={styles.updateDot} aria-hidden="true" />
+              <span className={styles.updateTitle}>
+                <b>Nest {update.version}</b> is ready
               </span>
-              {updateNoteLines(update.notes).map((l, i) => (
-                <span key={i} className={styles.updateNote}>
-                  {l}
-                </span>
-              ))}
-            </span>
-            <Button variant="primary" onClick={restartToUpdate} disabled={installing}>
-              {installing ? "Updating…" : "Restart to update"}
-            </Button>
+              {updateNoteLines(update.notes).length > 0 && (
+                <button
+                  type="button"
+                  className={styles.linkButton}
+                  aria-expanded={showNotes}
+                  onClick={() => setShowNotes((v) => !v)}
+                >
+                  {showNotes ? "Hide" : "What's new"}
+                </button>
+              )}
+              <span className={styles.spacer} />
+              <Button variant="primary" className={styles.updateButton} onClick={restartToUpdate} disabled={installing}>
+                {installing ? "Updating…" : "Restart to update"}
+              </Button>
+            </div>
+            {showNotes && (
+              <ul className={`${styles.updateNotes} nest-unfold`}>
+                {updateNoteLines(update.notes).map((l, i) => (
+                  <li key={i}>{l}</li>
+                ))}
+              </ul>
+            )}
           </div>
         )}
 

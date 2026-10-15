@@ -159,15 +159,54 @@
   background: var(--accent-soft);
 }
 
-.updateText {
-  display: grid;
-  gap: 2px;
+/* "Nest X is ready": one quiet line; the notes fold out under it on request. */
+.updateBar {
+  margin: 0 var(--space-3) var(--space-2);
+  padding: 6px var(--space-2) 6px var(--space-3);
+  border: var(--hairline) solid var(--separator);
+  border-radius: 8px;
+  background: var(--card-bg);
+}
+
+.updateRow {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
   min-width: 0;
 }
 
-.updateNote {
+.updateDot {
+  flex: none;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--accent);
+}
+
+.updateTitle {
+  white-space: nowrap;
+}
+
+.updateTitle b {
+  font-weight: 600;
+}
+
+.updateButton {
+  flex: none;
+  white-space: nowrap;
+}
+
+.updateNotes {
+  display: grid;
+  gap: 4px;
+  margin: var(--space-2) 0 var(--space-1);
+  padding-left: calc(8px + var(--space-2) + 1em);
   font-size: var(--text-small);
   color: var(--text-secondary);
+}
+
+.spacer {
+  flex: 1;
 }
 
 .version {
