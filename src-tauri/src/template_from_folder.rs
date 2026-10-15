@@ -995,6 +995,9 @@ mod tests {
         );
     }
 
+    // Mac / Linux only: Windows won't create `Final?.prproj`, `CON.txt` or `Selects.` at all,
+    // which is exactly why Nest cleans them (the v0.5.0 release gate failed on this, 2026-10-15).
+    #[cfg(unix)]
     #[test]
     fn names_are_cleaned_so_the_template_works_on_both_computers() {
         let tmp = tempfile::tempdir().unwrap();
@@ -1015,6 +1018,21 @@ mod tests {
             .map(|s| s.path.as_str())
             .collect();
         assert_eq!(bad, ["CON.txt", "old.nest.json"]);
+    }
+
+    /// The part of the cleaning rules that Windows can set up too.
+    #[test]
+    fn double_spaces_are_cleaned_and_nest_json_files_left_out_everywhere() {
+        let tmp = tempfile::tempdir().unwrap();
+        file(tmp.path(), "Edit  v2.aep", b"x");
+        file(tmp.path(), "old.nest.json", b"{}");
+        let r = read_folder(tmp.path(), Keep::FoldersAndFiles, none).unwrap();
+        assert_eq!(
+            r.staged.names().into_iter().collect::<Vec<_>>(),
+            ["Edit v2.aep"]
+        );
+        assert_eq!(r.skipped[0].path, "old.nest.json");
+        assert_eq!(r.skipped[0].reason, SkipReason::BadName);
     }
 
     #[cfg(target_os = "linux")]
