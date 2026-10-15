@@ -464,6 +464,7 @@ fn write_template(
 
 /// An id from a template name: lowercase a–z, 0–9 and -, unique among `taken` and the folders
 /// in `user_dir`. Names without any such letters (e.g. Korean) become `template`, `template-2`…
+/// Windows device names get `-template` added (`CON` → `con-template`).
 pub fn new_id(name: &str, taken: &HashSet<String>, user_dir: &Path) -> String {
     let mut slug = String::new();
     for c in name.nfc().flat_map(char::to_lowercase) {
@@ -477,6 +478,11 @@ pub fn new_id(name: &str, taken: &HashSet<String>, user_dir: &Path) -> String {
     base = base.trim_end_matches('-').to_string();
     if base.is_empty() {
         base = "template".into();
+    }
+    // A Windows device name (con, aux, nul, prn, com1…, lpt1…) can't be a folder or file name
+    // there, and a synced template is a file named after its id.
+    if crate::names::sanitize_segment(&base).is_err() {
+        base.push_str("-template");
     }
     (1..)
         .map(|n| {

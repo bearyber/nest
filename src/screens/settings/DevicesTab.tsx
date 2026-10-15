@@ -8,6 +8,7 @@ import {
   devicesEnable,
   devicesForget,
   devicesPickFolder,
+  devicesSetSyncTemplates,
   devicesView,
 } from "../../lib/commands";
 import { isMac } from "../../lib/platform";
@@ -227,6 +228,22 @@ export default function DevicesTab({ run }: TabProps) {
               </div>
             )}
           </div>
+          <label className={styles.check}>
+            <input
+              type="checkbox"
+              checked={view.syncTemplates}
+              onChange={async (e) => {
+                const v = await run(devicesSetSyncTemplates(e.target.checked));
+                if (v) setView(v);
+              }}
+            />
+            Keep my templates the same on all my computers
+          </label>
+          <p className={styles.hint}>
+            Templates you save show up on your other computers through the same synced folder; deleting one only removes
+            it here.
+          </p>
+          {view.syncTemplates && view.templateProblem && <p className={styles.problem}>{view.templateProblem}</p>}
           {view.forgotten.map((d) => (
             <div key={d.deviceId} className={styles.actions}>
               <span className={styles.sub}>{d.name} is hidden on this computer.</span>

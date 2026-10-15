@@ -46,6 +46,8 @@ pub struct DevicesRuntime {
     /// A dealt-with request couldn't be recorded: stop handling requests until Nest restarts,
     /// rather than risk applying one again and again.
     pub requests_paused: bool,
+    /// v0.5 template sync: plain words when it couldn't run.
+    pub template_problem: Option<String>,
 }
 
 #[derive(Default)]
@@ -54,6 +56,8 @@ pub struct Devices {
     pub syncing: AtomicBool,
     /// A sync was asked for while one ran: run once more when it finishes.
     pub again: AtomicBool,
+    /// Quitting: template sync only writes (nothing is installed on the way out).
+    pub quitting: AtomicBool,
 }
 
 fn now_rfc3339() -> String {
@@ -90,6 +94,7 @@ pub fn sync_now(app: &AppHandle) {
         if sync_inner(&state, dev) {
             let _ = app.emit(CHANGED_EVENT, ());
         }
+        crate::template_sync_cmd::tick(app, !dev.quitting.load(Ordering::SeqCst));
         if !dev.again.load(Ordering::SeqCst) {
             break;
         }
@@ -352,6 +357,9 @@ pub fn sync_soon(app: &AppHandle) {
 pub fn sync_on_quit(app: &AppHandle) {
     let (tx, rx) = std::sync::mpsc::channel();
     let app2 = app.clone();
+    if let Some(state) = app.try_state::<AppState>() {
+        state.devices.quitting.store(true, Ordering::SeqCst);
+    }
     thread::spawn(move || {
         if let Some(state) = app2.try_state::<AppState>() {
             for _ in 0..20 {
@@ -406,6 +414,9 @@ pub struct DevicesView {
     pub this_project_count: usize,
     pub others: Vec<OtherSummary>,
     pub forgotten: Vec<OtherSummary>,
+    /// v0.5: keep my templates the same on all my computers.
+    pub sync_templates: bool,
+    pub template_problem: Option<String>,
 }
 
 #[derive(Debug, Serialize)]
@@ -472,6 +483,8 @@ fn view(state: &AppState) -> AppResult<DevicesView> {
             .unwrap_or(0),
         others: rt.others.iter().map(summary).collect(),
         forgotten,
+        sync_templates: s.sync_templates,
+        template_problem: rt.template_problem.clone(),
     })
 }
 
@@ -633,6 +646,16 @@ pub fn devices_claim(app: AppHandle, device_id: String) -> AppResult<DevicesView
         rt.last_written = None;
     }
     sync_now(&app);
+    view(&app.state::<AppState>())
+}
+
+/// v0.5: turn template sync on or off. On: sync straight away.
+#[tauri::command(async)]
+pub fn devices_set_sync_templates(app: AppHandle, on: bool) -> AppResult<DevicesView> {
+    change(&app, |s| {
+        s.sync_templates = on;
+        Ok(())
+    })?;
     view(&app.state::<AppState>())
 }
 

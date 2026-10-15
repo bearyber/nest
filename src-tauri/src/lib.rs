@@ -17,6 +17,8 @@ pub mod template;
 pub mod template_edit;
 pub mod template_from_folder;
 pub mod template_io;
+pub mod template_sync;
+mod template_sync_cmd;
 mod update;
 mod window;
 
@@ -175,6 +177,7 @@ pub fn run() {
             devices_cmd::devices_forget,
             devices_cmd::devices_claim,
             devices_cmd::devices_refresh,
+            devices_cmd::devices_set_sync_templates,
             devices_cmd::request_status,
         ])
         .build(tauri::generate_context!())

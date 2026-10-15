@@ -360,4 +360,8 @@ export interface DevicesView {
   thisProjectCount: number;
   others: OtherComputer[];
   forgotten: OtherComputer[];
+  /** v0.5: keep my templates the same on all my computers. */
+  syncTemplates: boolean;
+  /** Plain words when template sync couldn't run. */
+  templateProblem: string | null;
 }
