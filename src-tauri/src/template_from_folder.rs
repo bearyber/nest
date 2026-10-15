@@ -163,6 +163,28 @@ pub fn read_dropped(paths: &[PathBuf], items: usize, bytes: u64) -> Result<Dropp
     Ok(out)
 }
 
+/// The start of the error `read_folder` gives when the files are over the 200 MB limit.
+const TOO_BIG: &str = "The files add up to more than";
+
+/// Folders and files, always. Only if the files are over the 200 MB limit, `folders_only`
+/// asks whether to make the template from the folders alone. `Ok(None)` if that was declined.
+pub fn read_folder_or_folders_only(
+    dir: &Path,
+    folders_only: impl FnOnce() -> bool,
+    installed: impl Fn(&str) -> Option<Template>,
+) -> Result<Option<FolderTemplate>, String> {
+    match read_folder(dir, Keep::FoldersAndFiles, &installed) {
+        Err(e) if e.starts_with(TOO_BIG) => {
+            if folders_only() {
+                read_folder(dir, Keep::Folders, &installed).map(Some)
+            } else {
+                Ok(None)
+            }
+        }
+        other => other.map(Some),
+    }
+}
+
 /// Read `dir` into a draft template. `installed` finds an installed template by id (for a Nest
 /// project's questions). Refuses folders over the template limits (2,000 items, 200 MB).
 pub fn read_folder(
@@ -423,7 +445,7 @@ impl Walk {
             self.count()?;
             if self.bytes > LIMITS.max_bytes {
                 return Err(format!(
-                    "The files add up to more than {} MB, the most a template can hold. Try \"Folders only\", or fewer files.",
+                    "{TOO_BIG} {} MB, the most a template can hold. Try \"Folders only\", or fewer files.",
                     LIMITS.max_bytes / 1024 / 1024
                 ));
             }
@@ -836,6 +858,46 @@ mod tests {
         assert!(e.contains("more than 200 MB"), "{e}");
         // Folders only is fine.
         assert!(read_folder(tmp.path(), Keep::Folders, none).is_ok());
+    }
+
+    #[test]
+    fn over_200_mb_offers_folders_only() {
+        let tmp = tempfile::tempdir().unwrap();
+        mk(tmp.path(), "01_BRIEF");
+        for i in 0..3 {
+            let f = fs::File::create(tmp.path().join(format!("big{i}.bin"))).unwrap();
+            f.set_len(MAX_FILE_BYTES).unwrap(); // 3 × 100 MB > 200 MB
+        }
+        // Declined: nothing made.
+        let mut asked = 0;
+        let r = read_folder_or_folders_only(
+            tmp.path(),
+            || {
+                asked += 1;
+                false
+            },
+            none,
+        )
+        .unwrap();
+        assert!(r.is_none());
+        assert_eq!(asked, 1);
+        // Accepted: folders only, no files.
+        let r = read_folder_or_folders_only(tmp.path(), || true, none)
+            .unwrap()
+            .unwrap();
+        assert!(r.staged.names().is_empty());
+        assert!(folders(&r.template).contains(&"01_BRIEF"));
+    }
+
+    #[test]
+    fn under_the_limit_brings_files_without_asking() {
+        let tmp = tempfile::tempdir().unwrap();
+        mk(tmp.path(), "01_BRIEF");
+        fs::write(tmp.path().join("01_BRIEF/brief.txt"), "hi").unwrap();
+        let r = read_folder_or_folders_only(tmp.path(), || panic!("asked"), none)
+            .unwrap()
+            .unwrap();
+        assert_eq!(r.staged.names().len(), 1);
     }
 
     #[test]

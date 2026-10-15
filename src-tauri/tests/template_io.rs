@@ -4,7 +4,10 @@ use std::fs;
 use std::io::Write;
 use std::path::{Path, PathBuf};
 
-use nest_lib::template_io::{duplicate, export, import, load_installed, Installed, Limits, LIMITS};
+use nest_lib::template_io::{
+    duplicate, export, folder_count, import, info, load_installed, removal, without_built_ins,
+    Installed, Limits, Removal, LIMITS,
+};
 use zip::write::SimpleFileOptions;
 use zip::ZipWriter;
 
@@ -313,4 +316,84 @@ fn duplicate_gets_a_new_id_and_export_round_trips() {
         .filter(|e| e.file_name().to_string_lossy().contains(".tmp"))
         .collect();
     assert!(leftovers.is_empty(), "no export temp files left");
+}
+
+/// Templates list: Remove hides one of Nest's, bins yours, and bins your version of one of
+/// Nest's while hiding the original (so it doesn't come back in its place).
+#[test]
+fn remove_hides_nests_and_bins_yours() {
+    let s = setup();
+    for id in ["project", "grading"] {
+        fs::create_dir_all(s.bundled.join(id)).unwrap();
+        fs::write(
+            s.bundled.join(format!("{id}/{id}.nest.json")),
+            template_json(id, 1, "Built in"),
+        )
+        .unwrap();
+    }
+    let mine = s.pkg("mine.json");
+    fs::write(&mine, template_json("project", 2, "Mine")).unwrap();
+    import(&mine, &s.user, &s.installed(), LIMITS).unwrap();
+    let other = s.pkg("other.json");
+    fs::write(&other, template_json("acme-film", 1, "Acme film")).unwrap();
+    import(&other, &s.user, &s.installed(), LIMITS).unwrap();
+    let installed = s.installed();
+    let find = |id: &str, built_in: bool| {
+        installed
+            .iter()
+            .find(|t| t.loaded.template.id == id && t.built_in == built_in)
+            .unwrap()
+    };
+    assert_eq!(
+        removal(find("grading", true), &installed),
+        Removal::Hide("grading".into())
+    );
+    assert_eq!(
+        removal(find("acme-film", false), &installed),
+        Removal::Bin {
+            id: "acme-film".into(),
+            hide_original: false
+        }
+    );
+    assert_eq!(
+        removal(find("project", false), &installed),
+        Removal::Bin {
+            id: "project".into(),
+            hide_original: true
+        }
+    );
+}
+
+#[test]
+fn bring_back_unhides_only_nests_templates() {
+    let hidden = vec![
+        "video".to_string(),
+        "acme-film".to_string(),
+        "blank".to_string(),
+    ];
+    assert_eq!(
+        without_built_ins(&hidden, &["blank", "general", "video"]),
+        ["acme-film"]
+    );
+}
+
+#[test]
+fn folder_count_includes_implied_parents_once() {
+    let s = setup();
+    fs::create_dir_all(s.bundled.join("project")).unwrap();
+    fs::write(
+        s.bundled.join("project/project.nest.json"),
+        r#"{"schema":1,"id":"project","version":1,"name":"P",
+        "fields":[{"key":"client","label":"Billed to","type":"client","required":true},
+                  {"key":"name","label":"Name","type":"text","required":true},
+                  {"key":"gfx","label":"Graphics","type":"bool"}],
+        "folderName":"{yymm}_{name}",
+        "tree":["01_REF","02_FOOTAGE/A_CAM","02_FOOTAGE/B_CAM",{"name":"03_GFX","when":"gfx"}]}"#,
+    )
+    .unwrap();
+    let installed = s.installed();
+    let t = &installed[0];
+    // 01_REF, 02_FOOTAGE, A_CAM, B_CAM, 03_GFX.
+    assert_eq!(folder_count(&t.loaded.template), 5);
+    assert_eq!(info(t, &[]).folders, 5);
 }

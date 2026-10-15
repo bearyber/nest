@@ -313,6 +313,8 @@ export interface TemplateInfo {
   replaced: boolean;
   hidden: boolean;
   folder: string;
+  /** How many folders a new project gets (Templates list). */
+  folders: number;
 }
 
 export interface FolderInfo {
