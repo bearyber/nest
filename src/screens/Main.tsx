@@ -237,6 +237,8 @@ export default function Main() {
     let unlisten: (() => void) | undefined;
     getCurrentWindow()
       .onFocusChanged(({ payload: focused }) => {
+        // Hover highlights only while this window is the active one (like other Mac / Windows apps).
+        document.documentElement.dataset.window = focused ? "active" : "inactive";
         // Devices: read the other computers' lists again (some drives don't announce changes).
         if (focused) void devicesRefresh().catch(() => {});
         const last = scannedAtRef.current;

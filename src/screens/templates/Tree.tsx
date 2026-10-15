@@ -20,7 +20,7 @@ interface Props {
   fields: Field[];
   selected: RowId | null;
   renaming: RowId | null;
-  /** A folder just added: its name starts selected, ready to type over. */
+  /** A folder just added: it unfolds into place, its name selected, ready to type over. */
   fresh: RowId | null;
   /** The folder files are being dragged over, as a template path ("" = the project folder). */
   dropPath: string | null;
@@ -183,7 +183,10 @@ export default function Tree(p: Props) {
     const empty = n.kids.length === 0 && files.length === 0;
     const each = n.each ? fieldOf(n.each) : undefined;
     return (
-      <div key={id} className={`${styles.group} ${empty && !n.each ? styles.empty : ""}`}>
+      <div
+        key={id}
+        className={`${styles.group} ${empty && !n.each ? styles.empty : ""} ${p.fresh === id ? "nest-unfold" : ""}`}
+      >
         <div
           data-folder-id={id}
           data-drop-path={n.each ? undefined : path}

@@ -4,6 +4,7 @@ import App from "./App";
 import { detectPlatform } from "./lib/platform";
 import "./styles/tokens.css";
 import "./styles/base.css";
+import "./styles/motion.css";
 
 document.documentElement.dataset.platform = detectPlatform(navigator.userAgent);
 

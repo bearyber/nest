@@ -91,6 +91,7 @@ export default function FirstRun({ onDone }: { onDone: () => void }) {
           ))}
         </ol>
 
+        <div key={step} className={index === 0 ? "nest-slide-back" : "nest-slide-in"}>
         {step === "folder" && (
           <>
             <p className={styles.welcome}>Welcome to Nest</p>
@@ -164,6 +165,7 @@ export default function FirstRun({ onDone }: { onDone: () => void }) {
             </div>
           </>
         )}
+        </div>
 
         {error && (
           <p className={styles.error} role="alert">

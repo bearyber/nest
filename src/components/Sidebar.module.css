@@ -71,7 +71,7 @@
   text-align: left;
 }
 
-.item:hover {
+:global(:root:not([data-window="inactive"])) .item:hover {
   background: var(--control-hover);
 }
 
@@ -109,6 +109,7 @@
 
 /* Pinned to the bottom of the sidebar (spec §3.1). */
 .settings {
+  position: relative;
   display: flex;
   align-items: center;
   gap: var(--space-2);
@@ -132,13 +133,28 @@
   margin-top: 0;
 }
 
+/* The open view (Templates): the same quiet fill and accent bar as the filters above. */
 .settingsOn,
 .settingsOn:hover {
-  background: var(--accent-soft);
+  background: var(--control-hover);
   color: var(--text);
+  font-weight: 600;
 }
 
-.settings:hover {
+.settingsOn::before {
+  content: "";
+  position: absolute;
+  left: 0;
+  top: 50%;
+  width: 3px;
+  height: 16px;
+  border-radius: 2px;
+  background: var(--accent);
+  transform: translateY(-50%);
+}
+
+/* No hover while another window (e.g. Settings) is in front: the pointer never "left" this one. */
+:global(:root:not([data-window="inactive"])) .settings:hover {
   background: var(--control-hover);
   color: var(--text);
 }

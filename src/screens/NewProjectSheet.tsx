@@ -505,7 +505,7 @@ export default function NewProjectSheet({ initialTemplate, onClose, onCreated }:
                   </div>
                 ))}
                 {showWhere && (
-                  <div className={styles.card}>
+                  <div className={`${styles.card} nest-unfold`}>
                     <div className={styles.row}>
                       <span className={styles.label}>Location</span>
                       <div className={styles.inline}>

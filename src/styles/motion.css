@@ -1,0 +1,67 @@
+/* Small, native-feeling motion (v0.6, Bernard 2026-10-15): short, no bounce, and off when the
+   system asks for less motion. Used as plain class names next to the CSS-module ones. */
+
+@keyframes nest-in {
+  from {
+    opacity: 0;
+    transform: translateY(4px);
+  }
+}
+
+@keyframes nest-slide-in {
+  from {
+    opacity: 0;
+    transform: translateX(16px);
+  }
+}
+
+@keyframes nest-slide-back {
+  from {
+    opacity: 0;
+    transform: translateX(-16px);
+  }
+}
+
+@keyframes nest-unfold {
+  from {
+    opacity: 0;
+    transform: translateY(-6px);
+  }
+}
+
+@keyframes nest-pop {
+  from {
+    opacity: 0;
+    transform: scale(0.85);
+  }
+}
+
+.nest-in {
+  animation: nest-in 180ms ease-out both;
+}
+
+.nest-slide-in {
+  animation: nest-slide-in 220ms ease-out both;
+}
+
+.nest-slide-back {
+  animation: nest-slide-back 220ms ease-out both;
+}
+
+.nest-unfold {
+  animation: nest-unfold 200ms ease-out both;
+}
+
+.nest-pop {
+  animation: nest-pop 150ms ease-out both;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .nest-in,
+  .nest-slide-in,
+  .nest-slide-back,
+  .nest-unfold,
+  .nest-pop {
+    animation: none;
+  }
+}

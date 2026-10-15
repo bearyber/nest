@@ -234,7 +234,7 @@ export default function NameField({ value, fields, selectAll, onCommit, onCancel
       <div className={styles.fieldBox} role="group" aria-label={`Editing: ${label}`}>
         {pieces.map((p, i) =>
           isBlank(p) ? (
-            <span key={i} className={styles.chip}>
+            <span key={i} className={`${styles.chip} nest-pop`}>
               <button type="button" className={styles.chipX} style={{ opacity: 1 }} onClick={() => onChip?.(p.key, savedIndex(i))}>
                 {blankLabel(p.key, fields)}
               </button>
@@ -324,7 +324,7 @@ export default function NameField({ value, fields, selectAll, onCommit, onCancel
         )}
       </div>
       {/* Buttons here never take the focus from the name (so it isn't committed). */}
-      <div className={styles.fillLine} onMouseDown={(e) => e.preventDefault()}>
+      <div className={`${styles.fillLine} nest-unfold`} onMouseDown={(e) => e.preventDefault()}>
         {selection ? (
           <button
             type="button"

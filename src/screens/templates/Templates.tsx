@@ -238,7 +238,7 @@ export default function Templates({ run, onNewProject }: Props) {
         {listed.map((t) => (
           <li
             key={t.key}
-            className={styles.card}
+            className={`${styles.card} nest-in`}
             onContextMenu={(e) => {
               e.preventDefault();
               void templateMenu(t);
