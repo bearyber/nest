@@ -1,4 +1,11 @@
 {
+  "0.6.0": [
+    "Setup is now two steps: where your jobs go, and the folder you copy for every job",
+    "Templates: drop a job folder to make a template, click one to change it",
+    "A calmer template editor: names show as a real project, with one-click fill-ins",
+    "New Project is shorter: the client's files and where it goes, one line each",
+    "Nest's own templates no longer add a notes file: add your own files, or Project info"
+  ],
   "0.5.0": [
     "Templates have their own place in the sidebar",
     "A new template editor: your folders as a tree, add a folder anywhere, answers from New Project right in the names",
