@@ -7,8 +7,8 @@ use std::path::{Path, PathBuf};
 use nest_lib::plan::Date;
 use nest_lib::template::{Template, TreeEntry, TreeRule};
 use nest_lib::template_edit::{
-    new_id, preview, reset_to_original, retire_older_copies, save, tidy_all, trash_all_versions,
-    Example, SaveMode,
+    example_names, new_id, preview, reset_to_original, retire_older_copies, save, tidy_all,
+    trash_all_versions, Example, SaveMode,
 };
 use nest_lib::template_io::{import, load_installed, Installed, BUILT_IN_IDS, LIMITS};
 
@@ -468,4 +468,33 @@ fn nothing_is_binned_unless_the_new_copy_is_loaded() {
     let never = |_: &Installed| -> Result<(), String> { panic!("must not bin") };
     let missing = s.user.join("not-there");
     assert!(retire_older_copies(&v1.id, &missing, &s.installed(), &never).is_err());
+}
+
+#[test]
+fn example_names_match_the_preview() {
+    let s = Setup::new();
+    let video = s.get("video", true);
+    let t = &video.loaded.template;
+    let ex = Example::new(TODAY);
+    let p = preview(t, &video.loaded, &ex);
+    let names: Vec<String> = [
+        t.folder_name.as_str(),
+        "01_BRIEF",
+        "{item}",
+        "{name}_{start}",
+        "{client}",
+        "{nope}",
+    ]
+    .iter()
+    .map(|s| s.to_string())
+    .collect();
+    let out = example_names(t, &ex, &names);
+    assert_eq!(out[0], p.folder_name);
+    assert_eq!(out[1], "01_BRIEF");
+    // "One folder for each format": the first format.
+    assert_eq!(out[2], "16x9");
+    assert!(p.folders.contains(&format!("05_EXPORTS/{}", out[2])));
+    assert_eq!(out[3], "SummerCampaign_20260302");
+    assert_eq!(out[4], "Acme");
+    assert_eq!(out[5], "{nope}");
 }

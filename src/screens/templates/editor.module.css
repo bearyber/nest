@@ -107,6 +107,14 @@
   min-width: 0;
 }
 
+/* One plain line under the header: what this screen is. */
+.lead {
+  margin: 0;
+  padding: var(--space-2) var(--space-4) 0;
+  font-size: var(--text-small);
+  color: var(--text-secondary);
+}
+
 /* ── The tree ── */
 
 .tree {
@@ -171,10 +179,6 @@
   font-size: var(--text-small);
 }
 
-.addRow:hover {
-  color: var(--accent);
-}
-
 .empty > .kids > .addRow,
 .always > .kids > .addRow,
 .group:hover:not(:has(.group:hover)) > .kids > .addRow {
@@ -196,11 +200,63 @@
   font-size: 13px;
 }
 
-.example {
-  margin-left: var(--space-2);
-  overflow: hidden;
-  text-overflow: ellipsis;
-  color: var(--text-tertiary);
+/* A name, as the example project has it: click it to change it. */
+.clickName {
+  cursor: text;
+  border-radius: 3px;
+}
+
+.clickName:hover {
+  text-decoration: underline;
+  text-decoration-color: var(--text-tertiary);
+  text-underline-offset: 3px;
+}
+
+/* ⋯ on the row under the pointer only (the same menu as right-click). */
+.rowMore {
+  visibility: hidden;
+  flex: none;
+  margin-left: auto;
+  width: 22px;
+  height: 20px;
+  padding: 0;
+  border: none;
+  border-radius: 4px;
+  background: transparent;
+  color: var(--text-secondary);
+  line-height: 1;
+}
+
+.row:hover > .rowMore {
+  visibility: visible;
+}
+
+.rowMore:hover {
+  background: var(--control-hover);
+  color: var(--text);
+}
+
+.addLink {
+  padding: 0;
+  border: none;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+}
+
+.addLink:hover {
+  color: var(--accent);
+}
+
+/* "or drop files here": only in an empty folder, and only under the pointer. */
+.dropHint {
+  display: none;
+  margin-left: var(--space-1);
+}
+
+.empty:hover > .kids > .addRow > .dropHint,
+.always:hover:not(:has(.group:hover)) > .kids > .addRow > .dropHint {
+  display: inline;
 }
 
 .tag {
@@ -212,7 +268,7 @@
   color: var(--text-secondary);
 }
 
-/* ── Names: text and blank chips ── */
+/* ── Names: text and answer chips ── */
 
 .name {
   display: inline-flex;
@@ -255,13 +311,48 @@
   opacity: 1;
 }
 
-/* Editing a name: the text parts are plain inputs between the chips. */
+/* Editing a name: the text parts are plain inputs between the chips, and one line under it
+   with New Project's answers to put in. */
 .field {
   position: relative;
   display: inline-flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 2px;
+  min-width: 0;
+  padding: 2px 0;
+}
+
+.fillLine {
+  display: flex;
+  flex-wrap: wrap;
   align-items: center;
   gap: 4px;
-  min-width: 0;
+  font-size: var(--text-small);
+  color: var(--text-secondary);
+}
+
+.fillItem {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.fillLink,
+.askLink {
+  padding: 0;
+  border: none;
+  background: transparent;
+  color: var(--accent);
+  font: inherit;
+  cursor: pointer;
+}
+
+.fillLink:hover,
+.askLink:hover,
+.askOpen {
+  text-decoration: underline;
+  text-underline-offset: 2px;
 }
 
 .fieldBox {
@@ -287,13 +378,7 @@
   -webkit-user-select: text;
 }
 
-.small {
-  height: 22px;
-  padding: 0 8px;
-  font-size: var(--text-small);
-}
-
-/* The blank picker under a name being edited. */
+/* The answer picker under a name being edited. */
 .picker {
   position: absolute;
   top: calc(100% + 4px);
@@ -335,7 +420,7 @@
   color: rgba(255, 255, 255, 0.8);
 }
 
-/* ── Bottom: a blank's settings, and what New Project asks ── */
+/* ── Bottom: a question's settings, and what New Project asks ── */
 
 .settings {
   display: grid;
@@ -412,10 +497,6 @@
   border-top: var(--hairline) solid var(--separator);
   font-size: var(--text-small);
   color: var(--text-secondary);
-}
-
-.asks .chip {
-  cursor: pointer;
 }
 
 .asksLabel {

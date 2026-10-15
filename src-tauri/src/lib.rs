@@ -159,6 +159,7 @@ pub fn run() {
             settings_cmd::reset_template,
             settings_cmd::template_draft,
             settings_cmd::preview_template,
+            settings_cmd::example_names,
             settings_cmd::save_template,
             settings_cmd::template_from_folder,
             settings_cmd::editor_open,

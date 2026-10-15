@@ -13,13 +13,15 @@ export const fileRow = (from: string) => `file:${from}`;
 
 interface Props {
   folderName: string;
-  /** The project folder's name with example answers (grey, next to it). */
-  example: string;
+  /** Each name as typed → as the example project has it (from Rust). Missing: shown as typed. */
+  examples: Record<string, string>;
   nodes: FolderNode[];
   files: FileEntry[];
   fields: Field[];
   selected: RowId | null;
   renaming: RowId | null;
+  /** A folder just added: its name starts selected, ready to type over. */
+  fresh: RowId | null;
   /** The folder files are being dragged over, as a template path ("" = the project folder). */
   dropPath: string | null;
   onSelect: (id: RowId) => void;
@@ -48,10 +50,25 @@ export function rowOrder(nodes: FolderNode[], files: FileEntry[]): RowId[] {
   return out;
 }
 
-const baseName = (to: string) => to.slice(to.lastIndexOf("/") + 1);
+export const baseName = (to: string) => to.slice(to.lastIndexOf("/") + 1);
+
+/** Every name the tree shows (project folder, folders, files), once each: what to ask Rust for
+ *  examples of. */
+export function visibleNames(folderName: string, nodes: FolderNode[], files: FileEntry[]): string[] {
+  const out = new Set<string>([folderName]);
+  const walk = (list: FolderNode[]) =>
+    list.forEach((n) => {
+      out.add(n.name);
+      walk(n.kids);
+    });
+  walk(nodes);
+  files.forEach((f) => out.add(baseName(f.to)));
+  return [...out];
+}
 
 /** The template as an outline: the project folder on top, what's inside each folder below it
- *  with a line down the side, and "Add folder" inside every folder. */
+ *  with a line down the side, and "Add folder" inside every folder. Names show as the example
+ *  project has them; click one to change it. */
 export default function Tree(p: Props) {
   const fieldOf = (key: string) => p.fields.find((f) => f.key === key);
   const labelOf = (key: string) => fieldOf(key)?.label ?? key;
@@ -66,21 +83,62 @@ export default function Tree(p: Props) {
     onDrop: (id, t) => p.onMove(id, t.id, t.where),
   });
 
+  /** A name as the example project has it. Before Rust has answered: as typed, with chips. */
+  const example = (id: RowId, value: string, renamable: boolean) => {
+    const shown = p.examples[value];
+    if (shown === undefined) return <NameView name={value} fields={p.fields} onChip={(key, i) => p.onChip(id, key, i)} />;
+    return (
+      <span
+        className={`${styles.name} ${styles.mono} ${renamable ? styles.clickName : ""}`}
+        title={shown !== value ? value : undefined}
+        onClick={
+          renamable
+            ? (e) => {
+                e.stopPropagation();
+                p.onStartRename(id);
+              }
+            : undefined
+        }
+      >
+        {shown}
+      </span>
+    );
+  };
+
   const nameOrField = (id: RowId, value: string, label: string, opts: { below?: boolean; tab?: boolean } = {}) =>
     p.renaming === id ? (
       <NameField
         value={value}
         fields={p.fields}
         label={label}
+        selectAll={p.fresh === id}
         onCommit={(v) => p.onRename(id, v)}
         onCancel={p.onCancelRename}
         onEnter={opts.below ? (v) => p.onRename(id, v, "below") : undefined}
         onTab={opts.tab ? (v, out) => p.onRename(id, v, out ? "out" : "in") : undefined}
         onNewBlank={p.onNewBlank}
-        onChip={(key) => p.onChip(id, key, -1)}
+        onChip={(key, i) => p.onChip(id, key, i)}
       />
     ) : (
-      <NameView name={value} fields={p.fields} onChip={(key, i) => p.onChip(id, key, i)} />
+      example(id, value, true)
+    );
+
+  /** ⋯ on the row under the pointer: the same menu as right-click. */
+  const more = (id: RowId, what: string) =>
+    p.renaming === id ? null : (
+      <button
+        type="button"
+        className={styles.rowMore}
+        aria-label={`More for ${what}`}
+        title="More"
+        onClick={(e) => {
+          e.stopPropagation();
+          p.onSelect(id);
+          p.onMenu(id);
+        }}
+      >
+        ⋯
+      </button>
     );
 
   const rowProps = (id: RowId) => ({
@@ -103,13 +161,17 @@ export default function Tree(p: Props) {
           <Icon name="file" className={styles.fileIcon} />
           {nameOrField(id, baseName(f.to), "File name")}
           {f.fill && <span className={styles.tag}>fills in answers</span>}
+          {more(id, baseName(f.to))}
         </div>
       );
     });
 
-  const addRow = (parent: string | null) => (
-    <div className={`${styles.row} ${styles.addRow}`} onClick={() => p.onAddInside(parent)}>
-      + Add folder
+  const addRow = (parent: string | null, path: string, empty: boolean) => (
+    <div className={`${styles.row} ${styles.addRow}`} data-drop-path={path}>
+      <button type="button" className={styles.addLink} onClick={() => p.onAddInside(parent)}>
+        + Add folder
+      </button>
+      {empty && <span className={styles.dropHint}>or drop files here</span>}
     </div>
   );
 
@@ -136,11 +198,7 @@ export default function Tree(p: Props) {
           {...drag.handlers(id)}
         >
           <Icon name="folder" className={styles.folderIcon} />
-          {n.each ? (
-            <NameView name={`{${n.each}}`} fields={p.fields} onChip={(key) => p.onChip(id, key, -1)} />
-          ) : (
-            nameOrField(id, n.name, "Folder name", { below: true, tab: true })
-          )}
+          {n.each ? example(id, n.name, false) : nameOrField(id, n.name, "Folder name", { below: true, tab: true })}
           {n.each && <span className={styles.tag}>one folder for each {each ? `“${each.label}”` : "choice"}</span>}
           {n.kit && <span className={styles.tag}>client kit</span>}
           {n.when && (
@@ -148,11 +206,12 @@ export default function Tree(p: Props) {
               only if {n.when.startsWith("!") ? `not “${labelOf(n.when.slice(1))}”` : `“${labelOf(n.when)}”`}
             </span>
           )}
+          {more(id, n.name)}
         </div>
         <div className={styles.kids}>
           {kids}
           {files}
-          {!n.each && addRow(id)}
+          {!n.each && addRow(id, path, empty)}
         </div>
       </div>
     );
@@ -171,12 +230,12 @@ export default function Tree(p: Props) {
         >
           <Icon name="folder" className={styles.folderIcon} />
           {nameOrField(ROOT, p.folderName, "Project folder name")}
-          {p.renaming !== ROOT && <span className={`${styles.example} ${styles.mono}`}>{p.example}</span>}
+          {more(ROOT, "the project folder")}
         </div>
         <div className={styles.kids}>
           {top}
           {topFiles}
-          {addRow(null)}
+          {addRow(null, "", p.nodes.length === 0 && topFiles.length === 0)}
         </div>
       </div>
     </div>

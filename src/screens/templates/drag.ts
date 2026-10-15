@@ -23,7 +23,7 @@ const THRESHOLD = 4;
 export function usePointerDrag({ attr, canDrop, canHoldInside, onDrop }: Options) {
   const [dragging, setDragging] = useState<string | null>(null);
   const [target, setTarget] = useState<DropTarget | null>(null);
-  const start = useRef<{ id: string; x: number; y: number; moved: boolean } | null>(null);
+  const start = useRef<{ id: string; x: number; y: number; moved: boolean; el: HTMLElement; pointer: number } | null>(null);
   const targetRef = useRef<DropTarget | null>(null);
 
   const pick = (x: number, y: number, id: string): DropTarget | null => {
@@ -40,15 +40,25 @@ export function usePointerDrag({ attr, canDrop, canHoldInside, onDrop }: Options
   const handlers = (id: string) => ({
     onPointerDown: (e: React.PointerEvent) => {
       if (e.button !== 0 || (e.target as HTMLElement).closest("input, select, button, textarea")) return;
-      start.current = { id, x: e.clientX, y: e.clientY, moved: false };
-      (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId);
+      // The pointer is only captured once it really moves, so a plain click still reaches what
+      // was clicked (a name: click it to change it).
+      start.current = { id, x: e.clientX, y: e.clientY, moved: false, el: e.currentTarget as HTMLElement, pointer: e.pointerId };
     },
     onPointerMove: (e: React.PointerEvent) => {
       const s = start.current;
       if (!s) return;
+      if (!s.moved && e.buttons === 0) {
+        start.current = null; // let go somewhere else before it became a drag
+        return;
+      }
       if (!s.moved && Math.hypot(e.clientX - s.x, e.clientY - s.y) < THRESHOLD) return;
       if (!s.moved) {
         s.moved = true;
+        try {
+          s.el.setPointerCapture(s.pointer);
+        } catch {
+          // The pointer is already gone: the drag ends on its own.
+        }
         setDragging(s.id);
       }
       const t = pick(e.clientX, e.clientY, s.id);

@@ -4,7 +4,7 @@ import { BUILTIN_BLOCKS } from "../../lib/templateDraft";
 import type { Field } from "../../lib/types";
 import styles from "./editor.module.css";
 
-/** What a blank is called, for its chip. Unknown keys show as they are (Rust says what's wrong). */
+/** What an answer is called, for its chip. Unknown keys show as they are (Rust says what's wrong). */
 export function blankLabel(key: string, fields: Field[]): string {
   if (key === "item") return "each choice";
   if (key === "yymmdd" || key === "date") return "Today";
@@ -16,7 +16,7 @@ export function blankLabel(key: string, fields: Field[]): string {
 const known = (key: string, fields: Field[]) =>
   key === "item" || fields.some((f) => f.key === key) || BUILTIN_BLOCKS.some((b) => b.key === key) || key === "yymmdd";
 
-/** A name with its blanks as chips (read-only). Clicking a chip opens its settings. */
+/** A name with its answers as chips (read-only). Clicking a chip opens its settings. */
 export function NameView({
   name,
   fields,
@@ -68,7 +68,7 @@ function normalize(pieces: NamePiece[]): NamePiece[] {
   return out;
 }
 
-/** Blanks a name can use: your questions that make sense in a name, and Nest's own. */
+/** Answers a name can use: your questions that make sense in a name, and Nest's own. */
 function choices(fields: Field[]): { key: string; label: string; hint: string }[] {
   const yours = fields
     .filter((f) => f.type !== "longtext" && f.type !== "bool")
@@ -81,17 +81,31 @@ function choices(fields: Field[]): { key: string; label: string; hint: string }[
   return [...yours, ...nest];
 }
 
-interface Picker {
-  /** The text piece the blank goes into, and where in it (start–end: replaced by "Make a blank"). */
+/** The quick ones under a name being edited: the template's own text, date and client
+ *  questions, at most three (the rest are under More…). */
+export function quickChoices(fields: Field[]): { key: string; label: string }[] {
+  return fields
+    .filter((f) => f.type === "text" || f.type === "date" || f.type === "client")
+    .slice(0, 3)
+    .map((f) => ({ key: f.key, label: f.type === "client" ? "Client" : f.label }));
+}
+
+/** A place in the name: a text piece, and a range in it (start–end is replaced). */
+interface Spot {
   piece: number;
   start: number;
   end: number;
+}
+
+interface Picker extends Spot {
   filter: string;
 }
 
 interface Props {
   value: string;
   fields: Field[];
+  /** Start with the whole name selected, ready to type over (a folder just added). */
+  selectAll?: boolean;
   /** Done (Enter, or clicked away). */
   onCommit: (value: string) => void;
   onCancel: () => void;
@@ -99,42 +113,54 @@ interface Props {
   onEnter?: (value: string) => void;
   /** Tab / Shift+Tab: done, and move the folder in or out. */
   onTab?: (value: string, out: boolean) => void;
-  /** A new blank named `label`: returns its key. */
+  /** A new question named `label`: returns its key. */
   onNewBlank: (label: string) => string;
-  onChip?: (key: string) => void;
-  /** Characters a name can't have (e.g. "/" in a folder name). */
+  /** A chip was clicked: its key, and its place among the name's pieces. */
+  onChip?: (key: string, index: number) => void;
+  /** What the field is (read out by screen readers). */
   label: string;
 }
 
-/** Edit a name: type text; type `{` (or click Add blank) to put in a blank; select some text and
- *  click Make a blank to turn it into one. Backspace next to a chip removes it. */
-export default function NameField({ value, fields, onCommit, onCancel, onEnter, onTab, onNewBlank, onChip, label }: Props) {
+/** Edit a name: type text; click one of New Project's answers under it (or type `{`) to put it
+ *  in; select some text and click "Use New Project's answer" to swap it for one. Backspace next
+ *  to a chip removes it. */
+export default function NameField({ value, fields, selectAll, onCommit, onCancel, onEnter, onTab, onNewBlank, onChip, label }: Props) {
   const [pieces, setPieces] = useState<NamePiece[]>(() => normalize(parseName(value)));
   const [picker, setPicker] = useState<Picker | null>(null);
   const [active, setActive] = useState(0);
-  const [selection, setSelection] = useState<{ piece: number; start: number; end: number } | null>(null);
+  const [selection, setSelection] = useState<Spot | null>(null);
   const inputs = useRef<(HTMLInputElement | null)[]>([]);
   const box = useRef<HTMLDivElement>(null);
-  const lastCaret = useRef<{ piece: number; at: number }>({ piece: 0, at: 0 });
+  /** Where a quick answer goes: the cursor, or the name selected on open (typed over). */
+  const spot = useRef<Spot>(
+    (() => {
+      const last = pieces.length - 1;
+      const len = (pieces[last] as { text: string }).text.length;
+      return selectAll && pieces.length === 1 ? { piece: 0, start: 0, end: len } : { piece: last, start: len, end: len };
+    })(),
+  );
+  /** The selection made on open isn't one the user made: it doesn't offer "Use New Project's answer". */
+  const opening = useRef(!!selectAll);
   const done = useRef(false);
 
   const current = () => formatName(pieces.filter((p) => isBlank(p) || p.text !== ""));
 
-  // Start with the cursor at the end, everything selected (like renaming in Finder / Explorer).
+  // A new folder starts fully selected (type over it); other names with the cursor at the end.
   useEffect(() => {
-    const last = inputs.current[inputs.current.length - 1];
-    if (pieces.length === 1) inputs.current[0]?.select();
-    else last?.focus();
-    // Only on open.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+    const at = spot.current;
+    const el = inputs.current[at.piece];
+    el?.focus();
+    el?.setSelectionRange(at.start, at.end);
+  }, []); // only on open
 
-  const focusAt = (piece: number, at: number) =>
+  const focusAt = (piece: number, at: number) => {
+    spot.current = { piece, start: at, end: at };
     setTimeout(() => {
       const el = inputs.current[piece];
       el?.focus();
       el?.setSelectionRange(at, at);
     }, 0);
+  };
 
   const finish = (how: "commit" | "enter" | "tab" | "untab" | "cancel") => {
     if (done.current) return;
@@ -154,28 +180,34 @@ export default function NameField({ value, fields, onCommit, onCancel, onEnter, 
   const typed = picker?.filter.trim() ?? "";
   const canAdd = typed !== "" && !choices(fields).some((c) => c.label.toLowerCase() === typed.toLowerCase());
   const count = options.length + (canAdd ? 1 : 0);
+  const quick = quickChoices(fields);
+
+  /** Put answer `key` in at `at` (replacing what's selected there). */
+  const put = (at: Spot, key: string) => {
+    const f = fields.find((x) => x.key === key);
+    const transform = f?.type === "date" ? "yymmdd" : undefined;
+    const text = (pieces[at.piece] as { text: string } | undefined)?.text ?? "";
+    const next = [
+      ...pieces.slice(0, at.piece),
+      { text: text.slice(0, at.start) },
+      transform ? { key, transform } : { key },
+      { text: text.slice(at.end) },
+      ...pieces.slice(at.piece + 1),
+    ];
+    setPieces(normalize(next));
+    setSelection(null);
+    opening.current = false;
+    focusAt(at.piece + 2, 0);
+  };
 
   const choose = (key: string | null) => {
     if (!picker) return;
-    const k = key ?? onNewBlank(typed);
-    const f = fields.find((x) => x.key === k);
-    const transform = f?.type === "date" ? "yymmdd" : undefined;
-    const text = (pieces[picker.piece] as { text: string }).text;
-    const next = [
-      ...pieces.slice(0, picker.piece),
-      { text: text.slice(0, picker.start) },
-      transform ? { key: k, transform } : { key: k },
-      { text: text.slice(picker.end) },
-      ...pieces.slice(picker.piece + 1),
-    ];
-    setPieces(normalize(next));
+    put(picker, key ?? onNewBlank(typed));
     setPicker(null);
-    setSelection(null);
-    focusAt(picker.piece + 2, 0);
   };
 
-  const openPicker = (piece: number, start: number, end: number, filter = "") => {
-    setPicker({ piece, start, end, filter });
+  const openPicker = (at: Spot, filter = "") => {
+    setPicker({ ...at, filter });
     setActive(0);
   };
 
@@ -186,6 +218,9 @@ export default function NameField({ value, fields, onCommit, onCancel, onEnter, 
     setPieces(normalize(next));
     focusAt(index - 1, caret);
   };
+
+  /** A chip's place among the name's pieces as saved (no empty text between chips). */
+  const savedIndex = (i: number) => pieces.slice(0, i).filter((p) => isBlank(p) || p.text !== "").length;
 
   return (
     <div
@@ -200,7 +235,7 @@ export default function NameField({ value, fields, onCommit, onCancel, onEnter, 
         {pieces.map((p, i) =>
           isBlank(p) ? (
             <span key={i} className={styles.chip}>
-              <button type="button" className={styles.chipX} style={{ opacity: 1 }} onClick={() => onChip?.(p.key)}>
+              <button type="button" className={styles.chipX} style={{ opacity: 1 }} onClick={() => onChip?.(p.key, savedIndex(i))}>
                 {blankLabel(p.key, fields)}
               </button>
               <button type="button" className={styles.chipX} aria-label={`Remove ${blankLabel(p.key, fields)}`} onClick={() => removeChip(i)}>
@@ -222,14 +257,21 @@ export default function NameField({ value, fields, onCommit, onCancel, onEnter, 
                 const raw = e.target.value.replace(/[/\\}]/g, "");
                 const brace = raw.indexOf("{");
                 const text = brace >= 0 ? raw.slice(0, brace) + raw.slice(brace + 1) : raw;
+                const caret = brace >= 0 ? brace : Math.min(e.target.selectionStart ?? text.length, text.length);
                 setPieces((ps) => ps.map((x, j) => (j === i ? { text } : x)));
-                if (brace >= 0) openPicker(i, brace, brace);
+                opening.current = false;
+                setSelection(null);
+                spot.current = { piece: i, start: caret, end: caret };
+                if (brace >= 0) openPicker({ piece: i, start: brace, end: brace });
               }}
               onSelect={(e) => {
                 const el = e.currentTarget;
                 const start = el.selectionStart ?? 0;
                 const end = el.selectionEnd ?? start;
-                lastCaret.current = { piece: i, at: end };
+                spot.current = { piece: i, start, end };
+                const whole = start === 0 && end === el.value.length;
+                if (opening.current && whole) return;
+                opening.current = false;
                 setSelection(start !== end ? { piece: i, start, end } : null);
               }}
               onKeyDown={(e) => {
@@ -281,36 +323,47 @@ export default function NameField({ value, fields, onCommit, onCancel, onEnter, 
           ),
         )}
       </div>
-      {selection ? (
-        <button
-          type="button"
-          className={`${styles.small}`}
-          onMouseDown={(e) => e.preventDefault()}
-          onClick={() => {
-            const text = (pieces[selection.piece] as { text: string }).text.slice(selection.start, selection.end);
-            openPicker(selection.piece, selection.start, selection.end, text);
-          }}
-        >
-          Make a blank
-        </button>
-      ) : (
-        <button
-          type="button"
-          className={styles.small}
-          onMouseDown={(e) => e.preventDefault()}
-          onClick={() => openPicker(lastCaret.current.piece, lastCaret.current.at, lastCaret.current.at)}
-        >
-          Add blank
-        </button>
-      )}
+      {/* Buttons here never take the focus from the name (so it isn't committed). */}
+      <div className={styles.fillLine} onMouseDown={(e) => e.preventDefault()}>
+        {selection ? (
+          <button
+            type="button"
+            className={styles.fillLink}
+            onClick={() => {
+              const text = (pieces[selection.piece] as { text: string }).text.slice(selection.start, selection.end);
+              openPicker(selection, text);
+            }}
+          >
+            Use New Project's answer
+          </button>
+        ) : (
+          <>
+            <span>Fill in from New Project:</span>
+            {quick.map((q, i) => (
+              <span key={q.key} className={styles.fillItem}>
+                {i > 0 && <span aria-hidden="true">·</span>}
+                <button type="button" className={styles.fillLink} onClick={() => put(spot.current, q.key)}>
+                  {q.label}
+                </button>
+              </span>
+            ))}
+            <span className={styles.fillItem}>
+              {quick.length > 0 && <span aria-hidden="true">·</span>}
+              <button type="button" className={styles.fillLink} onClick={() => openPicker(spot.current)}>
+                More…
+              </button>
+            </span>
+          </>
+        )}
+      </div>
       {picker && (
-        <div className={styles.picker} role="listbox" aria-label="Blanks">
+        <div className={styles.picker} role="listbox" aria-label="New Project's answers">
           <input
             className={styles.input}
             autoFocus
             value={picker.filter}
-            placeholder="Find or name a blank"
-            aria-label="Find or name a blank"
+            placeholder="Find an answer, or name a new question"
+            aria-label="Find an answer, or name a new question"
             onChange={(e) => {
               setPicker({ ...picker, filter: e.target.value });
               setActive(0);
@@ -352,7 +405,7 @@ export default function NameField({ value, fields, onCommit, onCancel, onEnter, 
               onMouseEnter={() => setActive(options.length)}
               onClick={() => choose(null)}
             >
-              Add “{typed}” as a blank
+              Add “{typed}” as a question
             </button>
           )}
         </div>
