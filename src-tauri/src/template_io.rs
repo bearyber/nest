@@ -252,6 +252,80 @@ fn install_into(
     load_dir(&folder).map_err(|e| e.to_string())
 }
 
+// ───────────────────────── Template sync install ─────────────────────────
+
+/// Given the package's template name, the new id and name for an unrelated copy.
+pub type Rename<'a> = dyn Fn(&str) -> (String, String) + 'a;
+
+/// Template sync (v0.5): install a package another of your computers wrote. Same package
+/// checks as Import (zip limits, names, no links), but it only installs exactly the template
+/// the sync decided on: the package's own id and version must be `expect` (otherwise it's
+/// still syncing and nothing is installed). `rename` = install as an unrelated copy with a new
+/// id and name. Import's "only a newer version" rule is the sync's job here (it may install the
+/// same version to settle a tie), so it isn't checked; nothing existing is ever overwritten:
+/// the new copy goes into a folder of its own, next to any older one.
+pub fn install_synced(
+    file: &Path,
+    user_dir: &Path,
+    installed: &[Installed],
+    limits: Limits,
+    expect: (&str, u32),
+    rename: Option<&Rename<'_>>,
+) -> Result<LoadedTemplate, String> {
+    fs::create_dir_all(user_dir)
+        .map_err(|e| format!("Couldn't create the templates folder: {e}"))?;
+    let tmp = user_dir.join(format!(".import-{}", uuid::Uuid::new_v4().simple()));
+    fs::create_dir(&tmp).map_err(|e| format!("Couldn't start the install: {e}"))?;
+    let result = (|| -> Result<LoadedTemplate, String> {
+        unzip_safely(file, &tmp, limits)?;
+        let root = template_root(&tmp)?;
+        let loaded = load_dir(&root).map_err(|e| e.to_string())?;
+        if (loaded.template.id.as_str(), loaded.template.version) != expect {
+            return Err("That template is still syncing".into());
+        }
+        let mut id = loaded.template.id.clone();
+        if let Some(rename) = rename {
+            let (new_id, new_name) = rename(&loaded.template.name);
+            let mut t = loaded.template.clone();
+            t.id = new_id.clone();
+            t.name = new_name;
+            t.validate().map_err(|e| e.to_string())?;
+            let json = fs::read_dir(&root)
+                .map_err(|e| e.to_string())?
+                .flatten()
+                .map(|e| e.path())
+                .find(|p| {
+                    p.file_name()
+                        .is_some_and(|n| n.to_string_lossy().ends_with(TEMPLATE_SUFFIX))
+                })
+                .ok_or("That template file has no template inside")?;
+            // Our own temporary folder: the old file is replaced by the renamed one.
+            fs::remove_file(&json).map_err(|e| e.to_string())?;
+            let text = serde_json::to_string_pretty(&t).map_err(|e| e.to_string())? + "\n";
+            write_new(
+                &root.join(format!("{new_id}{TEMPLATE_SUFFIX}")),
+                text.as_bytes(),
+            )?;
+            load_dir(&root).map_err(|e| e.to_string())?;
+            id = new_id;
+        }
+        let has_yours = installed
+            .iter()
+            .any(|t| !t.built_in && t.loaded.template.id == id);
+        let base = if has_yours {
+            format!("{id}-v{}", expect.1)
+        } else {
+            id.clone()
+        };
+        let folder = free_folder(user_dir, &base);
+        fs::rename(&root, &folder).map_err(|e| format!("Couldn't install the template: {e}"))?;
+        load_dir(&folder).map_err(|e| e.to_string())
+    })();
+    // Our own temporary folder: always cleaned up (on success it has been moved away).
+    let _ = fs::remove_dir_all(&tmp);
+    result
+}
+
 /// The template folder inside an unpacked package: the top level, or its single subfolder.
 fn template_root(dir: &Path) -> Result<PathBuf, String> {
     let has_json = |d: &Path| {

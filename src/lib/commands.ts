@@ -143,6 +143,7 @@ export const devicesForget = (deviceId: string, forget: boolean) =>
   s<DevicesView>("devices_forget", { deviceId, forget });
 export const devicesClaim = (deviceId: string) => s<DevicesView>("devices_claim", { deviceId });
 export const devicesRefresh = () => invoke<void>("devices_refresh");
+export const devicesSetSyncTemplates = (on: boolean) => s<DevicesView>("devices_set_sync_templates", { on });
 export const openLogsFolder = () => s<void>("open_logs_folder");
 export const firstRunPickFolder = () => s<FolderInfo | null>("first_run_pick_folder");
 export const firstRunCreateFolder = () => s<FolderInfo>("first_run_create_folder");

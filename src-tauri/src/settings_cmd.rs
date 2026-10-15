@@ -496,6 +496,8 @@ fn find_template(state: &AppState, key: &str) -> AppResult<template_io::Installe
 fn templates_changed(app: &AppHandle, state: &AppState) -> AppResult<()> {
     reload_templates(state)?;
     let _ = app.emit(CHANGED_EVENT, ());
+    // v0.5 template sync: your other computers get the change (waits for the templates lock).
+    crate::devices_cmd::sync_soon(app);
     Ok(())
 }
 
@@ -519,6 +521,12 @@ pub fn import_template(
     let installed = lock(&state.templates)?.clone();
     let loaded = template_io::import(&file, &state.user_templates, &installed, LIMITS)
         .map_err(AppError::new)?;
+    crate::template_sync_cmd::note_saved(
+        &state,
+        &loaded.template.id,
+        loaded.template.version,
+        false,
+    );
     templates_changed(&app, &state)?;
     // Decision T-A: a newer version of one of yours replaces it; the older copy goes to the bin.
     let installed = lock(&state.templates)?.clone();
@@ -572,7 +580,9 @@ pub fn duplicate_template(
     let _one = lock(&state.templates_lock)?; // one change to your templates at a time
     let t = find_template(&state, &key)?;
     let installed = lock(&state.templates)?.clone();
-    template_io::duplicate(&t.loaded, &state.user_templates, &installed).map_err(AppError::new)?;
+    let copy = template_io::duplicate(&t.loaded, &state.user_templates, &installed)
+        .map_err(AppError::new)?;
+    crate::template_sync_cmd::note_saved(&state, &copy.template.id, copy.template.version, true);
     templates_changed(&app, &state)
 }
 
@@ -741,6 +751,8 @@ pub fn save_template(
         &example(&state)?,
     )
     .map_err(AppError::new)?;
+    let fresh = session.source.is_none() || mode == SaveMode::New;
+    crate::template_sync_cmd::note_saved(&state, &saved.template.id, saved.template.version, fresh);
     lock(&state.editor_sessions)?.remove(&key);
     // Hiding is per template id, and your customized version shares the built-in's id: show it,
     // since you just made it to use it.
