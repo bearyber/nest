@@ -4,6 +4,7 @@ import { invoke } from "@tauri-apps/api/core";
 import type {
   AddedFiles,
   Created,
+  KitsView,
   NewProjectContext,
   Plan,
   PlanRequest,
@@ -34,6 +35,20 @@ export const planProject = (request: PlanRequest) => invoke<Plan>("plan_project"
 
 export const createProject = (request: PlanRequest) =>
   invoke<Created>("create_project", { request });
+
+/** Stop a running Create; it undoes what it made and rejects with "Create was cancelled…". */
+export const cancelCreate = () => invoke<void>("cancel_create");
+
+// ── Client kits (v0.5) ──
+export const kitsView = () => invoke<KitsView>("kits_view");
+/** Folder picker for the Kits folder; null when cancelled. */
+export const chooseKitsFolder = () => invoke<SettingsView | null>("choose_kits_folder");
+export const clearKitsFolder = () => invoke<SettingsView>("clear_kits_folder");
+/** Folder picker for one client's kit; null when cancelled. */
+export const chooseClientKit = (code: string, name: string) =>
+  invoke<SettingsView | null>("choose_client_kit", { code, name });
+/** Use the Kits folder again for this client. */
+export const clearClientKit = (code: string) => invoke<SettingsView>("clear_client_kit", { code });
 
 /** Native folder picker; resolves to the new jobs folder, or null if cancelled. */
 export const chooseJobsRoot = () => invoke<string | null>("choose_jobs_root");

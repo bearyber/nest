@@ -276,11 +276,13 @@ fn rules_on_folders_survive_saving() {
         name: "07_NO_GRAPHICS".into(),
         when: Some("!graphics".into()),
         each: None,
+        kit: false,
     }));
     t.tree.push(TreeEntry::Rule(TreeRule {
         name: "08_GFX/{item}".into(),
         when: Some("graphics".into()),
         each: Some("formats".into()),
+        kit: false,
     }));
     let saved = s.save(&t, SaveMode::Customize, &video).unwrap();
     assert_eq!(saved.tree, t.tree);

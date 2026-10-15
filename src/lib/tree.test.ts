@@ -16,6 +16,30 @@ describe("buildTree", () => {
     expect(film.children[0]).toEqual({ name: "Kodak.cube", isFile: true, children: [] });
     expect(tree[3].isFile).toBe(true);
   });
+
+  it("shows the client kit's first files inside its folder and counts the rest", () => {
+    const tree = buildTree({
+      folders: ["02_BRAND", "02_BRAND/APL"],
+      files: [],
+      kit: {
+        state: "ready",
+        client: "Apple",
+        code: "APL",
+        folder: "02_BRAND/APL",
+        count: 40,
+        bytes: 1,
+        sample: ["02_BRAND/APL/Logos/logo.png", "02_BRAND/APL/Guide.pdf"],
+      },
+    });
+    const apl = tree[0].children[0];
+    expect(apl.children.map((n) => n.name)).toEqual(["Logos", "Guide.pdf", "…and 38 more files from the kit"]);
+    expect(apl.children[0].children[0].name).toBe("logo.png");
+  });
+
+  it("leaves a kit out unless it's ready to copy", () => {
+    const kit = { state: "missing" as const, client: "Apple", code: "APL", folder: "B", count: 0, bytes: 0, sample: ["B/x"] };
+    expect(buildTree({ folders: ["B"], files: [], kit })[0].children).toEqual([]);
+  });
 });
 
 describe("defaultsFor", () => {

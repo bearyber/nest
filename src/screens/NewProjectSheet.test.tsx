@@ -57,11 +57,35 @@ vi.mock("../lib/commands", () => ({
   }),
   createProject: vi.fn(),
   chooseJobsRoot: vi.fn(async () => null),
+  chooseClientKit: vi.fn(async () => null),
+  cancelCreate: vi.fn(async () => {}),
 }));
 
 vi.mock("@tauri-apps/api/event", () => ({ listen: vi.fn(async () => () => {}) }));
 
+import * as commands from "../lib/commands";
+import type { PlanKit } from "../lib/types";
 import NewProjectSheet from "./NewProjectSheet";
+
+/** Plans like the stand-in above, plus this client kit. Returns a way to go back. */
+function withKit(kit: PlanKit) {
+  const plan = vi.mocked(commands.planProject);
+  const base = plan.getMockImplementation()!;
+  plan.mockImplementation(async (req) => ({ ...(await base(req)), kit }));
+  return () => plan.mockImplementation(base);
+}
+
+const KIT: PlanKit = {
+  state: "ready",
+  client: "Vertex Studio",
+  code: "VX",
+  source: "/Users/me/Library/CloudStorage/GoogleDrive-me@acme.com/My Drive/Kits/VX",
+  folder: "02_BRAND",
+  count: 38,
+  bytes: 1_200_000_000,
+  fingerprint: "38-1200000000-abc",
+  sample: ["02_BRAND/logo.png"],
+};
 
 afterEach(cleanup);
 
@@ -137,5 +161,41 @@ describe("NewProjectSheet", () => {
     fireEvent.mouseDown(await screen.findByRole("option", { name: /Vertex Studio/ }));
     expect((screen.getByPlaceholderText("Name") as HTMLInputElement).value).toBe("Vertex Studio");
     expect((screen.getByLabelText("Client code") as HTMLInputElement).value).toBe("VX");
+  });
+
+  it("shows the client kit and sends its fingerprint with Create", async () => {
+    const restore = withKit(KIT);
+    const create = vi.mocked(commands.createProject);
+    create.mockResolvedValue({ key: "k", jobCode: "VX-L01", title: "KIRA", root: "D:/NestDev/x", bumped: false });
+    const onCreated = vi.fn();
+    render(<NewProjectSheet onClose={() => {}} onCreated={onCreated} />);
+    expect(await screen.findByText(/Client kit: Vertex Studio · 38 files · 1\.2 GB/)).toBeTruthy();
+    expect(screen.getByText(/Online-only files will be downloaded while copying/)).toBeTruthy();
+    // The kit's first files show in the preview, inside its folder; the rest are counted.
+    expect(screen.getByText("logo.png")).toBeTruthy();
+    expect(screen.getByText("…and 37 more files from the kit")).toBeTruthy();
+
+    fireEvent.change(screen.getByLabelText(/^Artist/), { target: { value: "KIRA" } });
+    const button = (await screen.findByRole("button", { name: /^Create/ })) as HTMLButtonElement;
+    await waitFor(() => expect(button.disabled).toBe(false));
+    fireEvent.click(button);
+    await waitFor(() => expect(onCreated).toHaveBeenCalled());
+    expect(create).toHaveBeenCalledWith(expect.objectContaining({ kitFingerprint: "38-1200000000-abc" }));
+    restore();
+  });
+
+  it("offers to choose a kit folder when the client has none, and explains a template without a place", async () => {
+    const restore = withKit({ ...KIT, state: "missing", source: undefined, fingerprint: undefined, count: 0, bytes: 0, sample: [] });
+    render(<NewProjectSheet onClose={() => {}} onCreated={() => {}} />);
+    expect(await screen.findByText(/No kit for Vertex Studio/)).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "Choose a folder…" }));
+    await waitFor(() => expect(commands.chooseClientKit).toHaveBeenCalledWith("VX", "Vertex Studio"));
+    restore();
+    cleanup();
+
+    const restore2 = withKit({ ...KIT, state: "noPlace", fingerprint: undefined, count: 0, bytes: 0, sample: [] });
+    render(<NewProjectSheet onClose={() => {}} onCreated={() => {}} />);
+    expect(await screen.findByText(/This template has no place for a client kit/)).toBeTruthy();
+    restore2();
   });
 });

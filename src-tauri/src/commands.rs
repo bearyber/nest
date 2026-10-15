@@ -8,16 +8,17 @@ use std::sync::{Mutex, MutexGuard};
 
 use chrono::{Datelike, Local};
 use serde::{Deserialize, Serialize};
-use tauri::State;
+use tauri::{Emitter, State};
 use tauri_plugin_dialog::{DialogExt, MessageDialogButtons, MessageDialogKind};
 use tauri_plugin_opener::OpenerExt;
 
-use crate::apply::apply_plan;
+use crate::apply::{apply_plan_with, step_count as apply_step_count};
 use crate::archive;
 use crate::error::{io_reason, AppError, AppResult};
 use crate::index::{
     self, now_ms, scan_root, FoundProject, Index, ProjectRow, RescanSummary, RootScan, RootState,
 };
+use crate::kits_cmd::Kits;
 use crate::manifest;
 use crate::plan::{self, ClientValue, Date, Issue, Level, Plan, PlanContext, Values};
 use crate::settings::{self, Settings};
@@ -29,6 +30,8 @@ use tauri_plugin_clipboard_manager::ClipboardExt;
 
 /// Tries at finding a free job code when the folder appears between plan and create.
 const CREATE_ATTEMPTS: usize = 5;
+/// Event sent while Create copies a client kit: `{ done, total }` steps.
+pub const CREATE_PROGRESS: &str = "create-progress";
 
 pub struct AppState {
     pub config_dir: PathBuf,
@@ -145,7 +148,12 @@ pub struct NewProjectContext {
 /// Everything the New Project sheet needs. Also refreshes the jobs root scan.
 // `async`: run off the UI thread, so a slow NAS or a big starter file never freezes the window.
 #[tauri::command(async)]
-pub fn new_project_context(state: State<'_, AppState>) -> AppResult<NewProjectContext> {
+pub fn new_project_context(
+    state: State<'_, AppState>,
+    kits: State<'_, Kits>,
+) -> AppResult<NewProjectContext> {
+    // Client kits are read again each time New Project opens.
+    kits.forget();
     let settings = lock(&state.settings)?.clone();
     let root = settings.new_project_root(false);
     // Sent whenever a Personal folder is chosen (even if it's also the first jobs folder), so
@@ -204,17 +212,26 @@ pub struct PlanRequest {
     /// "No client (personal or passion project)" ticked in New Project.
     #[serde(default)]
     pub no_client: bool,
+    /// Create only: the client kit's fingerprint in the preview Create was clicked on. Create
+    /// refuses if the kit changed since (None = the preview had no kit).
+    #[serde(default)]
+    pub kit_fingerprint: Option<String>,
 }
 
-/// Live preview for the sheet. Uses the cached scan, so it's cheap to call per keystroke.
+/// Live preview for the sheet. Uses the cached scan and kit listing, so it's cheap to call
+/// per keystroke.
 #[tauri::command(async)]
-pub fn plan_project(state: State<'_, AppState>, request: PlanRequest) -> AppResult<Plan> {
+pub fn plan_project(
+    state: State<'_, AppState>,
+    kits: State<'_, Kits>,
+    request: PlanRequest,
+) -> AppResult<Plan> {
     let settings = lock(&state.settings)?.clone();
     let scan = match request_root(&settings, &request) {
         Some(root) => cached_scan(&state, &root)?,
         None => RootScan::default(),
     };
-    Ok(build_plan(&state, &settings, &scan, &request)?.0)
+    Ok(build_plan(&state, &kits, &settings, &scan, &request, false)?.0)
 }
 
 /// The remembered scan of `root`, or a fresh one if Nest hasn't looked there since New Project
@@ -231,11 +248,14 @@ fn cached_scan(state: &AppState, root: &Path) -> AppResult<RootScan> {
     Ok(scan)
 }
 
+/// `fresh_kit`: read the client kit again instead of using the cached listing (Create).
 fn build_plan(
     state: &AppState,
+    kits: &Kits,
     settings: &Settings,
     scan: &RootScan,
     request: &PlanRequest,
+    fresh_kit: bool,
 ) -> AppResult<(Plan, LoadedTemplate)> {
     let loaded = lock(&state.templates)?
         .iter()
@@ -243,6 +263,7 @@ fn build_plan(
         .map(|t| t.loaded.clone())
         .ok_or_else(|| AppError::new("That template isn't installed"))?;
     let loaded = &loaded;
+    let kit = crate::kits_cmd::kit_input(kits, settings, &loaded.template, request, fresh_kit)?;
     // No jobs folder yet still previews; Create stays blocked by the issue below.
     let root = request_root(settings, request).unwrap_or_default();
     let now = Local::now();
@@ -276,6 +297,7 @@ fn build_plan(
         code_override: request.code_override.clone(),
         own_code: (request.no_client || settings.no_client_spaces.contains(&request.space))
             .then(|| settings.own_code.clone()),
+        kit,
     };
     let mut plan = plan::plan_project(loaded, &request.values, &ctx);
     if !settings.spaces.contains(&request.space) {
@@ -319,20 +341,24 @@ pub struct Created {
 pub fn create_project(
     app: tauri::AppHandle,
     state: State<'_, AppState>,
+    kits: State<'_, Kits>,
     request: PlanRequest,
 ) -> AppResult<Created> {
     if state.creating.swap(true, Ordering::SeqCst) {
         return Err(AppError::new("A project is already being created"));
     }
     let _guard = CreatingGuard(&state.creating);
+    kits.cancel.store(false, Ordering::SeqCst);
     let settings = lock(&state.settings)?.clone();
     let root = request_root(&settings, &request)
         .ok_or_else(|| AppError::new("No jobs folder is set up yet"))?;
     let previewed = {
         let scan = cached_scan(&state, &root)?;
-        build_plan(&state, &settings, &scan, &request)?.0.job_code
+        build_plan(&state, &kits, &settings, &scan, &request, false)?
+            .0
+            .job_code
     };
-    for _ in 0..CREATE_ATTEMPTS {
+    for attempt in 0..CREATE_ATTEMPTS {
         let scan = scan_root(&root).map_err(|e| {
             AppError::new(format!(
                 "Jobs folder not found: {} ({})",
@@ -341,11 +367,47 @@ pub fn create_project(
             ))
         })?;
         lock(&state.scan)?.insert(root.clone(), scan.clone());
-        let (plan, loaded) = build_plan(&state, &settings, &scan, &request)?;
+        // The kit is read again (once): Create copies what's there now, and only if it's what
+        // the preview showed.
+        let (plan, loaded) = build_plan(&state, &kits, &settings, &scan, &request, attempt == 0)?;
         if let Some(problem) = plan.issues.iter().find(|i| i.level == Level::Error) {
             return Err(AppError::new(problem.message.clone()));
         }
-        match apply_plan(&plan, &loaded.dir) {
+        let kit_dir = crate::kits::kit_to_copy(&plan, request.kit_fingerprint.as_deref())
+            .map_err(AppError::new)?;
+        let total = apply_step_count(&plan);
+        let mut last_sent = std::time::Instant::now();
+        let mut hook = |step: usize| -> std::io::Result<()> {
+            if kits.cancel.load(Ordering::SeqCst) {
+                return Err(std::io::Error::new(
+                    std::io::ErrorKind::Interrupted,
+                    "Create was cancelled",
+                ));
+            }
+            // A few updates a second is plenty for "Copying… 12 of 38".
+            if kit_dir.is_some() && last_sent.elapsed().as_millis() >= 100 {
+                last_sent = std::time::Instant::now();
+                let _ = app.emit(
+                    CREATE_PROGRESS,
+                    serde_json::json!({ "done": step, "total": total }),
+                );
+            }
+            Ok(())
+        };
+        let applied = apply_plan_with(&plan, &loaded.dir, kit_dir.as_deref(), &mut hook);
+        if applied.is_err() && kits.cancel.load(Ordering::SeqCst) {
+            let left = applied.err().map(|e| e.left_behind).unwrap_or_default();
+            let mut message = "Create was cancelled. Nothing was kept.".to_string();
+            if !left.is_empty() {
+                let list: Vec<String> = left.iter().map(|p| p.display().to_string()).collect();
+                message = format!(
+                    "Create was cancelled. These couldn't be cleaned up and can be removed by hand: {}",
+                    list.join(", ")
+                );
+            }
+            return Err(AppError::new(message));
+        }
+        match applied {
             Ok(()) => {
                 remember_template(&state, &request.template_id);
                 // Straight into the list; the next rescan confirms it from disk.
@@ -1074,6 +1136,7 @@ mod tests {
             space: space.into(),
             code_override: None,
             no_client,
+            kit_fingerprint: None,
         };
         // Not chosen: everything goes to the first jobs folder.
         assert_eq!(

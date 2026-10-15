@@ -380,17 +380,8 @@ impl Walk {
             self.skip(rel, Some(name), SkipReason::Unreadable);
             return Ok(());
         };
-        let lower = name.to_lowercase();
-        if meta.file_type().is_symlink() {
-            self.skip(rel, Some(name), SkipReason::Link);
-            return Ok(());
-        }
-        if name.starts_with('.') || is_hidden(&meta) || CLUTTER.contains(&lower.as_str()) {
-            self.skip(rel, Some(name), SkipReason::Clutter);
-            return Ok(());
-        }
-        if meta.is_dir() && (CACHES.contains(&lower.as_str()) || is_package(&lower)) {
-            self.skip(rel, Some(name), SkipReason::Cache);
+        if let Some(reason) = skip_reason(name, &meta) {
+            self.skip(rel, Some(name), reason);
             return Ok(());
         }
         if !meta.is_dir() && !meta.is_file() {
@@ -470,6 +461,23 @@ fn join(rel: &[Seg], part: impl Fn(&Seg) -> &String) -> String {
         .map(|s| part(s).as_str())
         .collect::<Vec<_>>()
         .join("/")
+}
+
+/// Why an item found while reading a folder is left out, from its name and its own metadata
+/// (`symlink_metadata`, so a link is seen as a link): links and junctions (never followed),
+/// system clutter and hidden files, and editing apps' caches. Shared with client kits.
+pub(crate) fn skip_reason(name: &str, meta: &fs::Metadata) -> Option<SkipReason> {
+    let lower = name.to_lowercase();
+    if meta.file_type().is_symlink() {
+        return Some(SkipReason::Link);
+    }
+    if name.starts_with('.') || is_hidden(meta) || CLUTTER.contains(&lower.as_str()) {
+        return Some(SkipReason::Clutter);
+    }
+    if meta.is_dir() && (CACHES.contains(&lower.as_str()) || is_package(&lower)) {
+        return Some(SkipReason::Cache);
+    }
+    None
 }
 
 /// Folders macOS shows as one file (a Final Cut library, an app): never taken apart.

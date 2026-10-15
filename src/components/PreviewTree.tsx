@@ -12,7 +12,7 @@ export default function PreviewTree({ plan, tall }: { plan: Plan; /** Grow with 
   // Closed folders by path, so they stay closed while the preview updates.
   const [closed, setClosed] = useState<Set<string>>(new Set());
   const tree = buildTree(plan);
-  const fileCount = plan.files.length;
+  const fileCount = plan.files.length + (plan.kit?.state === "ready" ? plan.kit.count : 0);
 
   const toggle = (path: string) =>
     setClosed((prev) => {

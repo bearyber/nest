@@ -84,7 +84,7 @@ pub enum TreeEntry {
     Rule(TreeRule),
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct TreeRule {
     pub name: String,
@@ -92,6 +92,10 @@ pub struct TreeRule {
     pub when: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub each: Option<String>,
+    /// v0.5 client kits: the chosen client's kit is copied into this folder. At most one per
+    /// template, and never on a folder made only sometimes (`when`) or once per choice (`each`).
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub kit: bool,
 }
 
 impl TreeEntry {
@@ -114,6 +118,11 @@ impl TreeEntry {
             TreeEntry::Folder(_) => None,
             TreeEntry::Rule(rule) => rule.each.as_deref(),
         }
+    }
+
+    /// The client kit goes in this folder.
+    pub fn kit(&self) -> bool {
+        matches!(self, TreeEntry::Rule(rule) if rule.kit)
     }
 }
 
@@ -288,6 +297,14 @@ impl Template {
                 }
             }
             self.check_path("a folder", name, entry.each().is_some(), p);
+            if entry.kit() && (entry.when().is_some() || entry.each().is_some()) {
+                p.push(format!(
+                    "the client kit can't go in \"{name}\": that folder is only made sometimes. Put it in a folder that's always made"
+                ));
+            }
+        }
+        if self.tree.iter().filter(|e| e.kit()).count() > 1 {
+            p.push("only one folder can hold the client kit".to_string());
         }
 
         for file in &self.files {
@@ -562,6 +579,44 @@ mod tests {
     #[test]
     fn negated_when_is_fine() {
         assert!(problems_with(|v| v["tree"][1]["when"] = "!lookdev".into()).is_empty());
+    }
+
+    #[test]
+    fn client_kit_folder_rules() {
+        // One plain folder: fine, and it round-trips; templates without it are unchanged.
+        let p =
+            problems_with(|v| v["tree"][0] = serde_json::json!({ "name": "01_REF", "kit": true }));
+        assert!(p.is_empty(), "{p:?}");
+        let mut v: serde_json::Value = serde_json::from_str(VALID).unwrap();
+        v["tree"][0] = serde_json::json!({ "name": "01_REF", "kit": true });
+        let t = Template::from_json(&v.to_string()).unwrap();
+        assert!(t.tree[0].kit() && !t.tree[1].kit());
+        let back = serde_json::to_value(&t).unwrap();
+        assert_eq!(
+            back["tree"][0],
+            serde_json::json!({ "name": "01_REF", "kit": true })
+        );
+        assert_eq!(
+            back["tree"][1],
+            serde_json::json!({ "name": "05_STILLS/LOOKDEV", "when": "lookdev" })
+        );
+        assert!(!serde_json::to_string(&Template::from_json(VALID).unwrap())
+            .unwrap()
+            .contains("kit"));
+
+        // Never two, never on a sometimes folder.
+        let p = problems_with(|v| {
+            v["tree"][0] = serde_json::json!({ "name": "01_REF", "kit": true });
+            v["tree"]
+                .as_array_mut()
+                .unwrap()
+                .push(serde_json::json!({ "name": "02", "kit": true }));
+        });
+        assert_refused(p, "only one folder can hold the client kit");
+        let p = problems_with(|v| v["tree"][1]["kit"] = true.into());
+        assert_refused(p, "the client kit can't go in \"05_STILLS/LOOKDEV\"");
+        let p = problems_with(|v| v["tree"][2]["kit"] = true.into());
+        assert_refused(p, "only made sometimes");
     }
 
     #[test]

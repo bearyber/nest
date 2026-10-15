@@ -252,3 +252,19 @@
     transform: translateY(-8px);
   }
 }
+
+/* Client kit (v0.5): one line under the preview. */
+.kitLine {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0 var(--space-2);
+  margin: calc(var(--space-2) * -1) 0 0;
+  font-size: var(--text-small);
+  color: var(--text-secondary);
+}
+
+.kitNote {
+  flex-basis: 100%;
+  color: var(--text-tertiary);
+}

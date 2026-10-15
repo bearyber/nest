@@ -6,8 +6,9 @@ export interface TreeNode {
   children: TreeNode[];
 }
 
-/** Nest the Plan's flat `/` paths into a tree: folders first (plan order), then files. */
-export function buildTree(plan: Pick<Plan, "folders" | "files">): TreeNode[] {
+/** Nest the Plan's flat `/` paths into a tree: folders first (plan order), then files, then the
+ *  client kit's first files and a line counting the rest (a kit can hold thousands). */
+export function buildTree(plan: Pick<Plan, "folders" | "files" | "kit">): TreeNode[] {
   const root: TreeNode = { name: "", isFile: false, children: [] };
   const insert = (path: string, isFile: boolean) => {
     const parts = path.split("/");
@@ -24,6 +25,12 @@ export function buildTree(plan: Pick<Plan, "folders" | "files">): TreeNode[] {
   };
   plan.folders.forEach((f) => insert(f, false));
   plan.files.forEach((f) => insert(f.to, true));
+  const kit = plan.kit;
+  if (kit?.state === "ready") {
+    kit.sample.forEach((p) => insert(p, true));
+    const more = kit.count - kit.sample.length;
+    if (more > 0) insert(`${kit.folder}/…and ${more} more file${more === 1 ? "" : "s"} from the kit`, true);
+  }
   return root.children;
 }
 

@@ -8,17 +8,19 @@ import AppearanceTab from "./settings/AppearanceTab";
 import CodesTab from "./settings/CodesTab";
 import DevicesTab from "./settings/DevicesTab";
 import GeneralTab from "./settings/GeneralTab";
+import KitsTab from "./settings/KitsTab";
 import SpacesTab from "./settings/SpacesTab";
 import TemplatesTab from "./settings/TemplatesTab";
 import styles from "./settings/settings.module.css";
 
-type Tab = "general" | "codes" | "spaces" | "templates" | "devices" | "appearance" | "about";
+type Tab = "general" | "codes" | "spaces" | "templates" | "kits" | "devices" | "appearance" | "about";
 
 const TABS: { id: Tab; label: string }[] = [
   { id: "general", label: "General" },
   { id: "codes", label: "Job codes" },
   { id: "spaces", label: "Spaces" },
   { id: "templates", label: "Templates" },
+  { id: "kits", label: "Client kits" },
   { id: "devices", label: "Devices" },
   { id: "appearance", label: "Appearance" },
   { id: "about", label: "About" },
@@ -113,6 +115,7 @@ export default function Settings() {
         {view && tab === "codes" && <CodesTab view={view} run={run} />}
         {view && tab === "spaces" && <SpacesTab view={view} run={run} />}
         {view && tab === "templates" && <TemplatesTab view={view} run={run} />}
+        {view && tab === "kits" && <KitsTab view={view} run={run} />}
         {view && tab === "devices" && <DevicesTab view={view} run={run} />}
         {view && tab === "appearance" && <AppearanceTab view={view} run={run} />}
         {view && tab === "about" && <AboutTab view={view} run={run} />}

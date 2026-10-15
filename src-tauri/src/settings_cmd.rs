@@ -1062,7 +1062,7 @@ pub fn open_logs_folder(app: AppHandle) -> AppResult<()> {
 
 // ── First run ──
 
-fn pick_folder(app: &AppHandle, title: &str) -> AppResult<Option<PathBuf>> {
+pub(crate) fn pick_folder(app: &AppHandle, title: &str) -> AppResult<Option<PathBuf>> {
     let Some(picked) = app.dialog().file().set_title(title).blocking_pick_folder() else {
         return Ok(None);
     };

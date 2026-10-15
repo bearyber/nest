@@ -21,6 +21,7 @@ import {
 } from "../../lib/editorModel";
 import {
   blankField,
+  canHoldKit,
   cloneNodes,
   followMoves,
   fromNodes,
@@ -29,6 +30,7 @@ import {
   newKey,
   nodeId,
   removeQuestion,
+  setKitFolder,
   toNodes,
   type FolderNode,
 } from "../../lib/templateDraft";
@@ -230,6 +232,14 @@ export default function TemplateEditor({ sourceKey, mode, start, note, onClose, 
       return { ...d, nodes: next };
     });
 
+  /** The client's kit (Settings → Client kits) is copied into this folder on Create. One folder
+   *  per template: putting it somewhere else moves it. `null` = nowhere. */
+  const setKit = (id: string | null) => {
+    change((d) => ({ ...d, nodes: setKitFolder(d.nodes, id) }));
+    if (id) say(`New projects get the client's kit in ${locate(nodes, id)?.path ?? "this folder"}.`, true);
+    else say("New projects from this template won't get a client kit.", true);
+  };
+
   /** "One folder for each…": a `{item}` folder inside this one, made once per picked choice. */
   const setEach = (id: string, key: string | null) =>
     change((d) => {
@@ -413,6 +423,9 @@ export default function TemplateEditor({ sourceKey, mode, start, note, onClose, 
               ...(eachKid ? [{ item: "Separator" as const }, { text: "Stop", action: () => setEach(id, null) }] : []),
             ],
           },
+          node.kit
+            ? { text: "No client kit here", action: () => setKit(null) }
+            : { text: "Put the client kit here", action: () => setKit(id), enabled: canHoldKit(nodes, id) },
           { item: "Separator" },
           { text: "Delete", action: () => remove(id) },
         );

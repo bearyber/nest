@@ -65,6 +65,7 @@ fn ctx(jobs: &Path) -> PlanContext {
         existing_folders: vec![],
         code_override: None,
         own_code: None,
+        kit: None,
     }
 }
 
@@ -148,7 +149,7 @@ fn jobs_untouched(s: &Setup) {
 fn disk_matches_plan_exactly() {
     let s = setup();
     let p = plan(&s, &values("KIRA", "Summer Nights"));
-    apply_plan(&p, &s.template.dir).unwrap();
+    apply_plan(&p, &s.template.dir, None).unwrap();
 
     let (dirs, files) = walk(&p.root);
     let expected_dirs: BTreeSet<String> = p.folders.iter().cloned().collect();
@@ -187,7 +188,7 @@ fn failure_at_any_step_rolls_back_only_this_run() {
                 Ok(())
             }
         };
-        let err = apply_plan_with(&p, &s.template.dir, &mut hook).unwrap_err();
+        let err = apply_plan_with(&p, &s.template.dir, None, &mut hook).unwrap_err();
         assert!(
             err.left_behind.is_empty(),
             "step {fail_at}: {:?}",
@@ -213,7 +214,7 @@ fn a_file_someone_else_adds_survives_rollback() {
         }
         Ok(())
     };
-    let err = apply_plan_with(&p, &s.template.dir, &mut hook).unwrap_err();
+    let err = apply_plan_with(&p, &s.template.dir, None, &mut hook).unwrap_err();
     assert_eq!(
         fs::read_to_string(root.join("01_REF/theirs.txt")).unwrap(),
         "not ours"
@@ -232,7 +233,7 @@ fn existing_project_folder_is_never_merged_into() {
     let p = plan(&s, &values("KIRA", "Song"));
     fs::create_dir(&p.root).unwrap();
     fs::write(p.root.join("mine.txt"), "keep").unwrap();
-    let err = apply_plan(&p, &s.template.dir).unwrap_err();
+    let err = apply_plan(&p, &s.template.dir, None).unwrap_err();
     assert!(err.root_exists);
     let names: Vec<_> = fs::read_dir(&p.root)
         .unwrap()
@@ -247,7 +248,7 @@ fn missing_jobs_root_is_an_error_not_created() {
     let mut c = ctx(&s.jobs.join("Unplugged NAS"));
     c.jobs_root = s.jobs.join("Unplugged NAS");
     let p = plan_project(&s.template, &values("KIRA", "Song"), &c);
-    assert!(apply_plan(&p, &s.template.dir).is_err());
+    assert!(apply_plan(&p, &s.template.dir, None).is_err());
     assert!(!s.jobs.join("Unplugged NAS").exists());
 }
 
@@ -256,7 +257,7 @@ fn creating_twice_gives_a_new_code_never_a_merge() {
     let s = setup();
     let v = values("KIRA", "Song");
     let first = plan(&s, &v);
-    apply_plan(&first, &s.template.dir).unwrap();
+    apply_plan(&first, &s.template.dir, None).unwrap();
 
     let scan = nest_lib::index::scan_root(&s.jobs).unwrap();
     let mut c = ctx(&s.jobs);
@@ -264,7 +265,7 @@ fn creating_twice_gives_a_new_code_never_a_merge() {
     c.existing_folders = scan.folders;
     let second = plan_project(&s.template, &v, &c);
     assert_eq!(second.job_code, "VX-L02");
-    apply_plan(&second, &s.template.dir).unwrap();
+    apply_plan(&second, &s.template.dir, None).unwrap();
     assert!(first.root.is_dir() && second.root.is_dir());
 }
 
@@ -278,7 +279,7 @@ fn korean_chinese_and_nfd_names_create_correctly() {
     ] {
         let p = plan(&s, &values(artist, song));
         assert_eq!(p.folder_name, folder);
-        apply_plan(&p, &s.template.dir).unwrap();
+        apply_plan(&p, &s.template.dir, None).unwrap();
         let names: Vec<String> = fs::read_dir(&s.jobs)
             .unwrap()
             .map(|e| e.unwrap().file_name().to_string_lossy().into_owned())
@@ -298,7 +299,7 @@ fn starter_link_pointing_outside_the_template_is_refused() {
     fs::remove_file(&notes).unwrap();
     std::os::unix::fs::symlink(&secret, &notes).unwrap();
     let p = plan(&s, &values("KIRA", "Song"));
-    let err = apply_plan(&p, &s.template.dir).unwrap_err();
+    let err = apply_plan(&p, &s.template.dir, None).unwrap_err();
     assert!(
         err.message.contains("isn't a regular file"),
         "{}",

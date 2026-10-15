@@ -13,8 +13,9 @@ export interface Field {
 }
 
 /** A folder in a template: a plain `/` path, or one with rules (`when` a box is ticked, `!key`
- *  when not; `each` picked option, with `{item}` in the name). */
-export type TreeEntry = string | { name: string; when?: string; each?: string };
+ *  when not; `each` picked option, with `{item}` in the name). `kit`: the client's kit is copied
+ *  into this folder (one per template, never with `when` / `each`). */
+export type TreeEntry = string | { name: string; when?: string; each?: string; kit?: boolean };
 
 export interface FileEntry {
   from: string;
@@ -65,6 +66,30 @@ export interface Plan {
   manifest: unknown;
   fill: Record<string, string>;
   issues: Issue[];
+  /** v0.5 client kits; absent = no client, or no kit and no kit folder. */
+  kit?: PlanKit;
+}
+
+/** ready: copied on Create · missing: the template has a kit folder, the client no kit here ·
+ *  noPlace: the client has a kit, the template no kit folder · unreadable: created without it. */
+export type KitState = "ready" | "missing" | "noPlace" | "unreadable";
+
+/** The client kit in a Plan (Rust `PlanKit`): a summary, not every file. */
+export interface PlanKit {
+  state: KitState;
+  /** The client's name and code. */
+  client: string;
+  code: string;
+  /** The kit folder on this computer. */
+  source?: string;
+  /** Where it goes, relative to the project folder. */
+  folder: string;
+  count: number;
+  bytes: number;
+  /** Sent back with Create, which refuses if the kit changed since. */
+  fingerprint?: string;
+  /** The first few files' paths in the project (the rest are counted, not listed). */
+  sample: string[];
 }
 
 export interface NewProjectContext {
@@ -91,6 +116,32 @@ export interface PlanRequest {
   codeOverride: string | null;
   /** "No client (personal or passion project)" ticked. */
   noClient?: boolean;
+  /** Create only: the preview's `plan.kit.fingerprint` (null = no kit in the preview). */
+  kitFingerprint?: string | null;
+}
+
+/** Progress while Create copies a client kit (event `create-progress`). */
+export interface CreateProgress {
+  done: number;
+  total: number;
+}
+
+/** Settings → Client kits (Rust `KitsView`). */
+export interface KitsView {
+  kitsFolder: string | null;
+  kitsFolderMissing: boolean;
+  clients: KitClient[];
+}
+
+export interface KitClient {
+  name: string;
+  code: string;
+  /** The kit Nest copies for this client on this computer; null = none. */
+  kit: string | null;
+  /** chosen: a folder picked for this client · kitsFolder: found in the Kits folder. */
+  source: "chosen" | "kitsFolder" | null;
+  /** The folder chosen for this client can't be found. */
+  missing: boolean;
 }
 
 export interface Created {

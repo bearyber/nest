@@ -2,11 +2,16 @@
 //! Pure: everything from outside comes in through `PlanContext`, nothing touches the disk
 //! (build spec §2.2). The New Project preview renders this Plan.
 
-use std::collections::{BTreeMap, HashSet};
+use std::collections::{BTreeMap, HashMap, HashSet};
 use std::path::PathBuf;
+use std::sync::Arc;
 
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Map, Value as Json};
+use unicode_normalization::UnicodeNormalization;
+
+use crate::kits::KitListing;
+use crate::template_from_folder::SkipReason;
 
 use crate::names::{
     next_code, normalize_client_code, sanitize_segment, CodePattern, NameError, Transform,
@@ -70,7 +75,87 @@ pub struct PlanContext {
     /// A space without clients (e.g. Personal): the client field is ignored and job codes
     /// use this code instead, e.g. `OWN` → `OWN-L01`.
     pub own_code: Option<String>,
+    /// v0.5: the client's kit as the command found it. None = no client chosen.
+    pub kit: Option<KitInput>,
 }
+
+/// The chosen client and what Nest found for their kit (read before planning, cached).
+#[derive(Debug, Clone)]
+pub struct KitInput {
+    /// The client's name, for messages ("Apple's kit").
+    pub client: String,
+    pub code: String,
+    pub found: KitFound,
+}
+
+#[derive(Debug, Clone)]
+pub enum KitFound {
+    /// No kit for this client on this computer.
+    None,
+    /// There is one, but the template has no kit folder, so it wasn't read.
+    NotRead(PathBuf),
+    Listed(Arc<KitListing>),
+    /// There is one, but it couldn't be read (e.g. its drive isn't connected).
+    Unreadable {
+        dir: PathBuf,
+        message: String,
+    },
+}
+
+/// What the client kit adds to the project. The UI gets a summary; the full lists stay in Rust
+/// (a kit can hold thousands of files, and the preview re-plans on every keystroke).
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PlanKit {
+    pub state: KitState,
+    pub client: String,
+    pub code: String,
+    /// The kit folder (display only).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub source: Option<PathBuf>,
+    /// Where the kit goes, `/`-separated, relative to the project folder.
+    pub folder: String,
+    /// Files that will be copied, and their total size in bytes.
+    pub count: usize,
+    pub bytes: u64,
+    /// Sent back with Create: it refuses if the kit changed since the preview.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub fingerprint: Option<String>,
+    /// The first few files' destinations, relative to the project folder (for the preview).
+    pub sample: Vec<String>,
+    /// Kit folders to make, relative to the project folder, parents first.
+    #[serde(skip)]
+    pub folders: Vec<String>,
+    #[serde(skip)]
+    pub files: Vec<KitPlannedFile>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum KitState {
+    /// Found and read: its files are in the Plan.
+    Ready,
+    /// The template has a kit folder, but this client has no kit here.
+    Missing,
+    /// The client has a kit, but the template has no kit folder.
+    NoPlace,
+    /// The client has a kit, but it couldn't be read: created without it (a warning says so).
+    Unreadable,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct KitPlannedFile {
+    /// Relative to the kit folder, names as on disk.
+    pub from: String,
+    /// Relative to the project folder (cleaned names, NFC).
+    pub to: String,
+    pub size: u64,
+}
+
+/// Files of the kit listed in the preview.
+const KIT_SAMPLE: usize = 20;
+/// Names listed in one kit message before "and N more".
+const KIT_LISTED: usize = 5;
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -88,6 +173,9 @@ pub struct Plan {
     /// Values for `{variables}` inside filled starter files, as typed (no transforms).
     pub fill: BTreeMap<String, String>,
     pub issues: Vec<Issue>,
+    /// v0.5 client kits. None = no client chosen, or no kit and no kit folder.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub kit: Option<PlanKit>,
 }
 
 impl Plan {
@@ -267,7 +355,7 @@ pub fn plan_project(loaded: &LoadedTemplate, input: &Values, ctx: &PlanContext) 
     let root = ctx.jobs_root.join(&folder_name);
 
     let mut folders = FolderSet::default();
-    plan_tree(t, &values, &vars, &mut folders, &mut issues);
+    let kit_folder = plan_tree(t, &values, &vars, &mut folders, &mut issues);
     let files = plan_files(loaded, &vars, &mut folders, &mut issues);
     for file in &files {
         if folders.contains(&file.to) {
@@ -277,8 +365,23 @@ pub fn plan_project(loaded: &LoadedTemplate, input: &Values, ctx: &PlanContext) 
             );
         }
     }
+    // A template without a kit folder ignores kits (apart from saying there is one).
+    let kit = match &ctx.kit {
+        Some(input) if !no_client => {
+            let has_place = t.tree.iter().any(|e| e.kit());
+            plan_kit(
+                input,
+                has_place,
+                kit_folder.as_deref(),
+                &folders,
+                &files,
+                &mut issues,
+            )
+        }
+        _ => None,
+    };
 
-    check_path_lengths(&root, &folders.list, &files, &mut issues);
+    check_path_lengths(&root, &folders.list, &files, kit.as_ref(), &mut issues);
 
     let title = project_title(t, &values, &vars, &job_code);
     let manifest = manifest(
@@ -308,6 +411,188 @@ pub fn plan_project(loaded: &LoadedTemplate, input: &Values, ctx: &PlanContext) 
         manifest,
         fill,
         issues: issues.0,
+        kit,
+    }
+}
+
+/// The kit's files under the template's kit folder (`base`). Names are cleaned like every other
+/// name (never a silent rename: a warning lists them); clashes with the template's own files and
+/// folders, also by capitals only, are errors.
+fn plan_kit(
+    input: &KitInput,
+    has_place: bool,
+    base: Option<&[String]>,
+    folders: &FolderSet,
+    files: &[PlannedFile],
+    issues: &mut Issues,
+) -> Option<PlanKit> {
+    let who = &input.client;
+    let mut kit = PlanKit {
+        state: KitState::Missing,
+        client: who.clone(),
+        code: input.code.clone(),
+        source: None,
+        folder: base.map(|b| b.join("/")).unwrap_or_default(),
+        count: 0,
+        bytes: 0,
+        fingerprint: None,
+        sample: vec![],
+        folders: vec![],
+        files: vec![],
+    };
+    let listing = match &input.found {
+        KitFound::None => return has_place.then_some(kit),
+        KitFound::NotRead(dir) | KitFound::Unreadable { dir, .. } if !has_place => {
+            kit.state = KitState::NoPlace;
+            kit.source = Some(dir.clone());
+            return Some(kit);
+        }
+        KitFound::Listed(listing) if !has_place => {
+            kit.state = KitState::NoPlace;
+            kit.source = Some(listing.dir.clone());
+            return Some(kit);
+        }
+        KitFound::NotRead(dir) => {
+            kit.state = KitState::Unreadable;
+            kit.source = Some(dir.clone());
+            issues.error(
+                None,
+                format!("{who}'s kit wasn't read. Close New Project and open it again."),
+            );
+            return Some(kit);
+        }
+        KitFound::Unreadable { dir, message } => {
+            kit.state = KitState::Unreadable;
+            kit.source = Some(dir.clone());
+            issues.warning(format!(
+                "{message} The project will be created without {who}'s kit."
+            ));
+            return Some(kit);
+        }
+        KitFound::Listed(listing) => listing,
+    };
+    kit.state = KitState::Ready;
+    kit.source = Some(listing.dir.clone());
+    kit.fingerprint = Some(listing.fingerprint.clone());
+    // The kit folder's own name failed: that error is already listed.
+    let base = base?;
+
+    let template_files: HashSet<String> = files.iter().map(|f| f.to.to_lowercase()).collect();
+    // Kit folder (as on disk) → where it goes in the project.
+    let mut dest_of: HashMap<&str, String> = HashMap::from([("", base.join("/"))]);
+    let mut kit_seen = HashSet::new();
+    let (mut renamed, mut bad, mut clashes) = (vec![], vec![], vec![]);
+    let mut dest = |rel: &str, dest_of: &HashMap<&str, String>| -> Option<String> {
+        let (parent, leaf) = rel.rsplit_once('/').unwrap_or(("", rel));
+        let parent = dest_of.get(parent)?; // its folder couldn't be used: already listed
+        let shown: String = rel.nfc().collect();
+        match sanitize_segment(leaf) {
+            Ok(clean) => {
+                if clean != leaf.nfc().collect::<String>() {
+                    renamed.push(format!("\"{shown}\" → \"{clean}\""));
+                }
+                Some(format!("{parent}/{clean}"))
+            }
+            Err(e) => {
+                bad.push(format!("\"{shown}\" ({e})"));
+                None
+            }
+        }
+    };
+    for rel in &listing.folders {
+        let Some(to) = dest(rel, &dest_of) else {
+            continue;
+        };
+        let lower = to.to_lowercase();
+        if template_files.contains(&lower) {
+            clashes.push(to);
+            continue;
+        }
+        // Already one of the template's folders: the kit's files join it (same capitals).
+        let to = match folders.planned(&to) {
+            Some(existing) => existing.clone(),
+            None => {
+                if kit_seen.insert(lower) {
+                    kit.folders.push(to.clone());
+                }
+                to
+            }
+        };
+        dest_of.insert(rel, to);
+    }
+    for f in &listing.files {
+        let Some(to) = dest(&f.rel, &dest_of) else {
+            continue;
+        };
+        let lower = to.to_lowercase();
+        if folders.contains(&to) || template_files.contains(&lower) || !kit_seen.insert(lower) {
+            clashes.push(to);
+            continue;
+        }
+        kit.files.push(KitPlannedFile {
+            from: f.rel.clone(),
+            to,
+            size: f.size,
+        });
+    }
+    kit.count = kit.files.len();
+    kit.bytes = kit.files.iter().map(|f| f.size).sum();
+    kit.sample = kit
+        .files
+        .iter()
+        .take(KIT_SAMPLE)
+        .map(|f| f.to.clone())
+        .collect();
+
+    if !bad.is_empty() {
+        issues.error(
+            None,
+            format!(
+                "Some names in {who}'s kit can't be used on Windows and Mac: {}. Rename them in the kit.",
+                listed(&bad)
+            ),
+        );
+    }
+    if !clashes.is_empty() {
+        issues.error(
+            None,
+            format!(
+                "{who}'s kit has names that clash with the template's own files or folders (or with each other once cleaned up for Windows and Mac): {}. Rename them in the kit or the template.",
+                listed(&clashes.iter().map(|c| format!("\"{c}\"")).collect::<Vec<_>>())
+            ),
+        );
+    }
+    if !renamed.is_empty() {
+        issues.warning(format!(
+            "Some names in {who}'s kit will be changed so they work on Windows and Mac: {}.",
+            listed(&renamed)
+        ));
+    }
+    let left_out: Vec<String> = listing
+        .skipped
+        .iter()
+        .filter_map(|s| {
+            let why = match s.reason {
+                SkipReason::Link => "a shortcut or link",
+                SkipReason::Unreadable => "can't be read",
+                SkipReason::BadName => "a name that isn't valid text",
+                _ => return None, // system clutter and app caches: nobody wants those copied
+            };
+            Some(format!("\"{}\" ({why})", s.path))
+        })
+        .collect();
+    if !left_out.is_empty() {
+        issues.warning(format!("Left out of {who}'s kit: {}.", listed(&left_out)));
+    }
+    Some(kit)
+}
+
+/// The first few, then "and N more".
+fn listed(items: &[String]) -> String {
+    let shown = items[..items.len().min(KIT_LISTED)].join(", ");
+    match items.len().saturating_sub(KIT_LISTED) {
+        0 => shown,
+        more => format!("{shown} and {more} more"),
     }
 }
 
@@ -673,6 +958,12 @@ impl FolderSet {
     fn contains(&self, path: &str) -> bool {
         self.seen.contains(&path.to_lowercase())
     }
+
+    /// The folder as already planned (its capitals), if it is.
+    fn planned(&self, path: &str) -> Option<&String> {
+        let lower = path.to_lowercase();
+        self.list.iter().find(|p| p.to_lowercase() == lower)
+    }
 }
 
 fn lowercase_set(items: &[String]) -> HashSet<String> {
@@ -695,7 +986,8 @@ fn plan_tree(
     vars: &Vars,
     folders: &mut FolderSet,
     issues: &mut Issues,
-) {
+) -> Option<Vec<String>> {
+    let mut kit_folder = None;
     for entry in &t.tree {
         if let Some(when) = entry.when() {
             let (negate, key) = match when.strip_prefix('!') {
@@ -717,12 +1009,20 @@ fn plan_tree(
         for item in each_items {
             let vars = item.map_or_else(|| vars.clone(), |i| vars.with_item(i));
             match render_path(entry.name(), &vars) {
-                Ok(segments) if !segments.is_empty() => folders.add(&segments),
+                Ok(segments) if !segments.is_empty() => {
+                    folders.add(&segments);
+                    if entry.kit() {
+                        // As planned, so a folder listed twice in other capitals is one folder.
+                        let path = folders.planned(&segments.join("/")).cloned();
+                        kit_folder = path.map(|p| p.split('/').map(str::to_string).collect());
+                    }
+                }
                 Ok(_) => issues.error(None, format!("Folder \"{}\" comes out empty", entry.name())),
                 Err(e) => issues.error(None, format!("Folder \"{}\": {e}", entry.name())),
             }
         }
     }
+    kit_folder
 }
 
 fn plan_files(
@@ -824,23 +1124,30 @@ fn check_path_lengths(
     root: &std::path::Path,
     folders: &[String],
     files: &[PlannedFile],
+    kit: Option<&PlanKit>,
     issues: &mut Issues,
 ) {
     let root_len = root.to_string_lossy().encode_utf16().count();
     let len = |rel: &str| root_len + 1 + rel.encode_utf16().count();
     let mut worst: Option<(usize, usize, String)> = None; // (over by, length, path)
-    let mut consider = |length: usize, limit: usize, path: String| {
+    let mut consider = |length: usize, limit: usize, path: &str| {
         if length > limit && worst.as_ref().is_none_or(|w| length - limit > w.0) {
-            worst = Some((length - limit, length, path));
+            worst = Some((length - limit, length, path.to_string()));
         }
     };
-    consider(root_len, MAX_FOLDER_PATH, String::new());
-    consider(len(MANIFEST_NAME), MAX_FILE_PATH, MANIFEST_NAME.to_string());
-    for f in folders {
-        consider(len(f), MAX_FOLDER_PATH, f.clone());
+    consider(root_len, MAX_FOLDER_PATH, "");
+    consider(len(MANIFEST_NAME), MAX_FILE_PATH, MANIFEST_NAME);
+    let kit_folders = kit.map(|k| k.folders.as_slice()).unwrap_or_default();
+    for f in folders.iter().chain(kit_folders) {
+        consider(len(f), MAX_FOLDER_PATH, f);
     }
-    for f in files {
-        consider(len(&f.to), MAX_FILE_PATH, f.to.clone());
+    let kit_files = kit.map(|k| k.files.as_slice()).unwrap_or_default();
+    for to in files
+        .iter()
+        .map(|f| &f.to)
+        .chain(kit_files.iter().map(|f| &f.to))
+    {
+        consider(len(to), MAX_FILE_PATH, to);
     }
     if let Some((_, length, path)) = worst {
         let shown = if path.is_empty() {
@@ -977,6 +1284,7 @@ mod tests {
             existing_folders: vec![],
             code_override: None,
             own_code: None,
+            kit: None,
         }
     }
 
