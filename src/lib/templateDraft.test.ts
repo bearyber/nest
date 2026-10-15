@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  canHoldKit,
   followMoves,
   fromBlocks,
   fromNodes,
@@ -7,6 +8,7 @@ import {
   moveNode,
   newKey,
   removeQuestion,
+  setKitFolder,
   toBlocks,
   toNodes,
   usage,
@@ -182,5 +184,50 @@ describe("followMoves never mixes two folders' files", () => {
       { from: "b", to: "AUDIO_FINAL/b.txt" },
     ];
     expect(followMoves(files, before, after)).toEqual(files);
+  });
+});
+
+describe("client kit folder", () => {
+  const TREE: TreeEntry[] = ["01_REF", { name: "02_BRAND/KIT", kit: true }, { name: "05_FINAL/{item}", each: "ratios" }];
+
+  it("round-trips a kit folder and leaves other templates unchanged", () => {
+    const nodes = toNodes(TREE);
+    expect(nodes[1].kids[0].kit).toBe(true);
+    expect(fromNodes(nodes)).toEqual({ tree: TREE, problems: [] });
+    expect(JSON.stringify(fromNodes(toNodes(MV_TREE)).tree)).not.toContain("kit");
+  });
+
+  it("moves the kit when it's put somewhere else, and can be taken off", () => {
+    const nodes = toNodes(TREE);
+    const moved = fromNodes(setKitFolder(nodes, nodes[0].id)).tree;
+    expect(moved.filter((e) => typeof e !== "string" && e.kit)).toEqual([{ name: "01_REF", kit: true }]);
+    expect(moved).toContain("02_BRAND/KIT");
+    expect(JSON.stringify(fromNodes(setKitFolder(nodes, null)).tree)).not.toContain("kit");
+  });
+
+  it("only goes in folders that are always made", () => {
+    const nodes = toNodes([...TREE, { name: "07_X", when: "x" }]);
+    expect(canHoldKit(nodes, nodes[0].id)).toBe(true);
+    expect(canHoldKit(nodes, nodes[2].kids[0].id)).toBe(false);
+    expect(canHoldKit(nodes, nodes[3].id)).toBe(false);
+    // A folder inside an "only if" folder inherits the rule: the kit can't go there either.
+    const parent = toNodes([{ name: "A", when: "x" }, "A/B"]);
+    expect(canHoldKit(parent, parent[0].kids[0].id)).toBe(false);
+    const withKit = setKitFolder(parent, parent[0].kids[0].id);
+    expect(fromNodes(withKit).problems[0]).toContain("only made sometimes");
+  });
+
+  it("survives removing a question", () => {
+    const t: Template = {
+      schema: 1,
+      id: "x",
+      version: 1,
+      name: "X",
+      description: "",
+      fields: [{ key: "ratios", label: "Ratios", type: "multi", options: ["a"] }],
+      folderName: "{jobCode}",
+      tree: TREE,
+    };
+    expect(removeQuestion(t, "ratios").tree).toEqual(["01_REF", { name: "02_BRAND/KIT", kit: true }]);
   });
 });

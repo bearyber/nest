@@ -5,6 +5,8 @@ pub mod devices;
 mod devices_cmd;
 pub mod error;
 pub mod index;
+pub mod kits;
+mod kits_cmd;
 pub mod manifest;
 mod menu;
 pub mod names;
@@ -71,6 +73,7 @@ pub fn run() {
             None,
         ))
         .manage(update::Pending::default())
+        .manage(kits_cmd::Kits::default())
         .setup(|app| {
             let state = init_state(app)?;
             let theme = state
@@ -182,6 +185,12 @@ pub fn run() {
             devices_cmd::devices_refresh,
             devices_cmd::devices_set_sync_templates,
             devices_cmd::request_status,
+            kits_cmd::kits_view,
+            kits_cmd::choose_kits_folder,
+            kits_cmd::clear_kits_folder,
+            kits_cmd::choose_client_kit,
+            kits_cmd::clear_client_kit,
+            kits_cmd::cancel_create,
         ])
         .build(tauri::generate_context!())
         .expect("error while running Nest")

@@ -349,6 +349,12 @@ impl Settings {
                     jobs.display()
                 ));
             }
+            if let Some(kit) = self.kit_folders().find(|k| nested(k, p)) {
+                return Err(format!(
+                    "The archive folder can't be a client kit folder, inside one, or around one ({}). Pick a separate folder.",
+                    kit.display()
+                ));
+            }
         }
         if path.is_none() {
             self.archive_after_days = None;
@@ -408,6 +414,65 @@ impl Settings {
                     a.display()
                 )
             })
+            .or_else(|| {
+                self.kit_folders().find(|k| nested(k, path)).map(|k| {
+                    format!(
+                        "That folder is a client kit folder, inside one, or around one ({}). A jobs folder must be separate.",
+                        k.display()
+                    )
+                })
+            })
+    }
+
+    // ── Client kits (v0.5) ──
+
+    /// The Kits folder and every folder chosen for one client.
+    pub fn kit_folders(&self) -> impl Iterator<Item = &PathBuf> {
+        self.kits_folder.iter().chain(self.client_kits.values())
+    }
+
+    /// Why `path` can't be a kit folder (None = it can): it is, is inside, or holds a jobs folder
+    /// or the archive folder. Copying a kit must never read projects, or write into the kit.
+    pub fn kit_folder_problem(&self, path: &Path) -> Option<String> {
+        if let Some(jobs) = self.jobs_roots.iter().find(|j| nested(j, path)) {
+            return Some(format!(
+                "A client kit can't be a jobs folder, inside one, or around one ({}). Pick a separate folder.",
+                jobs.display()
+            ));
+        }
+        self.archive_folder
+            .as_ref()
+            .filter(|a| nested(a, path))
+            .map(|a| {
+                format!(
+                    "A client kit can't be the archive folder, inside it, or around it ({}). Pick a separate folder.",
+                    a.display()
+                )
+            })
+    }
+
+    /// The folder holding one kit folder per client (None = stop using it).
+    pub fn set_kits_folder(&mut self, path: Option<PathBuf>) -> Result<(), String> {
+        if let Some(problem) = path.as_deref().and_then(|p| self.kit_folder_problem(p)) {
+            return Err(problem);
+        }
+        self.kits_folder = path;
+        Ok(())
+    }
+
+    /// A kit folder chosen for one client (None = use the Kits folder again). Keyed by the
+    /// client code in capitals.
+    pub fn set_client_kit(&mut self, code: &str, path: Option<PathBuf>) -> Result<(), String> {
+        let code = crate::names::normalize_client_code(code)?;
+        self.client_kits
+            .retain(|k, _| !k.eq_ignore_ascii_case(&code));
+        if let Some(path) = path {
+            if let Some(problem) = self.kit_folder_problem(&path) {
+                return Err(problem);
+            }
+            self.client_kits.insert(code, path);
+        }
+        Ok(())
     }
 
     pub fn set_theme(&mut self, theme: &str) -> Result<(), String> {
@@ -533,6 +598,56 @@ mod tests {
         // Older settings files (no key) still read.
         let old: Settings = serde_json::from_str(r#"{"archiveFolder":"/X"}"#).unwrap();
         assert!(old.past_archive_folders.is_empty());
+    }
+
+    #[test]
+    fn kit_folders_must_be_separate_from_jobs_and_archive_folders() {
+        let mut s = Settings::default();
+        s.jobs_roots.push(PathBuf::from("/Work/Jobs"));
+        s.set_archive_folder(Some(PathBuf::from("/Work/Archive")))
+            .unwrap();
+        for bad in [
+            "/Work/Jobs",
+            "/Work/Jobs/Kits",
+            "/Work",
+            "/Work/Archive/Kits",
+        ] {
+            assert!(
+                s.set_kits_folder(Some(PathBuf::from(bad))).is_err(),
+                "{bad}"
+            );
+            assert!(
+                s.set_client_kit("apl", Some(PathBuf::from(bad))).is_err(),
+                "{bad}"
+            );
+        }
+        assert_eq!(s.kits_folder, None);
+        assert!(s.client_kits.is_empty());
+        s.set_kits_folder(Some(PathBuf::from("/Work/Kits")))
+            .unwrap();
+        // Keyed by the code in capitals; setting again replaces; None clears.
+        s.set_client_kit("apl", Some(PathBuf::from("/Brand/Apple")))
+            .unwrap();
+        s.set_client_kit("APL", Some(PathBuf::from("/Brand/Apple 2")))
+            .unwrap();
+        assert_eq!(s.client_kits.len(), 1);
+        assert_eq!(s.client_kits["APL"], PathBuf::from("/Brand/Apple 2"));
+        assert!(s
+            .set_client_kit("a", Some(PathBuf::from("/Brand/X")))
+            .is_err());
+        // And the other way round: no archive or jobs folder in, at or around a kit folder.
+        assert!(s
+            .set_archive_folder(Some(PathBuf::from("/Work/Kits/Old")))
+            .is_err());
+        assert!(s.set_archive_folder(Some(PathBuf::from("/Brand"))).is_err());
+        assert!(s
+            .jobs_root_problem(Path::new("/Brand/Apple 2/Jobs"))
+            .is_some());
+        assert!(s.jobs_root_problem(Path::new("/Work/Kits")).is_some());
+        assert!(s.jobs_root_problem(Path::new("/Other")).is_none());
+        s.set_client_kit("APL", None).unwrap();
+        s.set_kits_folder(None).unwrap();
+        assert!(s.kit_folders().next().is_none());
     }
 
     #[test]

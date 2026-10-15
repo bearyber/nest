@@ -13,6 +13,8 @@ export interface FolderNode {
   when?: string;
   /** One folder per picked option of this question; the name is `{item}`. */
   each?: string;
+  /** The client's kit is copied into this folder (one per template). */
+  kit?: boolean;
   explicit: boolean;
   kids: FolderNode[];
 }
@@ -40,6 +42,7 @@ export function toNodes(tree: TreeEntry[] = []): FolderNode[] {
         if (typeof entry !== "string") {
           if (entry.when) node.when = entry.when;
           if (entry.each) node.each = entry.each;
+          if (entry.kit) node.kit = true;
         }
       }
       level = node.kids;
@@ -76,8 +79,19 @@ export function fromNodes(nodes: FolderNode[], labelOf: (key: string) => string 
         if (each && each !== n.each) problems.push(`"${path}" can't be "one per" two different questions.`);
         e = n.each;
       }
-      const write = n.kids.length === 0 || n.explicit;
-      if (write) tree.push(w || e ? { name: path, ...(w ? { when: w } : {}), ...(e ? { each: e } : {}) } : path);
+      if (n.kit && (w || e)) {
+        problems.push(
+          `The client kit can't go in "${path}": that folder is only made sometimes. Put it in a folder that's always made.`,
+        );
+      }
+      const write = n.kids.length === 0 || n.explicit || !!n.kit;
+      const rules = w || e || n.kit;
+      if (write)
+        tree.push(
+          rules
+            ? { name: path, ...(w ? { when: w } : {}), ...(e ? { each: e } : {}), ...(n.kit ? { kit: true } : {}) }
+            : path,
+        );
       walk(n.kids, `${path}/`, w, e);
     }
   };
@@ -103,6 +117,35 @@ export function locate(
     return null;
   };
   return go(nodes, "");
+}
+
+/** A folder can hold the client kit if it's always made: no "only if" or "one per" on it or on
+ *  a folder it's inside. */
+export function canHoldKit(nodes: FolderNode[], id: string): boolean {
+  const go = (list: FolderNode[]): boolean | null => {
+    for (const n of list) {
+      if (n.id === id) return !n.when && !n.each;
+      const inside = go(n.kids);
+      if (inside !== null) return inside && !n.when && !n.each;
+    }
+    return null;
+  };
+  return go(nodes) ?? false;
+}
+
+/** Put the client kit in this folder (`null`: in none). Only one folder holds it, so it moves. */
+export function setKitFolder(nodes: FolderNode[], id: string | null): FolderNode[] {
+  const next = cloneNodes(nodes);
+  const walk = (list: FolderNode[]) =>
+    list.forEach((n) => {
+      if (n.id === id) {
+        n.kit = true;
+        n.explicit = true;
+      } else delete n.kit;
+      walk(n.kids);
+    });
+  walk(next);
+  return next;
 }
 
 /** Deep copy so React sees a new tree. */
@@ -284,7 +327,11 @@ export function removeQuestion(t: Template, key: string): Template {
     }
     if (e.each === key) continue;
     const when = e.when && strip(e.when) === key ? undefined : e.when;
-    tree.push(when || e.each ? { name: e.name, ...(when ? { when } : {}), ...(e.each ? { each: e.each } : {}) } : e.name);
+    tree.push(
+      when || e.each || e.kit
+        ? { name: e.name, ...(when ? { when } : {}), ...(e.each ? { each: e.each } : {}), ...(e.kit ? { kit: true } : {}) }
+        : e.name,
+    );
   }
   const title = t.title === undefined ? undefined : dropVar(t.title, " ");
   return {

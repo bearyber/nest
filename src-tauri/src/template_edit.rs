@@ -190,6 +190,7 @@ fn sample_ctx(ex: &Example) -> PlanContext {
         existing_folders: vec![],
         code_override: None,
         own_code: None,
+        kit: None,
     }
 }
 
