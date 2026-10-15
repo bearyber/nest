@@ -1296,13 +1296,17 @@ fn save_first_template(
     user_dir: &Path,
     ex: &Example,
 ) -> Result<crate::template::LoadedTemplate, String> {
-    let read = template_from_folder::read_folder(folder, Keep::FoldersAndFiles, |id| {
-        installed
-            .iter()
-            .filter(|t| t.loaded.template.id == id)
-            .max_by_key(|t| (!t.built_in, t.loaded.template.version))
-            .map(|t| t.loaded.template.clone())
-    })
+    let read = template_from_folder::read_folder(
+        folder,
+        template_from_folder::Keep::FoldersAndFiles,
+        |id| {
+            installed
+                .iter()
+                .filter(|t| t.loaded.template.id == id)
+                .max_by_key(|t| (!t.built_in, t.loaded.template.version))
+                .map(|t| t.loaded.template.clone())
+        },
+    )
     .map_err(|e| failed_note(folder, &e))?;
     template_edit::save_from_folder(&read.template, &read, installed, user_dir, BUILT_IN_IDS, ex)
         .map_err(|e| failed_note(folder, &e))
