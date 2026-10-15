@@ -50,6 +50,11 @@ export const chooseClientKit = (code: string, name: string) =>
   invoke<SettingsView | null>("choose_client_kit", { code, name });
 /** Use the Kits folder again for this client. */
 export const clearClientKit = (code: string) => invoke<SettingsView>("clear_client_kit", { code });
+/** New Project's "Put them in": the template keeps `folder` (a template tree path) as the place
+ *  for client files. Saved as its next version (a built-in becomes yours); `templateKey` is a
+ *  template key or the id New Project offers. */
+export const setTemplateKitFolder = (templateKey: string, folder: string) =>
+  invoke<void>("set_template_kit_folder", { templateKey, folder });
 
 /** Native folder picker; resolves to the new jobs folder, or null if cancelled. */
 export const chooseJobsRoot = () => invoke<string | null>("choose_jobs_root");

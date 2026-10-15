@@ -491,7 +491,7 @@ fn find_template(state: &AppState, key: &str) -> AppResult<template_io::Installe
         .ok_or_else(|| AppError::new("That template isn't installed any more"))
 }
 
-fn templates_changed(app: &AppHandle, state: &AppState) -> AppResult<()> {
+pub(crate) fn templates_changed(app: &AppHandle, state: &AppState) -> AppResult<()> {
     reload_templates(state)?;
     let _ = app.emit(CHANGED_EVENT, ());
     // v0.5 template sync: your other computers get the change (waits for the templates lock).
@@ -726,7 +726,7 @@ pub fn reset_template(app: AppHandle, state: State<'_, AppState>, key: String) -
 }
 
 /// Example answers use today and this computer's job-code format.
-fn example(state: &AppState) -> AppResult<Example> {
+pub(crate) fn example(state: &AppState) -> AppResult<Example> {
     let s = lock(&state.settings)?;
     Ok(Example {
         today: today(),

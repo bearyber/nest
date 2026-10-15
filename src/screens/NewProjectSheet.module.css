@@ -194,12 +194,6 @@
   color: var(--text-tertiary);
 }
 
-.inlineError {
-  margin: calc(var(--space-2) * -1) 0 0 calc(112px + var(--space-3));
-  font-size: var(--text-small);
-  color: var(--error);
-}
-
 .issues {
   margin: 0;
   padding-left: var(--space-4);
@@ -253,18 +247,106 @@
   }
 }
 
-/* Client kit (v0.5): one line under the preview. */
+/* The client's files: one quiet line right under the Client field. */
+.under {
+  margin-top: calc(var(--space-2) * -1);
+}
+
 .kitLine {
   display: flex;
   flex-wrap: wrap;
   align-items: center;
-  gap: 0 var(--space-2);
-  margin: calc(var(--space-2) * -1) 0 0;
+  gap: 2px var(--space-2);
+  min-width: 0;
+  margin: 0;
   font-size: var(--text-small);
   color: var(--text-secondary);
+}
+
+.muted {
+  color: var(--text-tertiary);
 }
 
 .kitNote {
   flex-basis: 100%;
   color: var(--text-tertiary);
+}
+
+/* A text button inside a line of text ("Change", "Add…"), like a link in a native sheet. */
+.link {
+  padding: 0;
+  border: none;
+  background: transparent;
+  color: var(--accent);
+  font: inherit;
+  cursor: default;
+}
+
+.link:hover {
+  text-decoration: underline;
+}
+
+.link:focus-visible {
+  border-radius: 3px;
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+
+.putIn {
+  display: inline-flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2);
+  min-width: 0;
+}
+
+/* Same look as the template's own choice fields (native select). */
+.select {
+  max-width: 100%;
+  height: 26px;
+  padding: 0 var(--space-2);
+  border: var(--hairline) solid var(--control-border);
+  border-radius: var(--radius-control);
+  background: var(--control-bg);
+  color: var(--text);
+  font: inherit;
+}
+
+.select:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 0;
+}
+
+/* Where it goes: one summary line; Change… shows the controls. */
+.summary {
+  display: flex;
+  align-items: baseline;
+  gap: var(--space-2);
+  min-width: 0;
+  color: var(--text-secondary);
+}
+
+.summaryText {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.summaryPath {
+  color: var(--text);
+  user-select: text;
+  -webkit-user-select: text;
+}
+
+.summaryCode {
+  font-family: var(--font-mono);
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text);
+}
+
+.whereIssue {
+  font-size: var(--text-small);
+  color: var(--error);
 }

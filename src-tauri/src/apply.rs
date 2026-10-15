@@ -75,7 +75,10 @@ pub fn apply_plan_with(
         .filter(|k| !k.files.is_empty() || !k.folders.is_empty());
     if let Some(kit) = kit {
         if kit_dir.is_none() {
-            return Err(refuse(format!("{}'s kit folder is missing", kit.client)));
+            return Err(refuse(format!(
+                "The folder with {}'s files is missing",
+                kit.client
+            )));
         }
         // Enough room for the kit? (Unknown free space: go ahead; a full drive still fails
         // cleanly and rolls back.)
@@ -83,7 +86,7 @@ pub fn apply_plan_with(
         if let Ok(free) = fs4::available_space(parent) {
             if free < kit.bytes.saturating_add(SPACE_MARGIN) {
                 return Err(refuse(format!(
-                    "Not enough free space for {}'s kit: it needs {}, and the drive has {} free.",
+                    "Not enough free space for {}'s files: it needs {}, and the drive has {} free.",
                     kit.client,
                     crate::kits::human_size(kit.bytes),
                     crate::kits::human_size(free)

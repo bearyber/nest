@@ -18,7 +18,8 @@ use crate::names::DEFAULT_CODE_PATTERN;
 use crate::plan::{plan_project, ClientValue, Date, FieldValue, Level, PlanContext, Values};
 use crate::staged::{OnDisk, Staged};
 use crate::template::{
-    load_dir, FieldKind, FileEntry, LoadedTemplate, Template, TEMPLATE_SCHEMA, TEMPLATE_SUFFIX,
+    load_dir, FieldKind, FileEntry, LoadedTemplate, Template, TreeEntry, TreeRule, TEMPLATE_SCHEMA,
+    TEMPLATE_SUFFIX,
 };
 use crate::template_from_folder::{fills, FolderTemplate};
 use crate::template_io::{copy_starters, delete, free_folder, write_new, Installed};
@@ -387,6 +388,85 @@ pub fn save_session(
             session.staged.copy_used(draft, &starters, tmp)
         },
     )
+}
+
+/// New Project's "Put them in": `t` with the client's files going into `folder` (a template
+/// tree path, `/`-separated) and no other folder. `folder` must be one of the template's
+/// folders that's always made: a plain entry, or the parent of one (then it's added as its own
+/// entry, just before that child). A folder made only sometimes (`when`) or once per choice
+/// (`each`) is refused.
+pub fn with_kit_folder(t: &Template, folder: &str) -> Result<Template, String> {
+    let folder = folder.trim().trim_matches('/');
+    if folder.is_empty() {
+        return Err("Choose a folder for the client's files.".into());
+    }
+    let plain = |e: &TreeEntry| e.when().is_none() && e.each().is_none();
+    let mut out = t.clone();
+    // Off everywhere first; a folder that was a rule only for the kit goes back to a plain name.
+    for e in &mut out.tree {
+        if let TreeEntry::Rule(rule) = e {
+            if rule.kit {
+                rule.kit = false;
+                if rule.when.is_none() && rule.each.is_none() {
+                    *e = TreeEntry::Folder(rule.name.clone());
+                }
+            }
+        }
+    }
+    let kit_rule = TreeEntry::Rule(TreeRule {
+        name: folder.to_string(),
+        kit: true,
+        ..TreeRule::default()
+    });
+    let only_sometimes = format!(
+        "Client files can't go in \"{folder}\": that folder is only made sometimes. Choose a folder that's always made."
+    );
+    // The folder itself (a plain entry, if it's listed more than once).
+    if t.tree.iter().any(|e| e.name() == folder) {
+        let i = t
+            .tree
+            .iter()
+            .position(|e| e.name() == folder && plain(e))
+            .ok_or(only_sometimes)?;
+        out.tree[i] = kit_rule;
+        return Ok(out);
+    }
+    // A parent of a folder that's always made.
+    let prefix = format!("{folder}/");
+    match t
+        .tree
+        .iter()
+        .position(|e| plain(e) && e.name().starts_with(&prefix))
+    {
+        Some(i) => {
+            out.tree.insert(i, kit_rule);
+            Ok(out)
+        }
+        None if t.tree.iter().any(|e| e.name().starts_with(&prefix)) => Err(only_sometimes),
+        None => Err(format!(
+            "\"{folder}\" isn't one of this template's folders."
+        )),
+    }
+}
+
+/// Save `source` with the client's files going into `folder` (see `with_kit_folder`) through
+/// the normal save: one of yours becomes its next version; one of Nest's becomes yours with the
+/// same id (like Customize). The caller then retires the older copy (decision T-A).
+pub fn save_kit_folder(
+    source: &Installed,
+    folder: &str,
+    installed: &[Installed],
+    user_dir: &Path,
+    built_in_ids: &[&str],
+    ex: &Example,
+) -> Result<LoadedTemplate, String> {
+    let draft = with_kit_folder(&source.loaded.template, folder)?;
+    let mode = if source.built_in {
+        SaveMode::Customize
+    } else {
+        SaveMode::Edit
+    };
+    save(&draft, mode, source, installed, user_dir, built_in_ids, ex)
 }
 
 fn yours_max(installed: &[Installed], id: &str) -> Option<u32> {

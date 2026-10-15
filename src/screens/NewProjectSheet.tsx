@@ -13,6 +13,7 @@ import {
   createProject,
   newProjectContext,
   planProject,
+  setTemplateKitFolder,
 } from "../lib/commands";
 import { hasCommandKey, isMac } from "../lib/platform";
 import { formatBytes } from "../lib/search";
@@ -26,40 +27,118 @@ import {
   type NewProjectContext,
   type Plan,
   type PlanKit,
+  type TreeEntry,
   type Values,
 } from "../lib/types";
 import styles from "./NewProjectSheet.module.css";
 
 const PREVIEW_DEBOUNCE_MS = 150;
+/** "Where it goes" open or closed, remembered while Nest runs (this window's session). */
+const WHERE_OPEN_KEY = "nest.newProject.whereOpen";
 
-/** A kit inside Google Drive: its online-only files are downloaded while Create copies them. */
+function readWhereOpen(): boolean {
+  try {
+    return sessionStorage.getItem(WHERE_OPEN_KEY) === "1";
+  } catch {
+    return false; // storage blocked: start closed
+  }
+}
+
+function saveWhereOpen(open: boolean) {
+  try {
+    sessionStorage.setItem(WHERE_OPEN_KEY, open ? "1" : "0");
+  } catch {
+    /* storage blocked: it just isn't remembered */
+  }
+}
+
+/** Client files inside Google Drive: online-only files are downloaded while Create copies them. */
 const inGoogleDrive = (path: string) => /Google Drive|GoogleDrive-|My Drive/.test(path);
 
-/** Under the preview: what the client kit adds, or why there isn't one. */
-function KitLine({ kit, onChoose }: { kit: PlanKit; onChoose: () => void }) {
+/** The template's folders that are always made (no "only if", no "one per"), top-level and
+ *  nested, parents first: where "Put them in" can put a client's files. Same rule as Rust's
+ *  `with_kit_folder`. */
+export function clientFilePlaces(tree: TreeEntry[] = []): string[] {
+  const out: string[] = [];
+  for (const e of tree) {
+    if (typeof e !== "string" && (e.when || e.each)) continue;
+    const parts = (typeof e === "string" ? e : e.name).split("/").filter(Boolean);
+    parts.forEach((_, i) => {
+      const path = parts.slice(0, i + 1).join("/");
+      if (!out.includes(path)) out.push(path);
+    });
+  }
+  return out;
+}
+
+interface ClientFilesProps {
+  kit: PlanKit;
+  places: string[];
+  saving: boolean;
+  onChoose: () => void;
+  onPut: (folder: string) => void;
+}
+
+/** Under the Client field: the client's files that come along, or how to add them. */
+function ClientFilesLine({ kit, places, saving, onChoose, onPut }: ClientFilesProps) {
+  const whose = `${kit.client}'s files`;
+  const link = (label: string) => (
+    <button type="button" className={styles.link} onClick={onChoose}>
+      {label}
+    </button>
+  );
+  if (kit.state === "ready") {
+    const files = `${kit.count} file${kit.count === 1 ? "" : "s"}`;
+    return (
+      <p className={styles.kitLine} title={kit.source}>
+        <span>
+          {whose}: {files} · {formatBytes(kit.bytes)} · {link("Change")}
+        </span>
+        {kit.source && inGoogleDrive(kit.source) && (
+          <span className={styles.kitNote}>Online-only files will be downloaded while copying.</span>
+        )}
+      </p>
+    );
+  }
+  if (kit.state === "missing") {
+    return (
+      <p className={`${styles.kitLine} ${styles.muted}`}>
+        <span>
+          {whose}: none · {link("Add…")}
+        </span>
+      </p>
+    );
+  }
   if (kit.state === "noPlace") {
+    if (places.length === 0) {
+      return <p className={`${styles.kitLine} ${styles.muted}`}>{whose}: this template has no folders to put them in</p>;
+    }
     return (
-      <p className={styles.kitLine}>
-        This template has no place for a client kit (right-click a folder in the template editor)
+      <p className={styles.kitLine} title={kit.source}>
+        <label className={styles.putIn}>
+          {whose} · Put them in:
+          <select
+            className={styles.select}
+            value=""
+            disabled={saving}
+            onChange={(e) => e.target.value && onPut(e.target.value)}
+          >
+            <option value="">{saving ? "Saving…" : "Choose a folder"}</option>
+            {places.map((p) => (
+              <option key={p} value={p}>
+                {p}
+              </option>
+            ))}
+          </select>
+        </label>
       </p>
     );
   }
-  if (kit.state !== "ready") {
-    return (
-      <p className={styles.kitLine}>
-        {kit.state === "missing" ? `No kit for ${kit.client}` : `Couldn't read ${kit.client}'s kit`} ·{" "}
-        <Button onClick={onChoose}>Choose a folder…</Button>
-      </p>
-    );
-  }
-  const files = `${kit.count} file${kit.count === 1 ? "" : "s"}`;
   return (
     <p className={styles.kitLine} title={kit.source}>
-      Client kit: {kit.client} · {files} · {formatBytes(kit.bytes)}
-      {kit.folder && <span className={styles.note}> into {kit.folder}</span>}
-      {kit.source && inGoogleDrive(kit.source) && (
-        <span className={styles.kitNote}>Online-only files will be downloaded while copying.</span>
-      )}
+      <span>
+        Couldn't read {whose} · {link("Choose a folder…")}
+      </span>
     </p>
   );
 }
@@ -68,6 +147,18 @@ function KitLine({ kit, onChoose }: { kit: PlanKit; onChoose: () => void }) {
 function parentOf(path: string): string {
   const cut = Math.max(path.lastIndexOf("/"), path.lastIndexOf("\\"));
   return cut > 0 ? path.slice(0, cut) : path;
+}
+
+/** A long folder path, shortened for one line: "D:\…\Clients\Jobs" (the full path is the
+ *  tooltip). Keeps the drive (or the leading /) and the last two folders. */
+export function shortPath(path: string): string {
+  if (path.length <= 32) return path;
+  const sep = path.includes("\\") ? "\\" : "/";
+  const parts = path.split(/[\\/]/);
+  const tail = parts.filter(Boolean).slice(-2);
+  if (parts.filter(Boolean).length <= 3) return path;
+  const head = parts[0]; // "D:" on Windows, "" for a path starting with /
+  return [head, "…", ...tail].join(sep);
 }
 
 interface Props {
@@ -92,6 +183,10 @@ export default function NewProjectSheet({ initialTemplate, onClose, onCreated }:
   const [progress, setProgress] = useState<CreateProgress | null>(null);
   /** Bumped to plan again without a change in the form (e.g. a kit was chosen). */
   const [replan, setReplan] = useState(0);
+  /** "Where it goes" shows its controls (Change…), or just the one summary line. */
+  const [whereOpen, setWhereOpen] = useState(readWhereOpen);
+  /** "Put them in" is saving the template. */
+  const [savingPlace, setSavingPlace] = useState(false);
   const planRequestId = useRef(0);
 
   const template = ctx?.templates.find((t) => t.id === templateId);
@@ -221,6 +316,27 @@ export default function NewProjectSheet({ initialTemplate, onClose, onCreated }:
       .catch((e) => setError(errorMessage(e)));
   };
 
+  // "Put them in": the template keeps this folder for client files (saved in Rust as its next
+  // version); then plan again with the new template.
+  const putClientFiles = (folder: string) => {
+    if (!templateId) return;
+    setSavingPlace(true);
+    setError(null);
+    setTemplateKitFolder(templateId, folder)
+      .then(() => newProjectContext())
+      .then((c) => {
+        setCtx(c);
+        setReplan((n) => n + 1);
+      })
+      .catch((e) => setError(errorMessage(e)))
+      .finally(() => setSavingPlace(false));
+  };
+
+  const toggleWhere = () => {
+    saveWhereOpen(!whereOpen);
+    setWhereOpen(!whereOpen);
+  };
+
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (e.key === "Escape") {
@@ -256,8 +372,14 @@ export default function NewProjectSheet({ initialTemplate, onClose, onCreated }:
   const codeInName = plan ? plan.folderName.includes(plan.jobCode) : true;
   const copying = creating && progress && progress.total > 0;
   const percent = copying ? Math.round((progress.done / progress.total) * 100) : 0;
+  // Problems about where it goes show without Change…; an error opens the controls.
+  const codeIssues = plan?.issues.filter((i) => i.field === "jobCode") ?? [];
+  const whereError = !jobsRoot || !!rootMissing || codeIssues.some((i) => i.level === "error");
+  const showWhere = whereOpen || whereError;
+  const kitPlaces = clientFilePlaces(template?.tree);
+
   const footHint = copying ? (
-    `Copying ${plan?.kit?.client ? `${plan.kit.client}'s kit` : "files"}… ${percent}%. Cancel undoes everything.`
+    `Copying ${plan?.kit?.client ? `${plan.kit.client}'s files` : "files"}… ${percent}%. Cancel undoes everything.`
   ) : !ready && missing.length > 0 ? (
       missing[0]
     ) : plan?.folderName && jobsRoot ? (
@@ -309,6 +431,18 @@ export default function NewProjectSheet({ initialTemplate, onClose, onCreated }:
                             clients={ctx.clients}
                           />
                         )}
+                        {!noClient && plan?.kit && (
+                          <div className={`${styles.row} ${styles.under}`}>
+                            <span />
+                            <ClientFilesLine
+                              kit={plan.kit}
+                              places={kitPlaces}
+                              saving={savingPlace}
+                              onChoose={chooseKit}
+                              onPut={putClientFiles}
+                            />
+                          </div>
+                        )}
                         <div className={styles.row}>
                           <span className={styles.label}>{noClient ? "Client" : ""}</span>
                           <div>
@@ -347,78 +481,91 @@ export default function NewProjectSheet({ initialTemplate, onClose, onCreated }:
                 </div>
               </section>
 
-              <section className={styles.group} aria-labelledby="group-where">
-                <h3 id="group-where" className={styles.groupTitle}>
-                  Where it goes
-                </h3>
-                <div className={styles.card}>
-                  <div className={styles.row}>
-                    <span className={styles.label}>Location</span>
-                    <div className={styles.inline}>
-                      <div className={styles.path} title={jobsRoot ?? undefined}>
-                        <Icon name="folder" className={styles.pathIcon} />
-                        <span className={styles.pathText}>{jobsRoot ?? "No jobs folder yet"}</span>
-                      </div>
-                      {personalShown && <span className={styles.note}>Your Personal folder</span>}
-                      <Button onClick={changeLocation}>Change…</Button>
-                    </div>
-                  </div>
-
-                  <div className={styles.row}>
-                    <span className={styles.label}>Space</span>
-                    <div>
-                      <Segmented label="Space" options={ctx.spaces} value={space} onChange={setSpace} />
-                    </div>
-                  </div>
-
-                  <div className={styles.row}>
-                    <span className={styles.label}>Folder name</span>
-                    <div className={styles.inline}>
-                      <span className={styles.result}>{plan?.folderName || "…"}</span>
-                      <IconButton icon="copy" label="Copy folder name" onClick={copyFolderName} />
-                    </div>
-                  </div>
-
-                  <div className={styles.row}>
-                    <span className={styles.label}>Job code</span>
-                    <div className={styles.inline}>
-                      {codeOverride === null ? (
-                        <>
-                          <span className={styles.codePill}>{plan?.jobCode ?? "…"}</span>
-                          <IconButton
-                            icon="pencil"
-                            label="Edit job code"
-                            onClick={() => setCodeOverride(plan?.jobCode ?? "")}
-                          />
-                        </>
-                      ) : (
-                        <>
-                          <input
-                            aria-label="Job code"
-                            className={`${styles.input} ${styles.codeInput}`}
-                            value={codeOverride}
-                            spellCheck={false}
-                            autoFocus
-                            onChange={(e) => setCodeOverride(e.target.value.toUpperCase())}
-                          />
-                          <Button onClick={() => setCodeOverride(null)}>Auto</Button>
-                        </>
-                      )}
-                      {!codeInName && <span className={styles.note}>Kept in Nest, not in the folder name</span>}
-                    </div>
-                  </div>
-                  {plan?.issues
-                    .filter((i) => i.field === "jobCode")
-                    .map((i) => (
-                      <div key={i.message} className={styles.inlineError} role="alert">
-                        {i.message}
-                      </div>
-                    ))}
+              <section className={styles.group} aria-label="Where it goes">
+                <div className={styles.summary}>
+                  <span className={styles.summaryText}>
+                    Goes in{" "}
+                    <span className={styles.summaryPath} title={jobsRoot ?? undefined}>
+                      {jobsRoot ? shortPath(jobsRoot) : "no jobs folder yet"}
+                    </span>
+                    {" · "}
+                    {space}
+                    {" · "}
+                    <span className={styles.summaryCode}>{plan?.jobCode ?? "…"}</span>
+                  </span>
+                  {!whereError && (
+                    <button type="button" className={styles.link} aria-expanded={showWhere} onClick={toggleWhere}>
+                      {showWhere ? "Done" : "Change…"}
+                    </button>
+                  )}
                 </div>
+                {codeIssues.map((i) => (
+                  <div key={i.message} className={styles.whereIssue} role="alert">
+                    {i.message}
+                  </div>
+                ))}
+                {showWhere && (
+                  <div className={styles.card}>
+                    <div className={styles.row}>
+                      <span className={styles.label}>Location</span>
+                      <div className={styles.inline}>
+                        <div className={styles.path} title={jobsRoot ?? undefined}>
+                          <Icon name="folder" className={styles.pathIcon} />
+                          <span className={styles.pathText}>{jobsRoot ?? "No jobs folder yet"}</span>
+                        </div>
+                        {personalShown && <span className={styles.note}>Your Personal folder</span>}
+                        <Button onClick={changeLocation}>Change…</Button>
+                      </div>
+                    </div>
+
+                    <div className={styles.row}>
+                      <span className={styles.label}>Space</span>
+                      <div>
+                        <Segmented label="Space" options={ctx.spaces} value={space} onChange={setSpace} />
+                      </div>
+                    </div>
+
+                    <div className={styles.row}>
+                      <span className={styles.label}>Folder name</span>
+                      <div className={styles.inline}>
+                        <span className={styles.result}>{plan?.folderName || "…"}</span>
+                        <IconButton icon="copy" label="Copy folder name" onClick={copyFolderName} />
+                      </div>
+                    </div>
+
+                    <div className={styles.row}>
+                      <span className={styles.label}>Job code</span>
+                      <div className={styles.inline}>
+                        {codeOverride === null ? (
+                          <>
+                            <span className={styles.codePill}>{plan?.jobCode ?? "…"}</span>
+                            <IconButton
+                              icon="pencil"
+                              label="Edit job code"
+                              onClick={() => setCodeOverride(plan?.jobCode ?? "")}
+                            />
+                          </>
+                        ) : (
+                          <>
+                            <input
+                              aria-label="Job code"
+                              className={`${styles.input} ${styles.codeInput}`}
+                              value={codeOverride}
+                              spellCheck={false}
+                              autoFocus
+                              onChange={(e) => setCodeOverride(e.target.value.toUpperCase())}
+                            />
+                            <Button onClick={() => setCodeOverride(null)}>Auto</Button>
+                          </>
+                        )}
+                        {!codeInName && <span className={styles.note}>Kept in Nest, not in the folder name</span>}
+                      </div>
+                    </div>
+                  </div>
+                )}
               </section>
 
               {plan && <PreviewTree plan={plan} />}
-              {plan?.kit && <KitLine kit={plan.kit} onChoose={chooseKit} />}
             </>
           )}
 

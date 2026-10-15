@@ -284,7 +284,7 @@ fn fingerprint_follows_the_kit() {
 fn a_missing_kit_folder_is_a_plain_error() {
     let s = setup();
     let err = list_kit(&s.path("Nowhere")).unwrap_err();
-    assert!(err.contains("Couldn't open the kit folder"), "{err}");
+    assert!(err.contains("Couldn't open the client's folder"), "{err}");
 }
 
 // ───────────────────────── Planning ─────────────────────────
@@ -477,7 +477,7 @@ fn kit_states_without_a_kit_or_a_place_for_it() {
     );
     assert!(p.can_create());
     assert_eq!(p.kit.as_ref().unwrap().state, KitState::Unreadable);
-    assert!(warnings(&p)[0].contains("without Apple's kit"));
+    assert!(warnings(&p)[0].contains("without Apple's files"));
 }
 
 // ───────────────────────── Create ─────────────────────────
@@ -530,7 +530,7 @@ fn a_changed_kit_is_refused_at_create() {
     let err = kit_to_copy(&p, Some("3-13-0000000000000000")).unwrap_err();
     assert_eq!(
         err,
-        "Apple's kit changed since the preview. Check it and click Create again."
+        "Apple's files changed since the preview. Check them and click Create again."
     );
     // The preview had no kit, but now there is one (or the other way round).
     assert!(kit_to_copy(&p, None).is_err());
@@ -601,7 +601,8 @@ fn a_plan_with_kit_files_needs_the_kit_folder() {
     let p = plan_with(&s, WITH_KIT, Some(listed(&s.kits.join("APL"))));
     let err = apply_plan(&p, &s.path("tpl-kit"), None).unwrap_err();
     assert!(
-        err.message.contains("kit folder is missing"),
+        err.message
+            .contains("The folder with Apple's files is missing"),
         "{}",
         err.message
     );
