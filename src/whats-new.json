@@ -1,0 +1,11 @@
+{
+  "0.5.0": [
+    "Make a template from one of your project folders",
+    "A new one-screen template editor",
+    "Templates now live in the main window"
+  ],
+  "0.4.4": [
+    "A button to hide the sidebar, also Ctrl/Cmd+B",
+    "Sidebar sections can be folded away"
+  ]
+}

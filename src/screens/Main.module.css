@@ -159,6 +159,17 @@
   background: var(--accent-soft);
 }
 
+.updateText {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+}
+
+.updateNote {
+  font-size: var(--text-small);
+  color: var(--text-secondary);
+}
+
 .version {
   float: right;
 }

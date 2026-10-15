@@ -361,3 +361,18 @@ export interface DevicesView {
   others: OtherComputer[];
   forgotten: OtherComputer[];
 }
+
+/** The "What's new" note shown once after an update (whats_new.rs). */
+export interface WhatsNew {
+  version: string;
+  lines: string[];
+}
+
+/** Up to `max` plain-text lines from an update's release notes: leading "- " / "* " removed. */
+export function updateNoteLines(notes: string | null | undefined, max = 4): string[] {
+  return (notes ?? "")
+    .split(/\r?\n/)
+    .map((l) => l.trim().replace(/^[-*]\s+/, "").trim())
+    .filter((l) => l.length > 0)
+    .slice(0, max);
+}

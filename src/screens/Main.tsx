@@ -8,6 +8,7 @@ import Inspector from "../components/Inspector";
 import ProjectList from "../components/ProjectList";
 import Sidebar, { type Computer } from "../components/Sidebar";
 import Toast, { type ToastData } from "../components/Toast";
+import WhatsNew from "../components/WhatsNew";
 import { Button, IconButton } from "../components/ui";
 import {
   archiveProject,
@@ -24,6 +25,8 @@ import {
   openSettings,
   projectSizes,
   pendingUpdate,
+  whatsNew,
+  whatsNewSeen,
   openProject,
   openProjectSubfolder,
   rescanProjects,
@@ -53,6 +56,8 @@ import {
   type ProjectRow,
   type Sizes,
   type UpdateInfo,
+  type WhatsNew as WhatsNewNote,
+  updateNoteLines,
 } from "../lib/types";
 import NewProjectSheet from "./NewProjectSheet";
 import Templates from "./templates/Templates";
@@ -196,6 +201,11 @@ export default function Main() {
   // Updates (release builds): ask once in case the check finished before we listened.
   const [update, setUpdate] = useState<UpdateInfo | null>(null);
   const [installing, setInstalling] = useState(false);
+  // "What's new" after an update: asked once at launch.
+  const [note, setNote] = useState<WhatsNewNote | null>(null);
+  useEffect(() => {
+    whatsNew().then(setNote).catch(() => {});
+  }, []);
   const [version, setVersion] = useState("");
   useEffect(() => {
     pendingUpdate().then(setUpdate).catch(() => {});
@@ -691,8 +701,15 @@ export default function Main() {
 
         {update && (
           <div className={styles.update} role="status">
-            <span>
-              <b>Nest {update.version}</b> is ready.
+            <span className={styles.updateText}>
+              <span>
+                <b>Nest {update.version}</b> is ready.
+              </span>
+              {updateNoteLines(update.notes).map((l, i) => (
+                <span key={i} className={styles.updateNote}>
+                  {l}
+                </span>
+              ))}
             </span>
             <Button variant="primary" onClick={restartToUpdate} disabled={installing}>
               {installing ? "Updating…" : "Restart to update"}
@@ -794,6 +811,15 @@ export default function Main() {
             setSheetTemplate(undefined);
             setView("projects");
             onCreated(c);
+          }}
+        />
+      )}
+      {note && (
+        <WhatsNew
+          note={note}
+          onOk={() => {
+            setNote(null);
+            whatsNewSeen().catch(() => {});
           }}
         />
       )}

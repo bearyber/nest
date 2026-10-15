@@ -10,6 +10,7 @@ import type {
   ProjectList,
   RescanSummary,
   UpdateInfo,
+  WhatsNew,
   FolderInfo,
   Settings,
   SettingsView,
@@ -154,3 +155,10 @@ export const completeFirstRun = (
 ) => s<SettingsView>("complete_first_run", { jobsRoot, spaces, noClientSpaces, hiddenTemplates, marker });
 export const settingsReady = () => invoke<void>("settings_ready");
 export const requestStatus = (key: string, status: "active" | "done") => invoke<void>("request_status", { key, status });
+
+// ── What's new ──
+/** The note to show after an update, or null. */
+export const whatsNew = () => invoke<WhatsNew | null>("whats_new");
+
+/** OK pressed on the note: remember this version has been seen. */
+export const whatsNewSeen = () => invoke<void>("whats_new_seen");

@@ -18,6 +18,7 @@ pub mod template_edit;
 pub mod template_from_folder;
 pub mod template_io;
 mod update;
+mod whats_new;
 mod window;
 
 use std::fs;
@@ -167,6 +168,8 @@ pub fn run() {
             settings_cmd::complete_first_run,
             settings_cmd::take_notice,
             settings_cmd::settings_ready,
+            whats_new::whats_new,
+            whats_new::whats_new_seen,
             devices_cmd::devices_view,
             devices_cmd::devices_detect,
             devices_cmd::devices_pick_folder,
