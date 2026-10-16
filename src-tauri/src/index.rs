@@ -361,19 +361,31 @@ CREATE TABLE roots (
 ";
 
 impl Index {
-    /// Open (or create) the index. A damaged file or an old schema is deleted and rebuilt:
-    /// it's a cache, the project folders are the truth.
+    /// Open (or create) the index. A damaged file or an old schema is moved aside
+    /// (`index.sqlite.broken-<date>`, never deleted) and rebuilt: it's a cache, the project
+    /// folders are the truth. If even that fails, Nest runs on a list kept in memory (rebuilt
+    /// by the rescan at start), so a broken cache never stops Nest from starting.
     pub fn open(path: &Path) -> Result<Index, String> {
-        match Self::try_open(path) {
-            Ok(index) => Ok(index),
-            Err(first) => {
-                log::warn!("rebuilding the project index ({first})");
-                for suffix in ["", "-journal", "-wal", "-shm"] {
-                    let _ = fs::remove_file(format!("{}{suffix}", path.display()));
+        let first = match Self::try_open(path) {
+            Ok(index) => return Ok(index),
+            Err(e) => e,
+        };
+        log::warn!("the project index can't be used ({first}); keeping it aside and rebuilding");
+        match set_aside(path) {
+            Ok(kept) => {
+                for p in kept {
+                    log::warn!("kept the old project index as {}", p.display());
                 }
-                Self::try_open(path).map_err(|e| format!("Nest couldn't open its project list. Restart Nest; if it keeps happening, tell support ({e})"))
             }
+            Err(e) => log::error!("couldn't move the old project index aside: {e}"),
         }
+        Ok(Self::try_open(path).unwrap_or_else(|e| {
+            log::error!(
+                "couldn't create a new project index at {} ({e}); using one in memory this time",
+                path.display()
+            );
+            Self::open_in_memory()
+        }))
     }
 
     pub fn open_in_memory() -> Index {
@@ -660,6 +672,15 @@ impl Index {
         tx.commit()
     }
 
+    /// Every project folder the index knows (start-up tidy looks only directly inside these).
+    pub fn project_folders(&self) -> rusqlite::Result<Vec<PathBuf>> {
+        let mut stmt = self
+            .conn
+            .prepare("SELECT path FROM locations ORDER BY path")?;
+        let rows = stmt.query_map([], |r| r.get::<_, String>(0))?;
+        rows.map(|p| p.map(PathBuf::from)).collect()
+    }
+
     /// Spaces used by any indexed project (a space in use can't be renamed or deleted).
     pub fn spaces_in_use(&self) -> rusqlite::Result<HashSet<String>> {
         let mut stmt = self
@@ -677,7 +698,12 @@ impl Index {
                 r.get(0)
             })
             .optional()?;
-        Ok(json.and_then(|j| serde_json::from_str(&j).ok()))
+        // A measurement this version can't read is simply measured again.
+        Ok(json.and_then(|j| {
+            serde_json::from_str(&j)
+                .map_err(|e| log::warn!("ignoring an unreadable folder size for {key}: {e}"))
+                .ok()
+        }))
     }
 
     pub fn put_sizes(&mut self, key: &str, sizes: &crate::sizes::Sizes) -> rusqlite::Result<()> {
@@ -701,6 +727,35 @@ impl Index {
         )?;
         Ok(())
     }
+}
+
+/// Rename a damaged index (and SQLite's side files next to it) to
+/// `<name>.broken-<date-time>[-n]<suffix>`. Nothing is deleted. Returns the new paths.
+fn set_aside(path: &Path) -> std::io::Result<Vec<PathBuf>> {
+    let Some(name) = path.file_name().map(|n| n.to_string_lossy().into_owned()) else {
+        return Ok(vec![]);
+    };
+    let dir = path.parent().unwrap_or(Path::new("."));
+    let stamp = chrono::Local::now().format("%Y-%m-%d-%H%M%S").to_string();
+    let suffixes = ["", "-journal", "-wal", "-shm"];
+    let present = |s: &str| dir.join(format!("{name}{s}")).symlink_metadata().is_ok();
+    // One free base name for the whole set, so the side files stay matched.
+    let mut base = format!("{name}.broken-{stamp}");
+    let mut n = 2;
+    while suffixes
+        .iter()
+        .any(|s| dir.join(format!("{base}{s}")).symlink_metadata().is_ok())
+    {
+        base = format!("{name}.broken-{stamp}-{n}");
+        n += 1;
+    }
+    let mut kept = Vec::new();
+    for s in suffixes.iter().filter(|s| present(s)) {
+        let to = dir.join(format!("{base}{s}"));
+        fs::rename(dir.join(format!("{name}{s}")), &to)?;
+        kept.push(to);
+    }
+    Ok(kept)
 }
 
 /// When a done project was marked done: the manifest's `doneAt` if it has one, else the
@@ -926,5 +981,82 @@ mod tests {
         drop(index);
         fs::write(&path, "not a database at all").unwrap();
         assert!(Index::open(&path).unwrap().list().unwrap().is_empty());
+    }
+
+    fn broken_copies(dir: &Path) -> Vec<String> {
+        let mut names: Vec<String> = fs::read_dir(dir)
+            .unwrap()
+            .flatten()
+            .map(|e| e.file_name().to_string_lossy().into_owned())
+            .filter(|n| n.starts_with("index.sqlite.broken-"))
+            .collect();
+        names.sort();
+        names
+    }
+
+    #[test]
+    fn damaged_index_is_kept_aside_and_rebuilt() {
+        let tmp = tempfile::tempdir().unwrap();
+        let path = tmp.path().join(INDEX_FILE);
+        fs::write(&path, "not a database at all").unwrap();
+
+        let mut index = Index::open(&path).unwrap();
+        assert!(index.list().unwrap().is_empty());
+        // The new index works and is on disk.
+        let root = tmp.path().join("Jobs");
+        project(&root, "A", r#"{"id":"a1","jobCode":"AA-L01"}"#);
+        let found = found_at(&root.join("A"), &root).unwrap();
+        index.record(&[found], now_ms()).unwrap();
+        drop(index);
+        assert_eq!(Index::open(&path).unwrap().codes().unwrap(), ["AA-L01"]);
+
+        // The damaged file was renamed, not deleted.
+        let kept = broken_copies(tmp.path());
+        assert_eq!(kept.len(), 1, "{kept:?}");
+        let main = &kept[0];
+        assert_eq!(
+            fs::read_to_string(tmp.path().join(main)).unwrap(),
+            "not a database at all"
+        );
+
+        // Damaged again in the same second: a second copy, the first one untouched.
+        fs::write(&path, "broken again").unwrap();
+        assert!(Index::open(&path).unwrap().list().unwrap().is_empty());
+        assert_eq!(broken_copies(tmp.path()).len(), 2);
+        assert_eq!(
+            fs::read_to_string(tmp.path().join(main)).unwrap(),
+            "not a database at all"
+        );
+    }
+
+    #[test]
+    fn side_files_move_aside_with_the_index() {
+        let tmp = tempfile::tempdir().unwrap();
+        let path = tmp.path().join(INDEX_FILE);
+        fs::write(&path, "db").unwrap();
+        fs::write(tmp.path().join("index.sqlite-wal"), "wal").unwrap();
+        fs::write(tmp.path().join("index.sqlite-shm"), "shm").unwrap();
+        fs::write(tmp.path().join("notes.txt"), "mine").unwrap();
+        let kept = set_aside(&path).unwrap();
+        assert_eq!(kept.len(), 3, "{kept:?}");
+        let base = kept[0].to_string_lossy().into_owned();
+        assert!(base.contains("index.sqlite.broken-"), "{base}");
+        assert_eq!(fs::read_to_string(format!("{base}-wal")).unwrap(), "wal");
+        assert_eq!(fs::read_to_string(format!("{base}-shm")).unwrap(), "shm");
+        assert!(!path.exists());
+        assert!(!tmp.path().join("index.sqlite-wal").exists());
+        assert_eq!(
+            fs::read_to_string(tmp.path().join("notes.txt")).unwrap(),
+            "mine"
+        );
+    }
+
+    #[test]
+    fn index_that_cant_be_created_falls_back_to_memory() {
+        let tmp = tempfile::tempdir().unwrap();
+        // Its folder doesn't exist, so no index file can be made: Nest still starts.
+        let path = tmp.path().join("missing-folder").join(INDEX_FILE);
+        let index = Index::open(&path).unwrap();
+        assert!(index.list().unwrap().is_empty());
     }
 }

@@ -267,6 +267,7 @@ fn build_plan(
     // No jobs folder yet still previews; Create stays blocked by the issue below.
     let root = request_root(settings, request).unwrap_or_default();
     let now = Local::now();
+    let mut index_problem = false;
     let ctx = PlanContext {
         jobs_root: root.clone(),
         id: uuid::Uuid::new_v4().to_string(),
@@ -283,11 +284,23 @@ fn build_plan(
         existing_codes: {
             let mut codes = scan.codes.clone();
             // Codes in the other folder New Project scanned (jobs / Personal) count too.
-            if let Ok(scans) = state.scan.lock() {
-                codes.extend(scans.values().flat_map(|s| s.codes.iter().cloned()));
+            match state.scan.lock() {
+                Ok(scans) => codes.extend(scans.values().flat_map(|s| s.codes.iter().cloned())),
+                Err(_) => log::warn!("job codes: the last folder scan isn't available"),
             }
-            if let Ok(idx) = state.index.lock() {
-                codes.extend(idx.codes().unwrap_or_default());
+            // Without the index, codes in offline folders can't be checked: say so, since a
+            // repeat of one of those is then possible.
+            let indexed = lock(&state.index).and_then(|idx| {
+                idx.codes().map_err(|e| {
+                    AppError::new(format!("couldn't read job codes from the index: {e}"))
+                })
+            });
+            match indexed {
+                Ok(c) => codes.extend(c),
+                Err(e) => {
+                    log::error!("job codes: {}", e.message);
+                    index_problem = true;
+                }
             }
             // Devices: codes your other computers use, so a code never repeats across them.
             codes.extend(crate::devices_cmd::remote_codes(&state.devices));
@@ -300,6 +313,16 @@ fn build_plan(
         kit,
     };
     let mut plan = plan::plan_project(loaded, &request.values, &ctx);
+    if index_problem {
+        plan.issues.push(Issue {
+            level: Level::Warning,
+            field: None,
+            message: format!(
+                "Nest couldn't check job codes in folders that aren't connected right now. Refresh the list ({}) to be sure the code is new.",
+                crate::error::refresh_keys()
+            ),
+        });
+    }
     if !settings.spaces.contains(&request.space) {
         plan.issues.push(Issue {
             level: Level::Error,
@@ -1027,7 +1050,15 @@ pub(crate) fn apply_request(
         .map(|mut i| i.set_status(project_id, status))
     {
         Ok(Ok(())) => RequestOutcome::Applied,
-        _ => RequestOutcome::Applied, // the file changed; the next rescan corrects the cache
+        // The file changed; the next rescan corrects the cache.
+        Ok(Err(e)) => {
+            log::warn!("status changed, but the project list didn't take it: {e}");
+            RequestOutcome::Applied
+        }
+        Err(_) => {
+            log::warn!("status changed, but the project list is busy or broken");
+            RequestOutcome::Applied
+        }
     }
 }
 

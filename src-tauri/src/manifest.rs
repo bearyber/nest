@@ -2,7 +2,7 @@
 //! and reads that keep unknown fields (CLAUDE.md #5).
 
 use std::fs::{self, File, OpenOptions};
-use std::io::{self, Write};
+use std::io::{self, Read, Write};
 use std::path::Path;
 
 use serde_json::Value as Json;
@@ -32,10 +32,27 @@ pub fn write_json_atomic(path: &Path, value: &Json, hidden: bool) -> io::Result<
     result
 }
 
+/// A project file is a few KB. Anything bigger than this isn't one of Nest's, so it's never
+/// loaded whole (a huge file in a project folder would otherwise stall the scan).
+pub const MAX_JSON_BYTES: u64 = 1024 * 1024;
+
 /// Read a manifest (or any JSON object). Unknown fields are kept as-is.
-/// A UTF-8 BOM (some Windows editors add one) is ignored.
+/// A UTF-8 BOM (some Windows editors add one) is ignored. Files over 1 MB are refused as
+/// unreadable, without reading them.
 pub fn read_json_object(path: &Path) -> Result<Json, String> {
-    let text = fs::read_to_string(path).map_err(|e| e.to_string())?;
+    let too_big = || "it's bigger than 1 MB, too big for a project file".to_string();
+    let file = File::open(path).map_err(|e| e.to_string())?;
+    if file.metadata().map_err(|e| e.to_string())?.len() > MAX_JSON_BYTES {
+        return Err(too_big());
+    }
+    // Capped while reading too, in case the file grows in the meantime.
+    let mut text = String::new();
+    file.take(MAX_JSON_BYTES + 1)
+        .read_to_string(&mut text)
+        .map_err(|e| e.to_string())?;
+    if text.len() as u64 > MAX_JSON_BYTES {
+        return Err(too_big());
+    }
     let text = text.strip_prefix('\u{feff}').unwrap_or(&text);
     let value: Json = serde_json::from_str(text).map_err(|e| e.to_string())?;
     if value.is_object() {
@@ -276,5 +293,23 @@ mod tests {
         assert!(read_json_object(&path).is_err());
         fs::write(&path, "[1]").unwrap();
         assert!(read_json_object(&path).is_err());
+    }
+
+    #[test]
+    fn huge_manifest_is_refused_as_unreadable() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join(".project.json");
+        let with_padding = |n: usize| format!("{{\"id\":\"abc\",\"pad\":\"{}\"}}", "x".repeat(n));
+        // Valid JSON, just over 1 MB: refused without being parsed, and left as it was.
+        fs::write(&path, with_padding(MAX_JSON_BYTES as usize)).unwrap();
+        let err = read_json_object(&path).unwrap_err();
+        assert!(err.contains("bigger than 1 MB"), "{err}");
+        let before = fs::read(&path).unwrap();
+        let err = update_status(&path, "abc", "done").unwrap_err();
+        assert!(err.contains("left untouched"), "{err}");
+        assert_eq!(fs::read(&path).unwrap(), before);
+        // Just under the cap still reads.
+        fs::write(&path, with_padding(MAX_JSON_BYTES as usize - 100)).unwrap();
+        assert_eq!(read_json_object(&path).unwrap()["id"], "abc");
     }
 }

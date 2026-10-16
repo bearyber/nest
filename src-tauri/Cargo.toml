@@ -34,6 +34,9 @@ zip = { version = "2", default-features = false, features = ["deflate"] }
 trash = "5"
 chrono = { version = "0.4", default-features = false, features = ["clock", "std"] }
 fs4 = { version = "1", default-features = false }
+# The "Nest couldn't start" message box, shown before Tauri (and its dialog plugin) is ready.
+# Already in the build via tauri-plugin-dialog: same version, same features.
+rfd = { version = "0.16", default-features = false, features = ["common-controls-v6"] }
 
 [dev-dependencies]
 tempfile = "3"

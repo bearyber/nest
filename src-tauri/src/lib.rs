@@ -15,12 +15,14 @@ pub mod settings;
 mod settings_cmd;
 pub mod sizes;
 pub mod staged;
+mod startup;
 pub mod template;
 pub mod template_edit;
 pub mod template_from_folder;
 pub mod template_io;
 pub mod template_sync;
 mod template_sync_cmd;
+pub mod tidy;
 mod update;
 mod whats_new;
 mod window;
@@ -33,9 +35,17 @@ use tauri_plugin_log::{RotationStrategy, Target, TargetKind};
 
 use commands::AppState;
 use settings::Settings;
+use startup::{StartupError, Step};
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
+    // If anything below fails, Nest says so in a message box instead of vanishing.
+    let started_at = std::time::SystemTime::now();
+    let context = tauri::generate_context!();
+    if let Some(dir) = startup::fallback_log_dir(&context.config().identifier) {
+        startup::set_log_dir(dir);
+    }
+    startup::install_crash_hook();
     let mut builder = tauri::Builder::default();
     // Installed app only: a second launch focuses the running window and exits. (Dev builds
     // skip it, otherwise an open installed Nest would swallow every test launch.) Must be
@@ -74,38 +84,11 @@ pub fn run() {
         ))
         .manage(update::Pending::default())
         .manage(kits_cmd::Kits::default())
-        .setup(|app| {
-            let state = init_state(app)?;
-            let theme = state
-                .settings
-                .lock()
-                .map(|s| s.theme.clone())
-                .unwrap_or_default();
-            app.manage(state);
-            let main = app
-                .get_webview_window("main")
-                .ok_or("main window missing")?;
-            app.manage(window::SettingsMaterial::default());
-            app.manage(window::Material {
-                applied: window::apply_appearance(&main, &theme),
-            });
-            update::start(app.handle());
-            devices_cmd::start(app.handle());
-            settings_cmd::tidy_template_copies_once(app.handle());
-            // macOS gets the native menu bar (spec §8). Windows 11 apps don't have one;
-            // there every action is on shortcuts, buttons and right-click menus.
-            if cfg!(target_os = "macos") {
-                app.set_menu(menu::build(app.handle())?)?;
-                app.on_menu_event(|app, event| {
-                    if event.id().0 == menu::SETTINGS {
-                        if let Err(e) = settings_cmd::open_settings_window(app) {
-                            log::warn!("couldn't open Settings: {e}");
-                        }
-                    } else {
-                        let _ = app.emit("menu", event.id().0.as_str());
-                    }
-                });
+        .setup(move |app| {
+            if let Err(e) = setup(app, started_at) {
+                startup::fail(&e);
             }
+            startup::started();
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
@@ -198,8 +181,8 @@ pub fn run() {
             kits_cmd::set_template_kit_folder,
             kits_cmd::cancel_create,
         ])
-        .build(tauri::generate_context!())
-        .expect("error while running Nest")
+        .build(context)
+        .unwrap_or_else(|e| startup::fail(&StartupError::new(Step::Other, e)))
         .run(|app, event| {
             // Save this computer's list one last time, so a change made just before quitting
             // reaches the other computers.
@@ -209,13 +192,63 @@ pub fn run() {
         });
 }
 
-fn init_state(app: &tauri::App) -> Result<AppState, Box<dyn std::error::Error>> {
+/// Everything Nest needs before its window shows. An error here becomes the start-up message
+/// box (startup.rs); only what truly can't be worked around is an error.
+fn setup(app: &mut tauri::App, started_at: std::time::SystemTime) -> Result<(), StartupError> {
+    match app.path().app_log_dir() {
+        Ok(dir) => startup::set_log_dir(dir),
+        Err(e) => log::warn!("couldn't find the log folder: {e}"),
+    }
+    let state = init_state(app)?;
+    let theme = state
+        .settings
+        .lock()
+        .map(|s| s.theme.clone())
+        .unwrap_or_default();
+    app.manage(state);
+    let main = app
+        .get_webview_window("main")
+        .ok_or_else(|| StartupError::new(Step::Window, "the main window is missing"))?;
+    app.manage(window::SettingsMaterial::default());
+    app.manage(window::Material {
+        applied: window::apply_appearance(&main, &theme),
+    });
+    update::start(app.handle());
+    devices_cmd::start(app.handle());
+    settings_cmd::tidy_template_copies_once(app.handle());
+    tidy::start(app.handle(), started_at);
+    // macOS gets the native menu bar (spec §8). Windows 11 apps don't have one;
+    // there every action is on shortcuts, buttons and right-click menus.
+    if cfg!(target_os = "macos") {
+        let bar = menu::build(app.handle()).map_err(|e| StartupError::new(Step::MenuBar, e))?;
+        app.set_menu(bar)
+            .map_err(|e| StartupError::new(Step::MenuBar, e))?;
+        app.on_menu_event(|app, event| {
+            if event.id().0 == menu::SETTINGS {
+                if let Err(e) = settings_cmd::open_settings_window(app) {
+                    log::warn!("couldn't open Settings: {e}");
+                }
+            } else if let Err(e) = app.emit("menu", event.id().0.as_str()) {
+                log::warn!("couldn't pass on a menu command: {e}");
+            }
+        });
+    }
+    Ok(())
+}
+
+fn init_state(app: &tauri::App) -> Result<AppState, StartupError> {
     let paths = app.path();
     // Dev builds keep their own settings so they never touch the real ones (spec §10).
-    let mut config_dir = paths.app_config_dir()?;
+    let mut config_dir = paths
+        .app_config_dir()
+        .map_err(|e| StartupError::new(Step::ConfigFolder, e))?;
     if cfg!(debug_assertions) {
         config_dir = config_dir.join("dev");
     }
+    // Nest's own folder (settings, index, your templates). Without it nothing can be saved.
+    fs::create_dir_all(&config_dir).map_err(|e| {
+        StartupError::new(Step::ConfigFolder, format!("{}: {e}", config_dir.display()))
+    })?;
 
     // No settings file yet → first run (spec §3.4). A damaged file is never first run, and
     // never overwritten.
@@ -229,16 +262,20 @@ fn init_state(app: &tauri::App) -> Result<AppState, Box<dyn std::error::Error>> 
     };
 
     let user_templates = config_dir.join("templates");
-    let bundled_templates = paths.resource_dir()?.join("templates");
+    let bundled_templates = paths
+        .resource_dir()
+        .map_err(|e| StartupError::new(Step::OwnFiles, e))?
+        .join("templates");
     let templates = template_io::load_installed(
         &user_templates,
         &bundled_templates,
         template_io::BUILT_IN_IDS,
     );
 
-    // The project index lives next to the settings (dev and release stay separate).
-    fs::create_dir_all(&config_dir)?;
-    let index = index::Index::open(&config_dir.join(index::INDEX_FILE))?;
+    // The project index lives next to the settings (dev and release stay separate). A broken
+    // one is kept aside and rebuilt; it never stops Nest from starting.
+    let index = index::Index::open(&config_dir.join(index::INDEX_FILE))
+        .map_err(|e| StartupError::new(Step::Other, e))?;
 
     Ok(AppState {
         config_dir,
