@@ -210,8 +210,14 @@ pub fn load_installed(
 /// Every template folder in `dir`. Hidden folders (half-finished imports) are skipped; a
 /// broken template is logged and skipped, never fatal.
 fn load_all_in(dir: &Path) -> Vec<LoadedTemplate> {
-    let Ok(entries) = fs::read_dir(dir) else {
-        return vec![];
+    let entries = match fs::read_dir(dir) {
+        Ok(entries) => entries,
+        // No folder of your own templates yet: nothing to load.
+        Err(e) if e.kind() == io::ErrorKind::NotFound => return vec![],
+        Err(e) => {
+            log::error!("couldn't read the templates folder {}: {e}", dir.display());
+            return vec![];
+        }
     };
     let mut dirs: Vec<PathBuf> = entries
         .flatten()
@@ -233,6 +239,19 @@ fn load_all_in(dir: &Path) -> Vec<LoadedTemplate> {
 
 // ───────────────────────── Import ─────────────────────────
 
+/// Remove one of Nest's own temporary folders. Already gone is fine; anything else is logged
+/// (the start-up tidy removes it a day later).
+fn remove_own_tmp(tmp: &Path) {
+    match fs::remove_dir_all(tmp) {
+        Ok(()) => {}
+        Err(e) if e.kind() == io::ErrorKind::NotFound => {}
+        Err(e) => log::warn!(
+            "couldn't remove the temporary folder {}: {e}",
+            tmp.display()
+        ),
+    }
+}
+
 /// Install a `.nesttemplate` (zip) or a single `.nest.json` / `.json` into `user_dir`.
 pub fn import(
     file: &Path,
@@ -246,7 +265,7 @@ pub fn import(
     fs::create_dir(&tmp).map_err(|e| format!("Couldn't start the import: {e}"))?;
     let result = install_into(file, &tmp, user_dir, installed, limits);
     // Our own temporary folder: always cleaned up (on success it has been moved away).
-    let _ = fs::remove_dir_all(&tmp);
+    remove_own_tmp(&tmp);
     result
 }
 
@@ -372,7 +391,7 @@ pub fn install_synced(
         load_dir(&folder).map_err(|e| e.to_string())
     })();
     // Our own temporary folder: always cleaned up (on success it has been moved away).
-    let _ = fs::remove_dir_all(&tmp);
+    remove_own_tmp(&tmp);
     result
 }
 
@@ -641,7 +660,7 @@ pub fn duplicate(
         load_dir(&folder).map_err(|e| e.to_string())
     })();
     if result.is_err() {
-        let _ = fs::remove_dir_all(&tmp);
+        remove_own_tmp(&tmp);
     }
     result
 }

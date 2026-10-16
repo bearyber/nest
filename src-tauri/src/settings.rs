@@ -500,8 +500,18 @@ fn nested(a: &Path, b: &Path) -> bool {
 /// is an error, and it is never overwritten with defaults.
 pub fn load(config_dir: &Path) -> AppResult<Option<Settings>> {
     let path = config_dir.join(SETTINGS_FILE);
-    if !path.exists() {
-        return Ok(None);
+    // Only a definite "not there" is first run. If the folder can't even be checked (no
+    // permission, a disk problem), that's an error: never start over with defaults.
+    match path.try_exists() {
+        Ok(true) => {}
+        Ok(false) => return Ok(None),
+        Err(e) => {
+            return Err(AppError::new(format!(
+                "Settings file {} can't be checked: {}",
+                path.display(),
+                io_reason(&e)
+            )))
+        }
     }
     let text = fs::read_to_string(&path).map_err(|e| {
         AppError::new(format!(
@@ -811,5 +821,25 @@ mod tests {
         )
         .unwrap();
         assert_eq!(load(dir.path()).unwrap().unwrap().local_marker, "LX");
+    }
+
+    /// A settings folder that can't be looked into is an error, never "first run".
+    #[cfg(unix)]
+    #[test]
+    fn unreachable_settings_folder_is_not_first_run() {
+        use std::os::unix::fs::PermissionsExt;
+        let dir = tempfile::tempdir().unwrap();
+        let config = dir.path().join("config");
+        fs::create_dir(&config).unwrap();
+        fs::write(config.join(SETTINGS_FILE), "{}").unwrap();
+        fs::set_permissions(&config, fs::Permissions::from_mode(0o000)).unwrap();
+        // Running as root (some CI machines) ignores permissions: nothing to test there.
+        let blocked = fs::metadata(config.join(SETTINGS_FILE)).is_err();
+        let result = load(&config);
+        fs::set_permissions(&config, fs::Permissions::from_mode(0o755)).unwrap();
+        if blocked {
+            let err = result.unwrap_err();
+            assert!(err.message.contains("can't be checked"), "{}", err.message);
+        }
     }
 }

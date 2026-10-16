@@ -8,7 +8,7 @@
 //! good), so Nest leaves that to the user.
 
 use std::io;
-use std::path::{Component, Path, PathBuf};
+use std::path::{Path, PathBuf};
 
 use serde_json::Value as Json;
 use unicode_normalization::UnicodeNormalization;
@@ -66,7 +66,7 @@ pub fn plan_move(from: &Path, dest_root: &Path, unarchive: bool) -> Result<MoveP
         ));
     }
     if is_cloud(from) || is_cloud(dest_root) {
-        return Err("This is in a cloud-synced folder (Google Drive, OneDrive, iCloud, Dropbox). Moving it there can remove it from your other computers, so Nest leaves that to you.".into());
+        return Err("This is in a cloud-synced folder (Google Drive, OneDrive, iCloud, Dropbox, Box). Moving it there can remove it from your other computers, so Nest leaves that to you.".into());
     }
     let to = dest_root.join(&name);
     if to.symlink_metadata().is_ok() {
@@ -192,20 +192,37 @@ pub fn mark_manifest(
 }
 
 /// Folders a cloud app syncs. Moving files out of them can delete them on the other computers.
+/// Checked by folder name, case-insensitively, with `/` and `\` both read as separators (so a
+/// Windows path is recognised on a Mac and the other way round).
 pub fn is_cloud(path: &Path) -> bool {
-    path.components().any(|c| {
-        let Component::Normal(s) = c else {
-            return false;
-        };
-        let s = s.to_string_lossy().to_lowercase();
+    let text = path.to_string_lossy().to_lowercase();
+    let parts: Vec<&str> = text
+        .split(['/', '\\'])
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+        .collect();
+    parts.iter().enumerate().any(|(i, &s)| {
+        // macOS: every cloud app (Google Drive, OneDrive, Dropbox, Box) lives here.
         s == "cloudstorage"
+            // iCloud Drive (macOS and Windows).
             || s == "mobile documents"
-            || s == "dropbox"
-            || s == "google drive"
-            || s == "my drive"
+            || s == "com~apple~clouddocs"
             || s == "icloud drive"
             || s == "iclouddrive"
+            // OneDrive, "OneDrive - Company", "OneDrive-Personal".
             || s.starts_with("onedrive")
+            // Dropbox, "Dropbox (Personal)", "Dropbox (Company)".
+            || s == "dropbox"
+            || s.starts_with("dropbox (")
+            // Google Drive: "Google Drive", "My Drive", "GoogleDrive-name@example.com".
+            || s == "google drive"
+            || s == "my drive"
+            || s.starts_with("googledrive-")
+            // Box: "Box-Box" (macOS), "Box Sync", and "Box" right inside a user folder
+            // (C:\Users\name\Box, /Users/name/Box). Elsewhere "Box" may be a client's name.
+            || s == "box-box"
+            || s == "box sync"
+            || (s == "box" && i >= 2 && parts[i - 2] == "users")
     })
 }
 
@@ -225,7 +242,7 @@ fn same_drive(a: &Path, b: &Path) -> bool {
     let prefix = |p: &Path| {
         let p = std::fs::canonicalize(p).ok()?;
         match p.components().next()? {
-            Component::Prefix(x) => Some(x.as_os_str().to_string_lossy().to_lowercase()),
+            std::path::Component::Prefix(x) => Some(x.as_os_str().to_string_lossy().to_lowercase()),
             _ => None,
         }
     };
@@ -252,6 +269,48 @@ mod tests {
             "D:/Jobs",
             "/Volumes/Footage/Jobs",
             "C:/Users/b/Documents/NestDev",
+        ] {
+            assert!(!is_cloud(Path::new(p)), "{p}");
+        }
+    }
+
+    #[test]
+    fn more_cloud_folders_on_both_systems() {
+        for p in [
+            // OneDrive
+            "C:/Users/b/OneDrive/Jobs",
+            r"C:\Users\b\OneDrive - Acme Studio\Jobs",
+            "/Users/b/Library/CloudStorage/OneDrive-Personal/Jobs",
+            "c:/users/b/ONEDRIVE - ACME/jobs",
+            // Dropbox
+            "/Users/b/Dropbox/Jobs",
+            r"C:\Users\b\Dropbox (Acme)\Jobs",
+            "/Users/b/Library/CloudStorage/Dropbox/Jobs",
+            // iCloud Drive
+            "/Users/b/Library/Mobile Documents/com~apple~CloudDocs/Jobs",
+            r"C:\Users\b\iCloudDrive\Jobs",
+            "/Users/b/iCloud Drive/Jobs",
+            // Box
+            "/Users/b/Library/CloudStorage/Box-Box/Jobs",
+            r"C:\Users\b\Box\Jobs",
+            "/Users/b/Box/Jobs",
+            r"C:\Users\b\Box Sync\Jobs",
+            // Google Drive
+            "/Users/b/Library/CloudStorage/GoogleDrive-b@example.com/My Drive/Jobs",
+            "/Volumes/GoogleDrive-b@example.com/Shared drives/Jobs",
+            "/Users/b/Google Drive/Jobs",
+            r"G:\My Drive\Jobs",
+            "g:/MY DRIVE/jobs",
+        ] {
+            assert!(is_cloud(Path::new(p)), "{p}");
+        }
+        for p in [
+            // A client or folder that only sounds like one.
+            "D:/Jobs/Box/2609_BX-L01_Promo",
+            r"D:\Jobs\Dropbox Ads\Spot",
+            "/Volumes/Footage/Jobs/OneDay",
+            "/Users/b/Documents/Jobs/My Drive Footage",
+            r"C:\Users\b\Documents\NestDev",
         ] {
             assert!(!is_cloud(Path::new(p)), "{p}");
         }
