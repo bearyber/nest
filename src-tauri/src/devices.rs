@@ -857,10 +857,23 @@ pub fn trusted_lists(
     online: bool,
     newest: &mut BTreeMap<String, String>,
 ) -> HashSet<String> {
+    trusted_lists_at(others, online, newest, chrono::Utc::now())
+}
+
+/// `trusted_lists` at a given time. A time more than a day ahead of `now` (a computer whose
+/// clock was wrong once) is never remembered, and one remembered earlier counts as unknown,
+/// so a single bad clock can't stop that computer's lists being trusted for good.
+pub fn trusted_lists_at(
+    others: &[OtherDevice],
+    online: bool,
+    newest: &mut BTreeMap<String, String>,
+    now: chrono::DateTime<chrono::Utc>,
+) -> HashSet<String> {
     let mut out = HashSet::new();
     if !online {
         return out;
     }
+    let horizon = now + chrono::Duration::days(1);
     let parse = |s: &str| chrono::DateTime::parse_from_rfc3339(s).ok();
     for d in others
         .iter()
@@ -869,11 +882,19 @@ pub fn trusted_lists(
         let Some(t) = parse(&d.updated_at) else {
             continue; // can't tell how old it is
         };
-        match newest.get(&d.device_id).and_then(|s| parse(s)) {
+        match newest
+            .get(&d.device_id)
+            .and_then(|s| parse(s))
+            .filter(|seen| *seen <= horizon)
+        {
             Some(seen) if t < seen => continue,
             _ => {}
         }
-        newest.insert(d.device_id.clone(), d.updated_at.clone());
+        if t <= horizon {
+            newest.insert(d.device_id.clone(), d.updated_at.clone());
+        } else {
+            newest.remove(&d.device_id);
+        }
         out.insert(d.device_id.clone());
     }
     out

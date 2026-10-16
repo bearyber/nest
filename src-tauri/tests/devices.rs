@@ -965,3 +965,40 @@ fn waiting_entries_written_as_a_plain_time_still_read() {
     let back = serde_json::to_value(&m["new"]).unwrap();
     assert_eq!(back["fromDevice"], PC);
 }
+
+#[test]
+fn a_clock_set_in_the_future_once_never_freezes_trust() {
+    use nest_lib::devices::{trusted_lists_at, OtherDevice};
+    use std::collections::BTreeMap;
+    let now = chrono::DateTime::parse_from_rfc3339("2026-10-16T12:00:00Z")
+        .unwrap()
+        .with_timezone(&chrono::Utc);
+    let list = |at: &str| OtherDevice {
+        device_id: "pc".into(),
+        name: "PC".into(),
+        os: "windows".into(),
+        updated_at: at.into(),
+        projects: vec![],
+        requests: vec![],
+        handled: vec![],
+        handled_upto: None,
+        problem: None,
+        not_downloaded: false,
+    };
+    let mut newest = BTreeMap::new();
+    // The PC's clock jumped years ahead once: trusted this round, but not remembered.
+    let t = trusted_lists_at(&[list("2031-01-01T00:00:00Z")], true, &mut newest, now);
+    assert!(t.contains("pc"));
+    assert!(!newest.contains_key("pc"));
+    // Its clock is fixed: the next list is trusted and remembered.
+    let t = trusted_lists_at(&[list("2026-10-16T11:59:00Z")], true, &mut newest, now);
+    assert!(t.contains("pc"));
+    // A future time remembered by an older build counts as unknown, not as "newest".
+    newest.insert("pc".into(), "2031-01-01T00:00:00Z".into());
+    let t = trusted_lists_at(&[list("2026-10-16T11:59:30Z")], true, &mut newest, now);
+    assert!(t.contains("pc"));
+    assert_eq!(newest["pc"], "2026-10-16T11:59:30Z");
+    // An older copy than the remembered one still isn't trusted.
+    let t = trusted_lists_at(&[list("2026-10-16T11:00:00Z")], true, &mut newest, now);
+    assert!(!t.contains("pc"));
+}
