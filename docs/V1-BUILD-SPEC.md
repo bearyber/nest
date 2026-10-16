@@ -461,6 +461,14 @@ Bernard's own template is named "Project". The year is never part of the job cod
     - **Files in templates:** Nest's own templates make folders only (no NOTES.md; versions bumped). The editor's "+ Add a file" (next to "+ Add folder") offers "Your own file…" (or drag one in) and one ready-made **Project info.txt** (job code, the template's own answers, made-on date; filled in on Create). A filled-in file shows that as a tooltip, not a tag. "+ Add folder / + Add a file" show at the bottom always and in a folder only under the pointer.
     - **New Project:** under Client, "<Client>'s files: N files · size · Change" / "none · Add…" / "Put them in: [folder ▾]" (saves the place into the template). Location, Space, Folder name and Job code fold into "Goes in … · Space · Code · Change…" (problems open it). The word "kit" is gone from the UI ("<Client>'s files"; Settings tab "Client files").
 
+28. **0.6.1 polish (Bernard 2026-10-16).**
+    - **Devices requests wait instead of failing:** a "mark done / active" from the other computer that can't be applied right now (file busy or locked, missing mid-sync, unreadable for a moment) waits and is retried on each sync; only lasting problems are refused with a plain reason. Requests for one project keep their order; other projects aren't held up. After 3 days a waiting request (and any held behind it) is refused with its reason. Nothing is applied twice or lost: a computer's "handled up to" mark only moves after reading the other computer's current list cleanly, never past a request it has seen waiting, and never from an older copy of that list (`handledUpto` in device files; `waitingSince`, `newestLists` in settings).
+    - **"Nest couldn't start: …"** native message with Open log folder / Quit, instead of failing silently. A damaged index is moved aside (never deleted) and rebuilt; an index from a newer Nest is left alone (in-memory list for that session).
+    - **Hardening:** `.project.json` over 1 MB counts as unreadable; start-up tidy removes only Nest's own exact-pattern temp files older than a day and old `extras/`; swallowed errors are logged; Archive recognises OneDrive / Dropbox / iCloud / Box / Google Drive folders.
+    - **Editor:** Edit → Undo / Redo in the Mac menu work in the template editor; drag questions on the bottom line to reorder them (Client stays first).
+    - **New Project:** a yes/no question that only makes folders shows as "Also make: ☐ PRINT folder" (the template's default kept); one tied to no folder, or to "made when not ticked", stays a question.
+    - **Update bar:** one quiet line, "What's new" folds out; the What's new sheet's OK has no double focus ring.
+
 ## 12. Out of scope for v1 (do not build)
 
 - Resolve/Premiere/AE project creation (a project file you put in a template is copied untouched, §12a #23; filling blanks inside it is v2)

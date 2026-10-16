@@ -56,6 +56,8 @@ src-tauri/
     kits.rs          client kits: find a client's kit folder, list it read-only, fingerprint
     kits_cmd.rs      client kit commands, cache, Create progress + Cancel
     whats_new.rs     What's new (bundled src/whats-new.json; shown once after an update)
+    startup.rs       the "Nest couldn't start" message box (works before the app is up)
+    tidy.rs          start-up tidy of Nest's own leftovers (exact-pattern temp files, extras/)
     archive.rs       Archive / Unarchive: one rename, same drive only (moves project folders)
     error.rs         AppError (user-facing message)
     menu.rs          macOS menu bar (Windows has none: shortcuts + context menus)
