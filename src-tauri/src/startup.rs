@@ -94,8 +94,9 @@ pub fn set_log_dir(dir: PathBuf) {
     }
 }
 
+/// The log folder. `try_lock`: the crash hook must never wait on a lock.
 fn log_dir() -> Option<PathBuf> {
-    LOG_DIR.lock().ok().and_then(|d| d.clone())
+    LOG_DIR.try_lock().ok().and_then(|d| d.clone())
 }
 
 /// Setup finished: from now on crashes are only logged.
@@ -103,20 +104,42 @@ pub fn started() {
     STARTED.store(true, Ordering::SeqCst);
 }
 
-/// Crashes are always logged. A crash on the main thread before setup finished (e.g. Tauri
+/// Crashes are always noted. A crash on the main thread before setup finished (e.g. Tauri
 /// couldn't make the window) gets the start-up message box.
+///
+/// The hook never waits on the logger: a crash inside the logger (while it holds its lock)
+/// would otherwise hang Nest instead of showing the box. It writes `startup-error.log`
+/// directly first, then hands the line to the logger from another thread, waiting at most a
+/// second for it.
 pub fn install_crash_hook() {
     let default = std::panic::take_hook();
     std::panic::set_hook(Box::new(move |info| {
-        log::error!("Nest stopped unexpectedly: {info}");
-        log::logger().flush();
+        let text = info.to_string();
+        let line = format!("Nest stopped unexpectedly: {text}");
+        if let Some(dir) = log_dir() {
+            append_note(&dir, &line);
+        }
+        eprintln!("{line}");
         let on_main = std::thread::current().name() == Some("main");
         if on_main && !STARTED.swap(true, Ordering::SeqCst) {
-            let text = info.to_string();
-            fail(&StartupError::new(step_for_crash(&text), text));
+            show_and_exit(&StartupError::new(step_for_crash(&text), text));
         }
+        log_without_waiting(line);
         default(info);
     }));
+}
+
+/// Pass a line to the logger from a helper thread; give up after a second.
+fn log_without_waiting(line: String) {
+    let (done, wait) = std::sync::mpsc::channel();
+    let spawned = std::thread::Builder::new().spawn(move || {
+        log::error!("{line}");
+        log::logger().flush();
+        let _ = done.send(()); // the hook may have stopped waiting: nothing to do then
+    });
+    if spawned.is_ok() {
+        let _ = wait.recv_timeout(std::time::Duration::from_secs(1));
+    }
 }
 
 /// Log the error, show the message box, open the log folder if asked, and quit.
@@ -124,11 +147,16 @@ pub fn fail(err: &StartupError) -> ! {
     STARTED.store(true, Ordering::SeqCst);
     log::error!("Nest couldn't start ({:?}): {}", err.step, err.detail);
     log::logger().flush();
-    eprintln!("Nest couldn't start ({:?}): {}", err.step, err.detail);
-    let dir = log_dir();
-    if let Some(dir) = &dir {
-        write_note(dir, err);
+    if let Some(dir) = log_dir() {
+        append_note(&dir, &note_line(err));
     }
+    eprintln!("{}", note_line(err));
+    show_and_exit(err)
+}
+
+/// The message box, then quit. Uses no logger and no lock it could wait on.
+fn show_and_exit(err: &StartupError) -> ! {
+    let dir = log_dir();
     let choice = rfd::MessageDialog::new()
         .set_level(rfd::MessageLevel::Error)
         .set_title("Nest")
@@ -153,14 +181,14 @@ pub fn fail(err: &StartupError) -> ! {
     std::process::exit(1)
 }
 
-/// One line per failed start, next to the log (in case the log plugin never started).
-fn write_note(dir: &std::path::Path, err: &StartupError) {
-    let line = format!(
-        "{} Nest couldn't start ({:?}): {}\n",
-        chrono::Local::now().to_rfc3339(),
-        err.step,
-        err.detail
-    );
+fn note_line(err: &StartupError) -> String {
+    format!("Nest couldn't start ({:?}): {}", err.step, err.detail)
+}
+
+/// One dated line in `startup-error.log`, next to the log (in case the log plugin never
+/// started, or is the thing that broke).
+fn append_note(dir: &std::path::Path, line: &str) {
+    let line = format!("{} {line}\n", chrono::Local::now().to_rfc3339());
     let written = std::fs::create_dir_all(dir).and_then(|_| {
         std::fs::OpenOptions::new()
             .create(true)
@@ -219,13 +247,24 @@ mod tests {
     fn note_is_appended_next_to_the_log() {
         let tmp = tempfile::tempdir().unwrap();
         let dir = tmp.path().join("logs");
-        write_note(
-            &dir,
-            &StartupError::new(Step::ConfigFolder, "permission denied"),
-        );
-        write_note(&dir, &StartupError::new(Step::Other, "second"));
+        let err = StartupError::new(Step::ConfigFolder, "permission denied");
+        append_note(&dir, &note_line(&err));
+        append_note(&dir, "Nest stopped unexpectedly: second");
         let text = std::fs::read_to_string(dir.join(NOTE_FILE)).unwrap();
         assert_eq!(text.lines().count(), 2);
-        assert!(text.contains("(ConfigFolder): permission denied"));
+        assert!(text.contains("Nest couldn't start (ConfigFolder): permission denied"));
+        assert!(text.contains("stopped unexpectedly: second"));
+    }
+
+    /// The crash hook's helpers never wait: not on the log folder's lock, not on the logger.
+    #[test]
+    fn crash_path_never_waits() {
+        let held = LOG_DIR.lock().unwrap();
+        let start = std::time::Instant::now();
+        assert_eq!(log_dir(), None, "a held lock means no folder, not a wait");
+        drop(held);
+        // Logging goes through a helper thread with a one-second limit.
+        log_without_waiting("test line".into());
+        assert!(start.elapsed() < std::time::Duration::from_secs(5));
     }
 }
