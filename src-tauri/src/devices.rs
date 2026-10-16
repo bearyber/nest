@@ -415,23 +415,27 @@ fn clamp(s: &mut String) {
     }
 }
 
-/// Remove our own leftover temp files (`.nest-*.tmp`) older than an hour: a sync app would
-/// otherwise upload them.
+/// Remove leftover temp files (`.nest-<32 hex>.tmp`, exactly what `write_json_atomic` makes)
+/// older than a day: a sync app would otherwise upload them. A day, not less, because this
+/// folder is shared: another computer's write still in progress (its clock may differ) is
+/// never touched. Nothing else is removed (see tidy.rs for the name rule).
 pub fn clean_temp_files(dir: &Path) {
     let Ok(entries) = fs::read_dir(dir) else {
         return;
     };
-    let hour_ago = SystemTime::now() - Duration::from_secs(3600);
+    let Some(day_ago) = SystemTime::now().checked_sub(Duration::from_secs(24 * 3600)) else {
+        return;
+    };
     for e in entries.flatten() {
         let name = e.file_name().to_string_lossy().into_owned();
-        if name.starts_with(".nest-") && name.ends_with(".tmp") {
-            let old = e
-                .metadata()
-                .and_then(|m| m.modified())
-                .is_ok_and(|t| t < hour_ago);
-            if old {
-                let _ = fs::remove_file(e.path());
-            }
+        if !crate::tidy::is_json_tmp(&name) {
+            continue;
+        }
+        let old = e
+            .metadata()
+            .is_ok_and(|m| m.is_file() && m.modified().is_ok_and(|t| t < day_ago));
+        if old {
+            let _ = fs::remove_file(e.path());
         }
     }
 }
@@ -670,54 +674,76 @@ pub fn incoming<'a>(
 pub enum Outcome {
     Applied,
     /// Can pass (a file busy or locked, the project file mid-sync, a folder offline): stays
-    /// waiting and is tried again at the next sync.
-    Later,
+    /// waiting and is tried again at the next sync. The plain reason is used if it gives up.
+    Later(String),
     /// Won't ever work; the reason goes back to the sender in plain words.
     Refused(String),
 }
+
+/// A request that has waited this long here is refused with the reason it waited, so one
+/// broken project can't hold its sender's bookkeeping back for ever.
+pub const GIVE_UP_AFTER_DAYS: i64 = 3;
+/// When this many dealt-with notes are still needed (see `note_needed`), waiting requests are
+/// refused straight away so the marks can move and the notes can go.
+pub const NOTES_PRESSURE: usize = MAX_HANDLED / 2;
+/// "First tried at" times kept for waiting requests (oldest dropped first).
+pub const MAX_WAITING_SINCE: usize = 2_000;
 
 /// One round of dealing with requests (see `handle_requests`).
 #[derive(Debug, Default)]
 pub struct Round<'a> {
     /// Applied this round, in order.
     pub applied: Vec<(&'a OtherDevice, &'a StatusRequest)>,
-    /// Per sender, the lowest request number still waiting (tried again next sync).
-    pub waiting: BTreeMap<String, u64>,
     /// Something was recorded (applied or refused).
     pub recorded: bool,
     /// Recording failed: the rest wait, and nothing more should be handled until a restart.
     pub stopped: bool,
 }
 
+/// What a round needs besides the requests: when each waiting request was first tried here
+/// (request id → RFC 3339, kept in settings), the time now, and whether too many notes are
+/// still needed (then nothing is left waiting).
+pub struct Waiting<'w> {
+    pub since: &'w mut BTreeMap<String, String>,
+    pub now: chrono::DateTime<chrono::Utc>,
+    pub pressure: bool,
+}
+
 /// Deal with `pending` (from `incoming`): each request on its own. One that can't be applied
 /// right now waits, and only later requests for the same project wait with it (so they keep
-/// their order); requests for other projects go ahead. `record` saves each dealt-with request
-/// straight away (before the next one), so a crash can never apply one twice; if it fails,
-/// everything after it waits.
+/// their order); requests for other projects go ahead. A request that has waited
+/// `GIVE_UP_AFTER_DAYS` (or any, under note pressure) is refused with its reason instead.
+/// `record` saves each dealt-with request straight away (before the next one), so a crash can
+/// never apply one twice; if it fails, everything after it waits.
 pub fn handle_requests<'a>(
     pending: Vec<(&'a OtherDevice, &'a StatusRequest)>,
+    waiting: Waiting<'_>,
     mut apply: impl FnMut(&OtherDevice, &StatusRequest) -> Outcome,
     mut record: impl FnMut(Handled) -> bool,
 ) -> Round<'a> {
     let mut round = Round::default();
     let mut blocked: HashSet<&str> = HashSet::new();
     for (from, req) in pending {
-        let wait = |round: &mut Round<'a>| {
-            let w = round
-                .waiting
-                .entry(from.device_id.clone())
-                .or_insert(req.seq);
-            *w = (*w).min(req.seq);
-        };
         if round.stopped || blocked.contains(req.project_id.as_str()) {
-            wait(&mut round);
             continue;
         }
         let (applied, reason) = match apply(from, req) {
-            Outcome::Later => {
-                blocked.insert(req.project_id.as_str());
-                wait(&mut round);
-                continue;
+            Outcome::Later(why) => {
+                let first = waiting
+                    .since
+                    .entry(req.id.clone())
+                    .or_insert_with(|| waiting.now.to_rfc3339());
+                let waited = chrono::DateTime::parse_from_rfc3339(first)
+                    .map(|t| waiting.now.signed_duration_since(t))
+                    .unwrap_or_default();
+                if waiting.pressure {
+                    (false, Some(format!("{why} Too many changes were waiting there, so this one wasn't made. Try again.")))
+                } else if waited >= chrono::Duration::days(GIVE_UP_AFTER_DAYS) {
+                    (false, Some(format!("{why} It still couldn't be done after {GIVE_UP_AFTER_DAYS} days, so nothing changed. Try again once it's sorted out there.")))
+                } else {
+                    blocked.insert(req.project_id.as_str());
+                    continue;
+                }
             }
             Outcome::Applied => (true, None),
             Outcome::Refused(r) => (false, Some(r)),
@@ -731,27 +757,69 @@ pub fn handle_requests<'a>(
         };
         if !record(note) {
             round.stopped = true;
-            wait(&mut round);
             continue;
         }
+        waiting.since.remove(&req.id);
         round.recorded = true;
         if applied {
             round.applied.push((from, req));
         }
     }
+    // Keep the "first tried" times bounded: forget the oldest beyond the cap (a request
+    // withdrawn by its sender leaves one behind until then).
+    while waiting.since.len() > MAX_WAITING_SINCE {
+        let oldest = waiting
+            .since
+            .iter()
+            .min_by(|a, b| a.1.cmp(b.1))
+            .map(|(k, _)| k.clone());
+        match oldest {
+            Some(k) => waiting.since.remove(&k),
+            None => break,
+        };
+    }
     round
 }
 
-/// After a round: move each sender's "dealt with up to" number as far as it safely goes,
-/// which is just below its lowest request still waiting. Returns whether anything moved.
+/// How far each sender's "dealt with up to" number may move: below the lowest request from it
+/// to this computer still not dealt with. Only senders whose list was read cleanly just now
+/// (folder online, no problem, downloaded) get a limit; for the rest nothing moves, because a
+/// missing or half-synced list proves nothing about what still waits.
+pub fn mark_limits(
+    own_id: &str,
+    others: &[OtherDevice],
+    online: bool,
+    marks: &BTreeMap<String, u64>,
+    handled: &[Handled],
+) -> BTreeMap<String, u64> {
+    if !online {
+        return BTreeMap::new();
+    }
+    others
+        .iter()
+        .filter(|d| d.problem.is_none() && !d.not_downloaded)
+        .map(|d| {
+            let lowest = incoming(own_id, std::slice::from_ref(d), marks, handled)
+                .first()
+                .map_or(u64::MAX, |(_, r)| r.seq);
+            (d.device_id.clone(), lowest)
+        })
+        .collect()
+}
+
+/// Move each sender's mark up to its highest dealt-with request below its limit (from
+/// `mark_limits`). Senders without a limit don't move. Returns whether anything moved.
 pub fn advance_marks(
     marks: &mut BTreeMap<String, u64>,
     handled: &[Handled],
-    waiting: &BTreeMap<String, u64>,
+    limits: &BTreeMap<String, u64>,
 ) -> bool {
     let mut moved = false;
     for h in handled {
-        if waiting.get(&h.from_device).is_some_and(|w| h.seq >= *w) {
+        let Some(limit) = limits.get(&h.from_device) else {
+            continue;
+        };
+        if h.seq >= *limit {
             continue;
         }
         let m = marks.entry(h.from_device.clone()).or_insert(0);
@@ -769,8 +837,14 @@ pub fn note_needed(h: &Handled, marks: &BTreeMap<String, u64>) -> bool {
     h.seq > marks.get(&h.from_device).copied().unwrap_or(0)
 }
 
-/// Keep at most `max` notes: drop the oldest ones the marks already cover first, and only
-/// then (never in practice: a sender holds at most `MAX_REQUESTS`) the oldest of the rest.
+/// Whether so many notes are still needed that waiting requests should be refused now.
+pub fn notes_pressure(handled: &[Handled], marks: &BTreeMap<String, u64>) -> bool {
+    handled.iter().filter(|h| note_needed(h, marks)).count() >= NOTES_PRESSURE
+}
+
+/// Keep at most `max` notes by dropping the oldest ones the marks already cover. A note still
+/// needed is never dropped (that could apply a request twice); `notes_pressure` keeps those
+/// few by refusing what waits, so the marks move.
 pub fn trim_handled(handled: &mut Vec<Handled>, marks: &BTreeMap<String, u64>, max: usize) {
     let mut extra = handled.len().saturating_sub(max);
     if extra == 0 {
@@ -784,9 +858,6 @@ pub fn trim_handled(handled: &mut Vec<Handled>, marks: &BTreeMap<String, u64>, m
             true
         }
     });
-    if extra > 0 {
-        handled.drain(..extra);
-    }
 }
 
 /// "This is this computer": where the old list was, per sender. Lists from before v0.6.1
@@ -804,6 +875,22 @@ pub fn taken_back_marks(
         *m = (*m).max(h.seq);
     }
     marks
+}
+
+/// "This is this computer": take the old list's request bookkeeping as it is. From now on
+/// only requests to the old id count, and its marks and notes say exactly which of those were
+/// dealt with; this install's own marks (for its short-lived id) would skip ones still waiting.
+/// This computer's own outgoing requests and their numbers are merged in.
+pub fn take_back_requests(s: &mut crate::settings::Settings, old: &OtherDevice) {
+    s.handled_seq = taken_back_marks(&old.handled, old.handled_upto.as_ref());
+    s.handled_requests = old.handled.clone();
+    s.waiting_since.clear();
+    for q in &old.requests {
+        if !s.outgoing_requests.iter().any(|o| o.id == q.id) {
+            s.outgoing_requests.push(q.clone());
+        }
+        s.request_seq = s.request_seq.max(q.seq);
+    }
 }
 
 /// What showing a project needs to know about requests: the latest one this computer is still
