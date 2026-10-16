@@ -5,10 +5,11 @@ use std::fs;
 use std::path::PathBuf;
 
 use nest_lib::devices::{
-    advance_marks, annotate, build_own, claim_allowed, devices_dir, handle_requests, incoming,
-    merge, note_needed, read_others, taken_back_marks, trim_handled, valid_device_id, valid_status,
-    write_own, DeviceFile, DeviceProject, Handled, OtherDevice, Outcome, StatusRequest, MAX_FILES,
-    MAX_FILE_BYTES,
+    advance_marks, annotate, build_own, claim_allowed, clean_temp_files, devices_dir,
+    handle_requests, incoming, mark_limits, merge, note_needed, notes_pressure, read_others,
+    take_back_requests, taken_back_marks, trim_handled, valid_device_id, valid_status, write_own,
+    DeviceFile, DeviceProject, Handled, OtherDevice, Outcome, StatusRequest, Waiting, MAX_FILES,
+    MAX_FILE_BYTES, NOTES_PRESSURE,
 };
 use nest_lib::index::ProjectRow;
 use nest_lib::plan::ClientValue;
@@ -464,27 +465,60 @@ fn too_many_requests_are_refused() {
 
 // ───────────── v0.6.1: retry instead of refuse; one stuck project never blocks the others ─────────────
 
-/// The Mac's side of requests, as Nest keeps it in settings: the per-sender mark and the notes.
-#[derive(Default)]
+/// The Mac's side of requests, as Nest keeps it in settings: the per-sender mark, the notes
+/// and when waiting requests were first tried.
 struct Owner {
     marks: std::collections::BTreeMap<String, u64>,
     notes: Vec<Handled>,
+    since: std::collections::BTreeMap<String, String>,
+    now: chrono::DateTime<chrono::Utc>,
     tried: Vec<String>,
 }
 
+impl Default for Owner {
+    fn default() -> Self {
+        Owner {
+            marks: Default::default(),
+            notes: vec![],
+            since: Default::default(),
+            now: chrono::DateTime::parse_from_rfc3339("2026-10-16T10:00:00Z")
+                .unwrap()
+                .with_timezone(&chrono::Utc),
+            tried: vec![],
+        }
+    }
+}
+
 impl Owner {
-    /// One sync, as `devices_cmd::sync_inner` runs it: deal with what's new, move the marks,
-    /// then forget notes the sender has dropped (only once the mark covers them).
+    /// One sync with the synced folder online.
     fn sync(
         &mut self,
         others: &[OtherDevice],
+        apply: impl FnMut(&StatusRequest) -> Outcome,
+    ) -> Vec<String> {
+        self.sync_at(others, true, apply)
+    }
+
+    /// One sync, as `devices_cmd::sync_inner` runs it: deal with what's new, move the marks
+    /// (only for lists read cleanly), then forget notes the sender has dropped (only once the
+    /// mark covers them).
+    fn sync_at(
+        &mut self,
+        others: &[OtherDevice],
+        online: bool,
         mut apply: impl FnMut(&StatusRequest) -> Outcome,
     ) -> Vec<String> {
         let pending = incoming(MAC, others, &self.marks, &self.notes);
         let mut recorded = vec![];
         let tried = &mut self.tried;
+        let waiting = Waiting {
+            since: &mut self.since,
+            now: self.now,
+            pressure: notes_pressure(&self.notes, &self.marks),
+        };
         let round = handle_requests(
             pending,
+            waiting,
             |_, r| {
                 tried.push(r.id.clone());
                 apply(r)
@@ -495,12 +529,13 @@ impl Owner {
             },
         );
         let applied: Vec<String> = round.applied.iter().map(|(_, r)| r.id.clone()).collect();
-        let waiting = round.waiting.clone();
         self.notes.extend(recorded);
-        advance_marks(&mut self.marks, &self.notes, &waiting);
+        let limits = mark_limits(MAC, others, online, &self.marks, &self.notes);
+        advance_marks(&mut self.marks, &self.notes, &limits);
         let marks = self.marks.clone();
         self.notes.retain(|h| {
             note_needed(h, &marks)
+                || !online
                 || others.iter().any(|d| {
                     d.device_id == h.from_device && d.requests.iter().any(|r| r.id == h.id)
                 })
@@ -514,6 +549,10 @@ fn pc_sends(dir: &std::path::Path, requests: Vec<StatusRequest>) -> Vec<OtherDev
     pc.requests = requests;
     write_own(dir, &pc, &mut None).unwrap();
     read_others(dir, MAC, &mut HashMap::new())
+}
+
+fn later() -> Outcome {
+    Outcome::Later("On MacBook: the project file is open in another app.".into())
 }
 
 /// A busy project file (a sync app or antivirus holding it) leaves the request waiting; the
@@ -532,23 +571,28 @@ fn busy_file_waits_then_applies_next_sync() {
         let file = file.clone();
         move |r: &StatusRequest| {
             if busy {
-                return Outcome::Later; // "The process cannot access the file…"
+                return later(); // "The process cannot access the file…"
             }
             match nest_lib::manifest::update_status(&file, &r.project_id, &r.status) {
                 Ok(()) => Outcome::Applied,
-                Err(_) => Outcome::Later,
+                Err(e) => Outcome::Later(e),
             }
         }
     };
     assert!(mac.sync(&others, apply(true)).is_empty());
     assert!(mac.notes.is_empty(), "nothing recorded while it waits");
     assert_eq!(mac.marks.get(PC), None, "the mark doesn't move past it");
+    assert!(
+        mac.since.contains_key("r1"),
+        "when it was first tried is kept"
+    );
     assert!(fs::read_to_string(&file).unwrap().contains("\"active\""));
 
     assert_eq!(mac.sync(&others, apply(false)), ["r1"]);
     let text = fs::read_to_string(&file).unwrap();
     assert!(text.contains("\"done\"") && text.contains("\"extra\""));
     assert_eq!(mac.marks.get(PC), Some(&1));
+    assert!(mac.since.is_empty());
 
     // Synced again and again: never applied twice.
     for _ in 0..3 {
@@ -593,7 +637,7 @@ fn stuck_project_does_not_block_others_and_keeps_its_order() {
     let mut mac = Owner::default();
     let stuck = |r: &StatusRequest| {
         if r.project_id == "m1" {
-            Outcome::Later
+            later()
         } else {
             Outcome::Applied
         }
@@ -629,36 +673,91 @@ fn stuck_project_does_not_block_others_and_keeps_its_order() {
     assert!(mac.sync(&stale, fine).is_empty());
 }
 
-/// A request that waits only holds back its own sender's mark; another computer's mark
-/// carries on.
+/// Review fix 1: #5 waits, #6 is applied; Nest restarts (no lists in memory) and the first
+/// sync runs before the synced folder is there, or reads the PC's list broken or not
+/// downloaded. The mark must not jump over #5: the next good sync still applies it.
 #[test]
-fn waiting_holds_back_only_its_own_senders_mark() {
-    let notes = vec![
-        Handled {
-            id: "a".into(),
-            from_device: PC.into(),
-            seq: 5,
-            applied: true,
-            reason: None,
-        },
-        Handled {
-            id: "b".into(),
-            from_device: "other".into(),
-            seq: 9,
-            applied: true,
-            reason: None,
-        },
+fn restart_with_the_folder_missing_never_skips_a_waiting_request() {
+    let (_tmp, dir) = shared();
+    let reqs = vec![
+        req("r5", 5, MAC, "m1", "done"),
+        req("r6", 6, MAC, "m2", "done"),
     ];
-    let mut marks = std::collections::BTreeMap::new();
-    let waiting = [(PC.to_string(), 4)].into();
-    assert!(advance_marks(&mut marks, &notes, &waiting));
-    assert_eq!(marks.get(PC), None);
-    assert_eq!(marks.get("other"), Some(&9));
+    let others = pc_sends(&dir, reqs.clone());
+    let mut mac = Owner::default();
+    let stuck = |r: &StatusRequest| {
+        if r.project_id == "m1" {
+            later()
+        } else {
+            Outcome::Applied
+        }
+    };
+    assert_eq!(mac.sync(&others, stuck), ["r6"]);
+    assert_eq!(mac.marks.get(PC), None);
+
+    // Restart: the folder isn't mounted yet, so no lists at all.
+    let fine = |_: &StatusRequest| Outcome::Applied;
+    assert!(mac.sync_at(&[], false, fine).is_empty());
+    assert_eq!(mac.marks.get(PC), None, "nothing moves while offline");
+    // Online, but the PC's list is broken (last good copy unknown after a restart) or still
+    // a cloud placeholder.
+    let mut broken = others.clone();
+    broken[0].requests.clear();
+    broken[0].problem = Some("half-synced".into());
+    assert!(mac.sync(&broken, fine).is_empty());
+    let mut placeholder = others.clone();
+    placeholder[0].requests.clear();
+    placeholder[0].not_downloaded = true;
+    assert!(mac.sync(&placeholder, fine).is_empty());
+    assert_eq!(mac.marks.get(PC), None, "an unclear list proves nothing");
+
+    // The list arrives: #5 is applied, #6 isn't applied again.
+    assert_eq!(mac.sync(&others, fine), ["r5"]);
+    assert_eq!(mac.marks.get(PC), Some(&6));
 }
 
-/// Trimming old notes keeps the ones still needed (above their sender's mark).
+/// Review fix 2: a request that can't be done for 3 days is refused with the reason it
+/// waited, so the mark moves on.
 #[test]
-fn trimming_keeps_needed_notes() {
+fn a_request_waiting_three_days_is_refused_with_its_reason() {
+    let (_tmp, dir) = shared();
+    let others = pc_sends(
+        &dir,
+        vec![
+            req("r1", 1, MAC, "m1", "done"),
+            req("r2", 2, MAC, "m2", "done"),
+        ],
+    );
+    let mut mac = Owner::default();
+    let stuck = |r: &StatusRequest| {
+        if r.project_id == "m1" {
+            Outcome::Later("That project's file couldn't be read on MacBook.".into())
+        } else {
+            Outcome::Applied
+        }
+    };
+    assert_eq!(mac.sync(&others, stuck), ["r2"]);
+    mac.now += chrono::Duration::days(2);
+    assert!(mac.sync(&others, stuck).is_empty());
+    assert!(
+        mac.notes.iter().all(|h| h.id != "r1"),
+        "still waiting at 2 days"
+    );
+
+    mac.now += chrono::Duration::days(1);
+    assert!(mac.sync(&others, stuck).is_empty());
+    let r1 = mac.notes.iter().find(|h| h.id == "r1").expect("refused");
+    assert!(!r1.applied);
+    let reason = r1.reason.as_deref().unwrap();
+    assert!(reason.contains("couldn't be read on MacBook") && reason.contains("3 days"));
+    assert_eq!(mac.marks.get(PC), Some(&2));
+    assert!(mac.since.is_empty());
+}
+
+/// Review fix 2: when too many notes are still needed, what waits is refused straight away
+/// (with a reason) so the mark can move; trimming never drops a needed note.
+#[test]
+fn note_pressure_refuses_what_waits_and_trimming_keeps_needed_notes() {
     let note = |id: &str, seq| Handled {
         id: id.into(),
         from_device: PC.into(),
@@ -668,38 +767,97 @@ fn trimming_keeps_needed_notes() {
     };
     let mut notes = vec![note("a", 1), note("b", 7), note("c", 2), note("d", 8)];
     let marks = [(PC.to_string(), 2)].into();
-    trim_handled(&mut notes, &marks, 2);
+    trim_handled(&mut notes, &marks, 1);
     let ids: Vec<&str> = notes.iter().map(|h| h.id.as_str()).collect();
-    assert_eq!(ids, ["b", "d"]);
+    assert_eq!(ids, ["b", "d"], "needed notes stay, even over the cap");
+
+    let (_tmp, dir) = shared();
+    let others = pc_sends(&dir, vec![req("r1", 1, MAC, "m1", "done")]);
+    let mut mac = Owner {
+        notes: (0..NOTES_PRESSURE as u64)
+            .map(|i| note(&format!("n{i}"), 100 + i))
+            .collect(),
+        ..Owner::default()
+    };
+    assert!(mac.sync(&others, |_| later()).is_empty());
+    let r1 = mac.notes.iter().find(|h| h.id == "r1").expect("refused");
+    assert!(r1.reason.as_deref().unwrap().contains("Too many changes"));
 }
 
-/// "This is this computer" takes back the old list's marks, not its highest number, so a
-/// request it left waiting is still applied; a list from before v0.6.1 (no marks) falls back
-/// to its highest number (it dealt with requests strictly in order).
+/// Review fix 4: "This is this computer" takes the old list's marks and notes as they are.
+/// This install's own mark for the PC (10, from its short-lived id) must not hide #7, which
+/// the old list left waiting.
 #[test]
-fn taking_a_list_back_keeps_waiting_requests_waiting() {
+fn taking_a_list_back_keeps_its_waiting_requests() {
     let (_tmp, dir) = shared();
-    let mut mac = build_own(MAC, "MacBook", &[], "t");
-    mac.handled = vec![Handled {
-        id: "r2".into(),
+    let mut old = build_own(MAC, "MacBook", &[], "t");
+    old.handled = vec![Handled {
+        id: "r8".into(),
         from_device: PC.into(),
-        seq: 2,
+        seq: 8,
         applied: true,
         reason: None,
     }];
-    mac.handled_upto = Some([(PC.to_string(), 0)].into());
-    write_own(&dir, &mac, &mut None).unwrap();
+    old.handled_upto = Some([(PC.to_string(), 6)].into());
+    write_own(&dir, &old, &mut None).unwrap();
     let back = read_others(&dir, PC, &mut HashMap::new());
-    let m = taken_back_marks(&back[0].handled, back[0].handled_upto.as_ref());
-    assert_eq!(m.get(PC), Some(&0), "r1 (waiting) will still be applied");
 
-    let old = serde_json::json!({
+    let mut s = nest_lib::settings::Settings::default();
+    s.handled_seq.insert(PC.into(), 10);
+    s.waiting_since
+        .insert("x".into(), "2026-10-01T00:00:00Z".into());
+    take_back_requests(&mut s, &back[0]);
+    assert_eq!(s.handled_seq.get(PC), Some(&6));
+    assert_eq!(s.handled_requests.len(), 1);
+    assert!(s.waiting_since.is_empty());
+
+    let pc = pc_sends(
+        &dir,
+        vec![
+            req("r7", 7, MAC, "m1", "done"),
+            req("r8", 8, MAC, "m2", "done"),
+        ],
+    );
+    let got: Vec<&str> = incoming(MAC, &pc, &s.handled_seq, &s.handled_requests)
+        .iter()
+        .map(|(_, r)| r.id.as_str())
+        .collect();
+    assert_eq!(got, ["r7"], "#7 still applied, #8 not again");
+
+    // A list from before v0.6.1 (no marks): it dealt with requests strictly in order.
+    let older = serde_json::json!({
         "schema": 1, "deviceId": MAC, "name": "MacBook", "os": "macos", "updatedAt": "t",
         "projects": [], "requests": [],
         "handled": [{"id": "r2", "fromDevice": PC, "seq": 2, "applied": true}]
     });
-    let old: DeviceFile = serde_json::from_value(old).unwrap();
-    assert_eq!(old.handled_upto, None);
-    let m = taken_back_marks(&old.handled, old.handled_upto.as_ref());
+    let older: DeviceFile = serde_json::from_value(older).unwrap();
+    assert_eq!(older.handled_upto, None);
+    let m = taken_back_marks(&older.handled, older.handled_upto.as_ref());
     assert_eq!(m.get(PC), Some(&2));
+}
+
+/// Review fix 8: only Nest's own `.nest-<32 hex>.tmp` files older than a day go; another
+/// computer's write in progress (or a lookalike) stays.
+#[test]
+fn only_old_nest_temp_files_are_cleaned_from_the_shared_folder() {
+    let (_tmp, dir) = shared();
+    fs::create_dir_all(&dir).unwrap();
+    let id = "0123456789abcdef0123456789abcdef";
+    let age = |name: &str, hours: u64| {
+        let p = dir.join(name);
+        let f = fs::File::create(&p).unwrap();
+        f.set_modified(std::time::SystemTime::now() - std::time::Duration::from_secs(hours * 3600))
+            .unwrap();
+        p
+    };
+    let old = age(&format!(".nest-{id}.tmp"), 30);
+    let recent = age(&format!(".nest-{}.tmp", id.replace('0', "1")), 2);
+    let lookalike = age(".nest-backup.tmp", 30);
+    clean_temp_files(&dir);
+    assert!(!old.exists());
+    assert!(
+        recent.exists(),
+        "two hours old: maybe another computer's write"
+    );
+    assert!(lookalike.exists());
 }

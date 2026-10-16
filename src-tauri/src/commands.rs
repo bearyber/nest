@@ -962,14 +962,9 @@ pub fn dismiss_archive_suggestion(state: State<'_, AppState>, key: String) -> Ap
     })
 }
 
-/// What happened to a request from another computer to change a project's status.
-pub(crate) enum RequestOutcome {
-    Applied,
-    /// Try again at the next sync (e.g. the jobs folder is offline right now).
-    Later,
-    /// Won't ever work; the reason goes back to the sender in plain words.
-    Refused(String),
-}
+/// What happened to a request from another computer to change a project's status (see
+/// `devices::Outcome`: `Later` carries the plain reason it waits, used if it gives up).
+pub(crate) use crate::devices::Outcome as RequestOutcome;
 
 /// Apply another computer's "mark done / active" to one of this computer's projects. The
 /// project is found by its id in this computer's index only (never by a path from the other
@@ -983,8 +978,9 @@ pub(crate) fn apply_request(
     if !matches!(status, "active" | "done") {
         return RequestOutcome::Refused("That request wasn't valid.".into());
     }
+    let busy = || RequestOutcome::Later(format!("Nest on {here} was busy."));
     let Ok(_one) = state.status_lock.lock() else {
-        return RequestOutcome::Later;
+        return busy();
     };
     // While the list is being (re)built (first launch, a deleted index, a rescan running), a
     // project that isn't found yet may still be there: wait instead of refusing.
@@ -1000,7 +996,11 @@ pub(crate) fn apply_request(
         Ok(Ok(None)) if list_ready => {
             return RequestOutcome::Refused(format!("That project isn't on {here} any more."))
         }
-        _ => return RequestOutcome::Later,
+        _ => {
+            return RequestOutcome::Later(format!(
+                "Nest on {here} was still building its project list."
+            ))
+        }
     };
     if located.paths.len() > 1 {
         return RequestOutcome::Refused(format!(
@@ -1013,12 +1013,19 @@ pub(crate) fn apply_request(
         .find(|(_, online)| *online)
         .map(|(p, _)| p.clone())
     else {
-        return RequestOutcome::Later; // its jobs folder is offline right now
+        return RequestOutcome::Later(format!("That project's jobs folder was offline on {here}."));
     };
     let (roots, archived) = match state.settings.lock() {
         Ok(s) => (s.scan_roots(), is_archived(&s, &path)),
-        Err(_) => return RequestOutcome::Later,
+        Err(_) => return busy(),
     };
+    // Not there right now (mid-sync, a network blip, moved and not rescanned yet): wait.
+    // There, but outside the jobs folders: that won't fix itself.
+    if !path.join(plan::MANIFEST_NAME).is_file() {
+        return RequestOutcome::Later(format!(
+            "That project's folder or project file wasn't there on {here}."
+        ));
+    }
     if !is_openable(&path, &roots) {
         return RequestOutcome::Refused(format!(
             "That project isn't inside {here}'s jobs folders any more."
@@ -1029,7 +1036,7 @@ pub(crate) fn apply_request(
     }
     let Some(id) = located.id else {
         // Its project file couldn't be read at the last look (a sync app mid-download?).
-        return RequestOutcome::Later;
+        return RequestOutcome::Later(format!("That project's file couldn't be read on {here}."));
     };
     if let Err(e) = manifest::update_status(&path.join(plan::MANIFEST_NAME), &id, status) {
         // Retry what can pass: the file was changed just now, it's busy or locked (a sync app
@@ -1040,7 +1047,7 @@ pub(crate) fn apply_request(
         let lasting = e.contains("different project");
         if !lasting {
             log::info!("request will be retried: {e}");
-            return RequestOutcome::Later;
+            return RequestOutcome::Later(format!("On {here}: {e}"));
         }
         return RequestOutcome::Refused(e);
     }

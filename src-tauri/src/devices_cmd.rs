@@ -15,7 +15,7 @@ use serde::Serialize;
 use tauri::{AppHandle, Emitter, Manager, State};
 use tauri_plugin_dialog::DialogExt;
 
-use crate::commands::{lock, AppState, RequestOutcome};
+use crate::commands::{lock, AppState};
 use crate::devices::{self, DeviceFile, OtherDevice, SyncedFolder};
 use crate::error::{AppError, AppResult};
 use crate::index::ChangedBy;
@@ -160,8 +160,15 @@ fn sync_inner(state: &AppState, dev: &Devices) -> bool {
     if !paused {
         let pending =
             devices::incoming(&id, &all, &settings.handled_seq, &settings.handled_requests);
+        let mut since = settings.waiting_since.clone();
+        let waiting = devices::Waiting {
+            since: &mut since,
+            now: chrono::Utc::now(),
+            pressure: devices::notes_pressure(&settings.handled_requests, &settings.handled_seq),
+        };
         let round = devices::handle_requests(
             pending,
+            waiting,
             |from, req| {
                 if forgotten(&from.device_id) {
                     return devices::Outcome::Refused(format!(
@@ -169,11 +176,7 @@ fn sync_inner(state: &AppState, dev: &Devices) -> bool {
                         from.name
                     ));
                 }
-                match crate::commands::apply_request(state, &req.project_id, &req.status, &name) {
-                    RequestOutcome::Applied => devices::Outcome::Applied,
-                    RequestOutcome::Later => devices::Outcome::Later,
-                    RequestOutcome::Refused(r) => devices::Outcome::Refused(r),
-                }
+                crate::commands::apply_request(state, &req.project_id, &req.status, &name)
             },
             |note| {
                 let saved = crate::settings_cmd::edit_settings_quietly(state, move |s| {
@@ -212,16 +215,26 @@ fn sync_inner(state: &AppState, dev: &Devices) -> bool {
                 },
             ));
         }
-        // Move each sender's "dealt with up to" number to just below what still waits.
-        let moves = state.settings.lock().is_ok_and(|s| {
+        // Move each sender's "dealt with up to" number to just below its lowest request still
+        // waiting, only for senders whose list was read cleanly just now; and keep when each
+        // waiting request was first tried.
+        let moves = |s: &Settings| {
             let mut marks = s.handled_seq.clone();
-            devices::advance_marks(&mut marks, &s.handled_requests, &round.waiting)
-        });
-        if moves {
-            let waiting = round.waiting.clone();
-            if let Err(e) = crate::settings_cmd::edit_settings_quietly(state, move |s| {
+            let limits =
+                devices::mark_limits(&id, &all, online, &s.handled_seq, &s.handled_requests);
+            devices::advance_marks(&mut marks, &s.handled_requests, &limits)
+        };
+        let needed = state
+            .settings
+            .lock()
+            .is_ok_and(|s| moves(&s) || s.waiting_since != since);
+        if needed {
+            if let Err(e) = crate::settings_cmd::edit_settings_quietly(state, |s| {
+                let limits =
+                    devices::mark_limits(&id, &all, online, &s.handled_seq, &s.handled_requests);
                 let notes = s.handled_requests.clone();
-                devices::advance_marks(&mut s.handled_seq, &notes, &waiting);
+                devices::advance_marks(&mut s.handled_seq, &notes, &limits);
+                s.waiting_since = since;
                 Ok(())
             }) {
                 // Harmless: the notes still stop anything being applied twice.
@@ -625,17 +638,11 @@ pub fn devices_claim(app: AppHandle, device_id: String) -> AppResult<DevicesView
         .lock()
         .ok()
         .and_then(|rt| {
-            rt.cache.get(&id).map(|d| {
-                (
-                    d.name.clone(),
-                    d.updated_at.clone(),
-                    devices::taken_back_marks(&d.handled, d.handled_upto.as_ref()),
-                    d.handled.clone(),
-                    d.requests.clone(),
-                )
-            })
+            rt.cache
+                .get(&id)
+                .map(|d| (d.name.clone(), d.updated_at.clone(), d.clone()))
         });
-    let Some((name, updated_at, old_marks, old_handled, old_requests)) = found else {
+    let Some((name, updated_at, old)) = found else {
         return Err(AppError::new(
             "That computer isn't in the synced folder any more",
         ));
@@ -648,20 +655,9 @@ pub fn devices_claim(app: AppHandle, device_id: String) -> AppResult<DevicesView
             s.device_name = Some(n);
         }
         s.forgotten_devices.retain(|d| d != &id);
-        // Take back what that computer had dealt with and was waiting on, so requests are
-        // neither applied twice nor lost.
-        // Its marks only (not its highest number): requests it left waiting stay waiting.
-        for (from, upto) in &old_marks {
-            let seq = s.handled_seq.entry(from.clone()).or_insert(0);
-            *seq = (*seq).max(*upto);
-        }
-        s.handled_requests = old_handled.clone();
-        for q in &old_requests {
-            if !s.outgoing_requests.iter().any(|o| o.id == q.id) {
-                s.outgoing_requests.push(q.clone());
-            }
-            s.request_seq = s.request_seq.max(q.seq);
-        }
+        // Take back what that computer had dealt with and was waiting on, as it is, so
+        // requests are neither applied twice nor lost.
+        devices::take_back_requests(s, &old);
         Ok(())
     })?;
     if let Ok(mut rt) = app.state::<AppState>().devices.runtime.lock() {
