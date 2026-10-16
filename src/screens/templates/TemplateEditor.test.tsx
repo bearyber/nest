@@ -40,6 +40,7 @@ vi.mock("@tauri-apps/api/webview", () => ({
   getCurrentWebview: () => ({ onDragDropEvent: async () => () => {} }),
 }));
 
+import { runEditStep } from "../../lib/editMenu";
 import TemplateEditor from "./TemplateEditor";
 
 const VIDEO: Template = {
@@ -299,5 +300,129 @@ describe("TemplateEditor (one screen)", () => {
     expect(contents).toContain("Client: {client}");
     expect(contents).toContain("Project name: {name}");
     expect(await screen.findByText("Project info.txt")).toBeTruthy();
+  });
+
+  describe("the order New Project asks the questions in", () => {
+    const realFromPoint = document.elementFromPoint;
+    afterEach(() => {
+      document.elementFromPoint = realFromPoint;
+    });
+    const line = () => screen.getByLabelText("What New Project asks");
+    const askButton = (name: string) => within(line()).getByRole("button", { name });
+    const ask = (name: string) => askButton(name).closest("[data-ask-key]") as HTMLElement;
+    const asked = () =>
+      screen
+        .getByLabelText("What New Project asks")
+        .textContent!.replace("New Project will ask for:", "")
+        .replace("Add a question", "");
+
+    /** Drag a name along the bottom line onto the left or right half of another. */
+    function drag(name: string, onto: string, side: "left" | "right") {
+      const from = ask(name);
+      const to = ask(onto);
+      to.getBoundingClientRect = () => ({
+        left: 100,
+        width: 100,
+        top: 0,
+        height: 20,
+        right: 200,
+        bottom: 20,
+        x: 100,
+        y: 0,
+        toJSON: () => ({}),
+      });
+      document.elementFromPoint = () => to.firstElementChild ?? to;
+      const x = side === "left" ? 110 : 190;
+      fireEvent.pointerDown(within(from).getByRole("button"), {
+        button: 0,
+        clientX: 0,
+        clientY: 10,
+        pointerId: 1,
+      });
+      fireEvent.pointerMove(from, {
+        buttons: 1,
+        clientX: x,
+        clientY: 10,
+        pointerId: 1,
+      });
+      fireEvent.pointerUp(from, { clientX: x, clientY: 10, pointerId: 1 });
+    }
+
+    it("drag a name to ask it earlier; it's saved in that order", async () => {
+      open();
+      drag("Has graphics", "Project name", "left");
+      expect(asked()).toBe("Client,Has graphics,Project name,Start date");
+      const saved = await saveAndGet();
+      expect(saved.fields.map((f) => f.key)).toEqual(["client", "graphics", "name", "start"]);
+    });
+
+    it("keeps the client question first", () => {
+      open();
+      // The client question can't be picked up.
+      expect(ask("Client").querySelector("[aria-hidden]")).toBeNull();
+      drag("Client", "Start date", "right");
+      expect(asked()).toBe("Client,Project name,Start date,Has graphics");
+      // Nothing goes before it...
+      drag("Start date", "Client", "left");
+      expect(asked()).toBe("Client,Project name,Start date,Has graphics");
+      // ...but right after it is fine.
+      drag("Start date", "Client", "right");
+      expect(asked()).toBe("Client,Start date,Project name,Has graphics");
+    });
+
+    it("a click without moving still opens the question", () => {
+      open();
+      fireEvent.pointerDown(askButton("Start date"), {
+        button: 0,
+        clientX: 5,
+        clientY: 5,
+      });
+      fireEvent.pointerUp(ask("Start date"), { clientX: 5, clientY: 5 });
+      fireEvent.click(askButton("Start date"));
+      expect(screen.getByLabelText("Question: Start date")).toBeTruthy();
+    });
+
+    it("one reorder is one undo step", () => {
+      open();
+      drag("Has graphics", "Project name", "left");
+      drag("Start date", "Client", "right");
+      expect(asked()).toBe("Client,Start date,Has graphics,Project name");
+      fireEvent.keyDown(window, { key: "z", ctrlKey: true, metaKey: true });
+      expect(asked()).toBe("Client,Has graphics,Project name,Start date");
+      fireEvent.keyDown(window, { key: "z", ctrlKey: true, metaKey: true });
+      expect(asked()).toBe("Client,Project name,Start date,Has graphics");
+    });
+  });
+
+  describe("Edit → Undo / Redo in the macOS menu bar", () => {
+    const realExec = document.execCommand;
+    afterEach(() => {
+      document.execCommand = realExec;
+    });
+
+    it("steps the editor's history when the focus isn't in a text box", () => {
+      open();
+      fireEvent.click(row("01_BRIEF"));
+      fireEvent.keyDown(tree().parentElement!, { key: "Delete" });
+      expect(screen.queryByText("01_BRIEF")).toBeNull();
+      (document.activeElement as HTMLElement | null)?.blur();
+      act(() => runEditStep("undo"));
+      expect(screen.getByText("01_BRIEF")).toBeTruthy();
+      act(() => runEditStep("redo"));
+      expect(screen.queryByText("01_BRIEF")).toBeNull();
+    });
+
+    it("in a text box it's the text's own undo, and the editor's history stays", () => {
+      const exec = vi.fn(() => true);
+      document.execCommand = exec;
+      open();
+      fireEvent.click(row("01_BRIEF"));
+      fireEvent.keyDown(tree().parentElement!, { key: "Delete" });
+      expect(screen.queryByText("01_BRIEF")).toBeNull();
+      screen.getByLabelText("Template name").focus();
+      act(() => runEditStep("undo"));
+      expect(exec).toHaveBeenCalledWith("undo");
+      expect(screen.queryByText("01_BRIEF")).toBeNull();
+    });
   });
 });

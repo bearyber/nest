@@ -520,3 +520,46 @@
   box-shadow: var(--shadow-popover);
   font-size: var(--text-small);
 }
+
+/* A question in "New Project will ask for": drag one to change the order (the client stays first). */
+.ask {
+  display: inline-flex;
+  align-items: center;
+  padding: 1px 2px;
+  border-radius: 3px;
+}
+
+/* A small grip shows up on hover: these can be dragged. */
+.grip {
+  width: 5px;
+  height: 9px;
+  margin-right: 2px;
+  background-image: radial-gradient(circle, var(--text-secondary) 0.8px, transparent 1px);
+  background-size: 2.5px 3px;
+  opacity: 0;
+  cursor: grab;
+  transition: opacity 120ms ease;
+}
+
+.askMovable:hover .grip {
+  opacity: 0.8;
+}
+
+.asksDragging,
+.asksDragging * {
+  cursor: grabbing;
+}
+
+.askDropBefore {
+  box-shadow: inset 2px 0 0 var(--accent);
+}
+
+.askDropAfter {
+  box-shadow: inset -2px 0 0 var(--accent);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .grip {
+    transition: none;
+  }
+}
