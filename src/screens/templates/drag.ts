@@ -15,12 +15,26 @@ interface Options {
   canDrop: (id: string, target: string) => boolean;
   /** May things go inside `target`? Otherwise only before/after. */
   canHoldInside?: (target: string) => boolean;
+  /** May `id` go `where` `target`? (E.g. nothing before the client question.) */
+  canPlace?: (target: string, where: DropWhere) => boolean;
   onDrop: (id: string, target: DropTarget) => void;
+  /** "y" for a list (before = above), "x" for a line of words (before = to the left). */
+  axis?: "x" | "y";
+  /** Pressing on these doesn't start a drag. */
+  ignore?: string;
 }
 
 const THRESHOLD = 4;
 
-export function usePointerDrag({ attr, canDrop, canHoldInside, onDrop }: Options) {
+export function usePointerDrag({
+  attr,
+  canDrop,
+  canHoldInside,
+  canPlace,
+  onDrop,
+  axis = "y",
+  ignore = "input, select, button, textarea",
+}: Options) {
   const [dragging, setDragging] = useState<string | null>(null);
   const [target, setTarget] = useState<DropTarget | null>(null);
   const start = useRef<{ id: string; x: number; y: number; moved: boolean; el: HTMLElement; pointer: number } | null>(null);
@@ -31,15 +45,16 @@ export function usePointerDrag({ attr, canDrop, canHoldInside, onDrop }: Options
     const over = el?.getAttribute(attr);
     if (!el || !over || !canDrop(id, over)) return null;
     const r = el.getBoundingClientRect();
-    const f = (y - r.top) / r.height;
+    const f = axis === "x" ? (x - r.left) / r.width : (y - r.top) / r.height;
     const inside = canHoldInside?.(over) ?? false;
     const where: DropWhere = inside ? (f < 0.3 ? "before" : f > 0.7 ? "after" : "inside") : f < 0.5 ? "before" : "after";
+    if (canPlace && !canPlace(over, where)) return null;
     return { id: over, where };
   };
 
   const handlers = (id: string) => ({
     onPointerDown: (e: React.PointerEvent) => {
-      if (e.button !== 0 || (e.target as HTMLElement).closest("input, select, button, textarea")) return;
+      if (e.button !== 0 || (e.target as HTMLElement).closest(ignore)) return;
       // The pointer is only captured once it really moves, so a plain click still reaches what
       // was clicked (a name: click it to change it).
       start.current = { id, x: e.clientX, y: e.clientY, moved: false, el: e.currentTarget as HTMLElement, pointer: e.pointerId };

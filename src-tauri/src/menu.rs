@@ -14,6 +14,11 @@ pub const TOGGLE_INSPECTOR: &str = "toggle-inspector";
 /// Handled in Rust (opens the Settings window), not sent to the UI.
 pub const SETTINGS: &str = "open-settings";
 pub const CHECK_UPDATES: &str = "check-updates";
+/// Edit → Undo / Redo. Our own items (not the predefined ones, which only reach text fields), so
+/// the template editor can step its own history too. The UI decides: in a text box it's the
+/// text's undo, otherwise the editor's (see `src/lib/editMenu.ts`).
+pub const UNDO: &str = "undo";
+pub const REDO: &str = "redo";
 
 pub fn build<R: Runtime>(app: &AppHandle<R>) -> tauri::Result<Menu<R>> {
     let item = |id: &str, label: &str, accel: Option<&str>| {
@@ -49,8 +54,8 @@ pub fn build<R: Runtime>(app: &AppHandle<R>) -> tauri::Result<Menu<R>> {
 
     // The standard Edit items keep Cmd+C / Cmd+V working in text fields on macOS.
     let edit = SubmenuBuilder::new(app, "Edit")
-        .undo()
-        .redo()
+        .item(&item(UNDO, "Undo", Some("CmdOrCtrl+Z"))?)
+        .item(&item(REDO, "Redo", Some("CmdOrCtrl+Shift+Z"))?)
         .separator()
         .cut()
         .copy()

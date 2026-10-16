@@ -8,6 +8,7 @@ import {
   formatName,
   indent,
   isBlank,
+  moveField,
   outdent,
   parentOf,
   parseName,
@@ -43,6 +44,8 @@ import {
   type Template,
   type TemplatePreview,
 } from "../../lib/types";
+import { EDIT_STEP_EVENT, type EditStep } from "../../lib/editMenu";
+import { usePointerDrag } from "./drag";
 import { blankLabel } from "./NameField";
 import QuestionSettings from "./QuestionSettings";
 import Tree, { fileRow, ROOT, rowOrder, visibleNames, type RowId } from "./Tree";
@@ -509,12 +512,46 @@ export default function TemplateEditor({ sourceKey, mode, start, note, onClose, 
     }
   };
 
+  // ── The order New Project asks the questions in (drag a name along the bottom line) ──
+
+  const isClient = (key: string) => draft.fields.find((f) => f.key === key)?.type === "client";
+  /** When a drag ended: the click that may follow it isn't a click on the name. */
+  const draggedAt = useRef(0);
+  const askDrag = usePointerDrag({
+    attr: "data-ask-key",
+    axis: "x",
+    ignore: "input, select, textarea",
+    canDrop: (key, target) => key !== target && !isClient(key),
+    canPlace: (target, where) => !(where === "before" && isClient(target)),
+    onDrop: (key, t) => {
+      draggedAt.current = Date.now();
+      const where = t.where === "after" ? "after" : "before";
+      change((d) => {
+        const fields = moveField(d.draft.fields, key, t.id, where);
+        return fields === d.draft.fields ? d : { ...d, draft: { ...d.draft, fields } };
+      });
+    },
+  });
+
   // ── Keyboard ──
+
+  // Edit → Undo / Redo in the macOS menu bar, when the focus isn't in a text box.
+  useEffect(() => {
+    const onStep = (e: Event) => {
+      const step = (e as CustomEvent<EditStep>).detail;
+      setRenaming(null);
+      setHist((h) => (step === "redo" ? redo(h) : undo(h)));
+    };
+    window.addEventListener(EDIT_STEP_EVENT, onStep);
+    return () => window.removeEventListener(EDIT_STEP_EVENT, onStep);
+  }, []);
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       const mod = isMac() ? e.metaKey : e.ctrlKey;
-      if (mod && !isTyping(e.target) && (e.key === "z" || e.key === "Z" || e.key === "y")) {
+      // On macOS the menu bar's Undo / Redo own Cmd+Z and Shift+Cmd+Z (see above).
+      const menuOwned = isMac() && (e.key === "z" || e.key === "Z");
+      if (mod && !menuOwned && !isTyping(e.target) && (e.key === "z" || e.key === "Z" || e.key === "y")) {
         e.preventDefault();
         setRenaming(null);
         if (e.key === "y" || e.shiftKey) setHist((h) => redo(h));
@@ -569,6 +606,8 @@ export default function TemplateEditor({ sourceKey, mode, start, note, onClose, 
   };
 
   const asks = draft.fields;
+  // Only worth dragging with two questions that can move (the client one stays first).
+  const canReorder = asks.filter((f) => f.type !== "client").length > 1;
 
   return (
     <div className={styles.scrim}>
@@ -668,22 +707,44 @@ export default function TemplateEditor({ sourceKey, mode, start, note, onClose, 
           />
         )}
 
-        <div className={styles.asks} aria-label="What New Project asks">
+        <div
+          className={`${styles.asks} ${askDrag.dragging ? styles.asksDragging : ""}`}
+          aria-label="What New Project asks"
+        >
           <span className={styles.asksLabel}>New Project will ask for:</span>
           {asks.length === 0 && <span>nothing yet</span>}
-          {asks.map((f, i) => (
-            <span key={f.key}>
-              <button
-                type="button"
-                className={`${styles.askLink} ${blank?.key === f.key ? styles.askOpen : ""}`}
-                aria-expanded={blank?.key === f.key}
-                onClick={() => setBlank(blank?.key === f.key ? null : { key: f.key })}
+          {asks.map((f, i) => {
+            const movable = f.type !== "client" && canReorder;
+            const drop = askDrag.target?.id === f.key ? askDrag.target.where : null;
+            return (
+              <span
+                key={f.key}
+                data-ask-key={f.key}
+                className={[
+                  styles.ask,
+                  movable ? styles.askMovable : "",
+                  askDrag.dragging === f.key ? styles.dragging : "",
+                  drop === "before" ? styles.askDropBefore : drop === "after" ? styles.askDropAfter : "",
+                ].join(" ")}
+                {...(movable ? askDrag.handlers(f.key) : {})}
               >
-                {blankLabel(f.key, draft.fields)}
-              </button>
-              {i < asks.length - 1 && ","}
-            </span>
-          ))}
+                {movable && <span className={styles.grip} aria-hidden="true" />}
+                <button
+                  type="button"
+                  className={`${styles.askLink} ${blank?.key === f.key ? styles.askOpen : ""}`}
+                  aria-expanded={blank?.key === f.key}
+                  title={movable ? "Click to change. Drag to ask it earlier or later." : undefined}
+                  onClick={() => {
+                    if (Date.now() - draggedAt.current < 400) return;
+                    setBlank(blank?.key === f.key ? null : { key: f.key });
+                  }}
+                >
+                  {blankLabel(f.key, draft.fields)}
+                </button>
+                {i < asks.length - 1 && ","}
+              </span>
+            );
+          })}
           <span className={styles.spacer} />
           <Button
             onClick={() => {

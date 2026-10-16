@@ -168,3 +168,27 @@ export function redo<T>(h: History<T>): History<T> {
   if (h.future.length === 0) return h;
   return { past: [...h.past, h.present], present: h.future[0], future: h.future.slice(1) };
 }
+
+// ───────────────────────── Question order ─────────────────────────
+
+/** Move question `key` to just before / after `target`: the order New Project asks them in.
+ *  The client question stays first (it can't move, and nothing goes before it). The same array
+ *  back means nothing changed. */
+export function moveField<F extends { key: string; type: string }>(
+  fields: F[],
+  key: string,
+  target: string,
+  where: "before" | "after",
+): F[] {
+  const moving = fields.find((f) => f.key === key);
+  if (!moving || moving.type === "client" || key === target) return fields;
+  const rest = fields.filter((f) => f.key !== key);
+  let at = rest.findIndex((f) => f.key === target);
+  if (at < 0) return fields;
+  if (where === "after") at += 1;
+  let firstFree = 0;
+  while (firstFree < rest.length && rest[firstFree].type === "client") firstFree += 1;
+  at = Math.max(at, firstFree);
+  const next = [...rest.slice(0, at), moving, ...rest.slice(at)];
+  return next.every((f, i) => f === fields[i]) ? fields : next;
+}

@@ -5,6 +5,7 @@ import FirstRun from "./screens/FirstRun";
 import Main from "./screens/Main";
 import Settings from "./screens/Settings";
 import { getSettings, materialApplied } from "./lib/commands";
+import { listenEditMenu } from "./lib/editMenu";
 import { applyTheme } from "./lib/theme";
 
 /** The same page serves two windows; the Settings window is the one labelled "settings". */
@@ -47,6 +48,9 @@ export default function App() {
       .catch(() => {});
     return () => unlisten?.();
   }, [syncSettings]);
+
+  // Edit → Undo / Redo in the macOS menu bar, for whichever window has focus.
+  useEffect(() => listenEditMenu(), []);
 
   if (isSettingsWindow) return <Settings />;
   if (firstRun === null) return null;

@@ -6,6 +6,7 @@ import {
   formatName,
   indent,
   insertBlank,
+  moveField,
   makeBlank,
   outdent,
   parentOf,
@@ -139,5 +140,27 @@ describe("undo history", () => {
     for (let i = 1; i <= UNDO_STEPS + 20; i++) h = record(h, i);
     expect(h.past.length).toBe(UNDO_STEPS);
     expect(h.past[0]).toBe(20);
+  });
+});
+
+describe("moveField (the order New Project asks)", () => {
+  const f = (key: string, type = "text") => ({ key, type });
+  const fields = [f("client", "client"), f("name"), f("start"), f("graphics")];
+  const keys = (fs: { key: string }[]) => fs.map((x) => x.key);
+
+  it("moves a question before or after another", () => {
+    expect(keys(moveField(fields, "graphics", "name", "before"))).toEqual(["client", "graphics", "name", "start"]);
+    expect(keys(moveField(fields, "name", "graphics", "after"))).toEqual(["client", "start", "graphics", "name"]);
+  });
+
+  it("keeps the client question first", () => {
+    expect(moveField(fields, "client", "graphics", "after")).toBe(fields);
+    expect(keys(moveField(fields, "start", "client", "before"))).toEqual(["client", "start", "name", "graphics"]);
+  });
+
+  it("returns the same list when nothing changes", () => {
+    expect(moveField(fields, "name", "start", "before")).toBe(fields);
+    expect(moveField(fields, "name", "name", "after")).toBe(fields);
+    expect(moveField(fields, "missing", "name", "after")).toBe(fields);
   });
 });
