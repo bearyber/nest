@@ -17,6 +17,7 @@ import {
 } from "../lib/commands";
 import { hasCommandKey, isMac } from "../lib/platform";
 import { formatBytes } from "../lib/search";
+import { alsoMakeFor } from "../lib/alsoMake";
 import { defaultsFor } from "../lib/tree";
 import {
   canCreate,
@@ -377,6 +378,8 @@ export default function NewProjectSheet({ initialTemplate, onClose, onCreated }:
   const whereError = !jobsRoot || !!rootMissing || codeIssues.some((i) => i.level === "error");
   const showWhere = whereOpen || whereError;
   const kitPlaces = clientFilePlaces(template?.tree);
+  const alsoMake = template ? alsoMakeFor(template.fields, template.tree) : [];
+  const alsoMakeKeys = new Set(alsoMake.map((a) => a.field.key));
 
   const footHint = copying ? (
     `Copying ${plan?.kit?.client ? `${plan.kit.client}'s files` : "files"}… ${percent}%. Cancel undoes everything.`
@@ -418,7 +421,9 @@ export default function NewProjectSheet({ initialTemplate, onClose, onCreated }:
                   Project
                 </h3>
                 <div className={styles.card}>
-                  {template.fields.map((f) =>
+                  {template.fields
+                    .filter((f) => !alsoMakeKeys.has(f.key))
+                    .map((f) =>
                     f.type === "client" ? (
                       <Fragment key={`${templateId}:${f.key}`}>
                         {!noClient && (
@@ -480,6 +485,26 @@ export default function NewProjectSheet({ initialTemplate, onClose, onCreated }:
                   )}
                 </div>
               </section>
+
+              {alsoMake.length > 0 && (
+                <section className={styles.group} aria-labelledby="group-also-make">
+                  <h3 id="group-also-make" className={styles.groupTitle}>
+                    Also make:
+                  </h3>
+                  <div className={styles.alsoMake}>
+                    {alsoMake.map((a) => (
+                      <label key={`${templateId}:${a.field.key}`} className={styles.check} title={a.paths.join("\n")}>
+                        <input
+                          type="checkbox"
+                          checked={values[a.field.key] === true}
+                          onChange={(e) => setValue(a.field.key, e.target.checked)}
+                        />
+                        {a.label}
+                      </label>
+                    ))}
+                  </div>
+                </section>
+              )}
 
               <section className={styles.group} aria-label="Where it goes">
                 <div className={styles.summary}>
