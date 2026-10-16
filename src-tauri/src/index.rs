@@ -363,29 +363,52 @@ CREATE TABLE roots (
 impl Index {
     /// Open (or create) the index. A damaged file or an old schema is moved aside
     /// (`index.sqlite.broken-<date>`, never deleted) and rebuilt: it's a cache, the project
-    /// folders are the truth. If even that fails, Nest runs on a list kept in memory (rebuilt
-    /// by the rescan at start), so a broken cache never stops Nest from starting.
+    /// folders are the truth. Nest runs on a list kept in memory for this session (rebuilt by
+    /// the rescan at start) when the file was made by a newer Nest (left as it is, so going
+    /// back to that version finds it), or when it can't be moved aside completely (a new file
+    /// next to an old journal would get that journal rolled into it). A broken cache never
+    /// stops Nest from starting.
     pub fn open(path: &Path) -> Result<Index, String> {
+        Ok(Self::open_with(path, |from, to| fs::rename(from, to)))
+    }
+
+    fn open_with(path: &Path, rename: impl Fn(&Path, &Path) -> std::io::Result<()>) -> Index {
+        let in_memory = |why: String| {
+            log::error!("{why}; using a project list in memory this time");
+            Self::open_in_memory()
+        };
         let first = match Self::try_open(path) {
-            Ok(index) => return Ok(index),
-            Err(e) => e,
+            Ok(index) => return index,
+            Err(OpenError::Newer(v)) => {
+                return in_memory(format!(
+                    "the project index {} was made by a newer Nest (schema {v}); left as it is",
+                    path.display()
+                ))
+            }
+            Err(OpenError::Broken(e)) => e,
         };
         log::warn!("the project index can't be used ({first}); keeping it aside and rebuilding");
-        match set_aside(path) {
+        match set_aside(path, rename) {
             Ok(kept) => {
                 for p in kept {
                     log::warn!("kept the old project index as {}", p.display());
                 }
             }
-            Err(e) => log::error!("couldn't move the old project index aside: {e}"),
+            Err(e) => {
+                return in_memory(format!(
+                    "couldn't move the old project index {} aside ({e})",
+                    path.display()
+                ))
+            }
         }
-        Ok(Self::try_open(path).unwrap_or_else(|e| {
-            log::error!(
-                "couldn't create a new project index at {} ({e}); using one in memory this time",
+        match Self::try_open(path) {
+            Ok(index) => index,
+            Err(OpenError::Newer(v)) => in_memory(format!("unexpected schema {v}")),
+            Err(OpenError::Broken(e)) => in_memory(format!(
+                "couldn't create a new project index at {} ({e})",
                 path.display()
-            );
-            Self::open_in_memory()
-        }))
+            )),
+        }
     }
 
     pub fn open_in_memory() -> Index {
@@ -393,19 +416,21 @@ impl Index {
         Self::init(conn).expect("fresh schema")
     }
 
-    fn try_open(path: &Path) -> Result<Index, String> {
-        let conn = Connection::open(path).map_err(|e| e.to_string())?;
+    fn try_open(path: &Path) -> Result<Index, OpenError> {
+        let broken = |e: rusqlite::Error| OpenError::Broken(e.to_string());
+        let conn = Connection::open(path).map_err(broken)?;
         let version: i32 = conn
             .pragma_query_value(None, "user_version", |r| r.get(0))
-            .map_err(|e| e.to_string())?;
+            .map_err(broken)?;
         match version {
-            0 => Self::init(conn).map_err(|e| e.to_string()),
+            0 => Self::init(conn).map_err(broken),
             SCHEMA_VERSION => {
                 conn.query_row("SELECT count(*) FROM projects", [], |r| r.get::<_, i64>(0))
-                    .map_err(|e| e.to_string())?;
+                    .map_err(broken)?;
                 Ok(Index { conn })
             }
-            other => Err(format!("schema version {other}")),
+            newer if newer > SCHEMA_VERSION => Err(OpenError::Newer(newer)),
+            older => Err(OpenError::Broken(format!("old schema version {older}"))),
         }
     }
 
@@ -729,15 +754,28 @@ impl Index {
     }
 }
 
+/// Why the index file couldn't be used.
+enum OpenError {
+    /// Made by a newer Nest (schema version): left alone.
+    Newer(i32),
+    /// Damaged, or an older schema: moved aside and rebuilt.
+    Broken(String),
+}
+
 /// Rename a damaged index (and SQLite's side files next to it) to
 /// `<name>.broken-<date-time>[-n]<suffix>`. Nothing is deleted. Returns the new paths.
-fn set_aside(path: &Path) -> std::io::Result<Vec<PathBuf>> {
+/// Side files go first and the main file last: on any error the caller must not create a new
+/// index at `path` (an old journal left there would be rolled into it).
+fn set_aside(
+    path: &Path,
+    rename: impl Fn(&Path, &Path) -> std::io::Result<()>,
+) -> std::io::Result<Vec<PathBuf>> {
     let Some(name) = path.file_name().map(|n| n.to_string_lossy().into_owned()) else {
         return Ok(vec![]);
     };
     let dir = path.parent().unwrap_or(Path::new("."));
     let stamp = chrono::Local::now().format("%Y-%m-%d-%H%M%S").to_string();
-    let suffixes = ["", "-journal", "-wal", "-shm"];
+    let suffixes = ["-journal", "-wal", "-shm", ""];
     let present = |s: &str| dir.join(format!("{name}{s}")).symlink_metadata().is_ok();
     // One free base name for the whole set, so the side files stay matched.
     let mut base = format!("{name}.broken-{stamp}");
@@ -752,7 +790,7 @@ fn set_aside(path: &Path) -> std::io::Result<Vec<PathBuf>> {
     let mut kept = Vec::new();
     for s in suffixes.iter().filter(|s| present(s)) {
         let to = dir.join(format!("{base}{s}"));
-        fs::rename(dir.join(format!("{name}{s}")), &to)?;
+        rename(&dir.join(format!("{name}{s}")), &to)?;
         kept.push(to);
     }
     Ok(kept)
@@ -973,7 +1011,7 @@ mod tests {
         let path = tmp.path().join(INDEX_FILE);
         {
             let conn = Connection::open(&path).unwrap();
-            conn.execute_batch("CREATE TABLE junk (x); PRAGMA user_version = 99;")
+            conn.execute_batch("CREATE TABLE junk (x); PRAGMA user_version = 1;")
                 .unwrap();
         }
         let index = Index::open(&path).unwrap();
@@ -1037,9 +1075,9 @@ mod tests {
         fs::write(tmp.path().join("index.sqlite-wal"), "wal").unwrap();
         fs::write(tmp.path().join("index.sqlite-shm"), "shm").unwrap();
         fs::write(tmp.path().join("notes.txt"), "mine").unwrap();
-        let kept = set_aside(&path).unwrap();
+        let kept = set_aside(&path, |a, b| fs::rename(a, b)).unwrap();
         assert_eq!(kept.len(), 3, "{kept:?}");
-        let base = kept[0].to_string_lossy().into_owned();
+        let base = kept[2].to_string_lossy().into_owned();
         assert!(base.contains("index.sqlite.broken-"), "{base}");
         assert_eq!(fs::read_to_string(format!("{base}-wal")).unwrap(), "wal");
         assert_eq!(fs::read_to_string(format!("{base}-shm")).unwrap(), "shm");
@@ -1049,6 +1087,52 @@ mod tests {
             fs::read_to_string(tmp.path().join("notes.txt")).unwrap(),
             "mine"
         );
+    }
+
+    #[test]
+    fn side_file_that_wont_move_means_memory_and_no_new_file() {
+        let tmp = tempfile::tempdir().unwrap();
+        let path = tmp.path().join(INDEX_FILE);
+        fs::write(&path, "not a database at all").unwrap();
+        // An antivirus holds the journal: it can't be renamed.
+        let journal = tmp.path().join("index.sqlite-journal");
+        let rename = |from: &Path, to: &Path| {
+            if from.to_string_lossy().ends_with("-journal") {
+                Err(std::io::Error::from(std::io::ErrorKind::PermissionDenied))
+            } else {
+                fs::rename(from, to)
+            }
+        };
+        // (A folder stands in for the held journal: SQLite can't tidy it away while checking.)
+        fs::create_dir(&journal).unwrap();
+        let index = Index::open_with(&path, rename);
+        assert!(index.list().unwrap().is_empty());
+        // Nothing new was created at the index path: the damaged file is still exactly there.
+        assert_eq!(fs::read_to_string(&path).unwrap(), "not a database at all");
+        assert!(broken_copies(tmp.path()).is_empty());
+        assert!(journal.is_dir());
+    }
+
+    #[test]
+    fn index_from_a_newer_nest_is_left_alone() {
+        let tmp = tempfile::tempdir().unwrap();
+        let path = tmp.path().join(INDEX_FILE);
+        {
+            let conn = Connection::open(&path).unwrap();
+            conn.execute_batch("CREATE TABLE future (x); PRAGMA user_version = 99;")
+                .unwrap();
+        }
+        let before = fs::read(&path).unwrap();
+        let index = Index::open(&path).unwrap();
+        assert!(index.list().unwrap().is_empty(), "a working list in memory");
+        drop(index);
+        assert_eq!(fs::read(&path).unwrap(), before, "file untouched");
+        assert!(broken_copies(tmp.path()).is_empty());
+        let conn = Connection::open(&path).unwrap();
+        let v: i32 = conn
+            .pragma_query_value(None, "user_version", |r| r.get(0))
+            .unwrap();
+        assert_eq!(v, 99);
     }
 
     #[test]
