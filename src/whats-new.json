@@ -1,4 +1,11 @@
 {
+  "0.6.1": [
+    "New Project: a yes/no that only adds a folder now reads \"Also make: PRINT folder\"",
+    "Template editor: drag the questions to change their order, and Edit → Undo works on Mac",
+    "Marking a project done from your other computer now waits and retries when a file is busy",
+    "If Nest can't start, it now says why instead of closing",
+    "A quieter update bar, and lots of small safety fixes"
+  ],
   "0.6.0": [
     "Setup is now two steps: where your jobs go, and the folder you copy for every job",
     "Templates: drop a job folder to make a template, click one to change it",
