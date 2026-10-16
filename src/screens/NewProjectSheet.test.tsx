@@ -72,7 +72,7 @@ vi.mock("../lib/commands", () => ({
 vi.mock("@tauri-apps/api/event", () => ({ listen: vi.fn(async () => () => {}) }));
 
 import * as commands from "../lib/commands";
-import type { Issue, PlanKit } from "../lib/types";
+import type { Field, Issue, PlanKit, TreeEntry } from "../lib/types";
 import NewProjectSheet, { clientFilePlaces, shortPath } from "./NewProjectSheet";
 
 /** Plans like the stand-in above, plus these changes. Returns a way to go back. */
@@ -121,7 +121,7 @@ describe("NewProjectSheet", () => {
     expect(screen.getByText("Client")).toBeTruthy();
     expect(screen.queryByText("Billed to")).toBeNull();
     expect(screen.getByLabelText("Client code")).toBeTruthy();
-    const lookdev = screen.getByLabelText("Include look dev") as HTMLInputElement;
+    const lookdev = screen.getByLabelText("03_LOOKDEV folder") as HTMLInputElement;
     expect(lookdev.type).toBe("checkbox");
     expect(lookdev.checked).toBe(false);
     // Ratios are toggle chips; the template default (16x9) starts on.
@@ -295,6 +295,67 @@ describe("NewProjectSheet", () => {
     fireEvent.click(screen.getByRole("button", { name: "Choose a folder…" }));
     await waitFor(() => expect(commands.chooseClientKit).toHaveBeenCalledWith("VX", "Vertex Studio"));
     restore();
+  });
+});
+
+/** Opens the sheet with one template made of these fields and tree rules. */
+async function openWith(fields: Field[], tree: TreeEntry[]) {
+  const base = await vi.mocked(commands.newProjectContext)();
+  const tpl = { ...base.templates[0], fields: [base.templates[0].fields[1], ...fields], tree };
+  vi.mocked(commands.newProjectContext).mockResolvedValueOnce({ ...base, templates: [tpl] });
+  render(<NewProjectSheet onClose={() => {}} onCreated={() => {}} />);
+  await screen.findByLabelText(/^Artist/);
+}
+
+const bool = (key: string, label: string, def = false): Field => ({ key, label, type: "bool", default: def });
+
+describe("Also make:", () => {
+  it("shows a yes/no that makes a folder, labelled after the folder, unticked, with the path as tooltip", async () => {
+    await openWith([bool("print", "Includes print")], ["01_BRIEF", { name: "05_EXPORTS/PRINT", when: "print" }]);
+    expect(screen.getByText("Also make:")).toBeTruthy();
+    const box = screen.getByLabelText("PRINT folder") as HTMLInputElement;
+    expect(box.checked).toBe(false);
+    expect(box.closest("label")?.getAttribute("title")).toBe("05_EXPORTS/PRINT");
+    // Its own question is gone from the normal list.
+    expect(screen.queryByLabelText("Includes print")).toBeNull();
+    // Ticking sends it in the plan request.
+    fireEvent.click(box);
+    await waitFor(() => {
+      const last = vi.mocked(commands.planProject).mock.lastCall![0];
+      expect(last.values.print).toBe(true);
+    });
+  });
+
+  it("keeps the template's default (ticked stays ticked)", async () => {
+    await openWith([bool("print", "Includes print", true)], [{ name: "PRINT", when: "print" }]);
+    expect((screen.getByLabelText("PRINT folder") as HTMLInputElement).checked).toBe(true);
+  });
+
+  it("names several folders on one key", async () => {
+    await openWith([bool("print", "Includes print")], [
+      { name: "05_EXPORTS/PRINT", when: "print" },
+      { name: "06/PROOFS", when: "print" },
+    ]);
+    const box = screen.getByLabelText("PRINT and PROOFS folders");
+    expect(box.closest("label")?.getAttribute("title")).toBe("05_EXPORTS/PRINT\n06/PROOFS");
+  });
+
+  it("uses the question's label when the folder name has blanks", async () => {
+    await openWith([bool("print", "Includes print")], [{ name: "05/{artist}_PRINT", when: "print" }]);
+    expect(screen.getByLabelText("Includes print")).toBeTruthy();
+    expect(screen.getByText("Also make:")).toBeTruthy();
+  });
+
+  it("leaves a yes/no tied to no folder as a normal question, with no group", async () => {
+    await openWith([bool("rush", "Rush job")], ["01_BRIEF"]);
+    expect(screen.getByLabelText("Rush job")).toBeTruthy();
+    expect(screen.queryByText("Also make:")).toBeNull();
+  });
+
+  it("leaves a !key rule as a normal question", async () => {
+    await openWith([bool("print", "Skip print")], [{ name: "05/NO_PRINT", when: "!print" }]);
+    expect(screen.getByLabelText("Skip print")).toBeTruthy();
+    expect(screen.queryByText("Also make:")).toBeNull();
   });
 });
 
