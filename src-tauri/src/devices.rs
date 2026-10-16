@@ -700,21 +700,77 @@ pub struct Round<'a> {
     pub stopped: bool,
 }
 
-/// What a round needs besides the requests: when each waiting request was first tried here
-/// (request id → RFC 3339, kept in settings), the time now, and whether too many notes are
-/// still needed (then nothing is left waiting).
+/// A request waiting here: which computer sent it, its number, and when it started waiting
+/// (RFC 3339, this computer's clock). Kept in settings by request id. An entry written as a
+/// plain time (the first v0.6.1 builds) still reads; it just doesn't hold a mark back.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "camelCase", from = "WaitingRaw")]
+pub struct WaitingSince {
+    pub since: String,
+    pub from_device: String,
+    pub seq: u64,
+}
+
+#[derive(Deserialize)]
+#[serde(untagged)]
+enum WaitingRaw {
+    Full {
+        #[serde(default)]
+        since: String,
+        #[serde(default, rename = "fromDevice")]
+        from_device: String,
+        #[serde(default)]
+        seq: u64,
+    },
+    Time(String),
+}
+
+impl From<WaitingRaw> for WaitingSince {
+    fn from(raw: WaitingRaw) -> Self {
+        match raw {
+            WaitingRaw::Full {
+                since,
+                from_device,
+                seq,
+            } => WaitingSince {
+                since,
+                from_device,
+                seq,
+            },
+            WaitingRaw::Time(since) => WaitingSince {
+                since,
+                ..Default::default()
+            },
+        }
+    }
+}
+
+/// A waiting entry this old is forgotten: by then the request was either refused (after
+/// `GIVE_UP_AFTER_DAYS`) or its sender withdrew it.
+pub const FORGET_WAITING_AFTER_DAYS: i64 = 14;
+
+/// What a round needs besides the requests: the requests waiting here (request id → entry,
+/// kept in settings), the time now, and whether too many notes are still needed (then
+/// nothing is left waiting).
 pub struct Waiting<'w> {
-    pub since: &'w mut BTreeMap<String, String>,
+    pub since: &'w mut BTreeMap<String, WaitingSince>,
     pub now: chrono::DateTime<chrono::Utc>,
     pub pressure: bool,
 }
 
+fn waited(entry: &WaitingSince, now: chrono::DateTime<chrono::Utc>) -> chrono::Duration {
+    chrono::DateTime::parse_from_rfc3339(&entry.since)
+        .map(|t| now.signed_duration_since(t))
+        .unwrap_or_default()
+}
+
 /// Deal with `pending` (from `incoming`): each request on its own. One that can't be applied
 /// right now waits, and only later requests for the same project wait with it (so they keep
-/// their order); requests for other projects go ahead. A request that has waited
-/// `GIVE_UP_AFTER_DAYS` (or any, under note pressure) is refused with its reason instead.
-/// `record` saves each dealt-with request straight away (before the next one), so a crash can
-/// never apply one twice; if it fails, everything after it waits.
+/// their order; their wait starts then too). A request that has waited `GIVE_UP_AFTER_DAYS`
+/// (or any, under note pressure) is refused with its reason instead, and so is the rest of
+/// that project's chain behind it that has waited as long. `record` saves each dealt-with
+/// request straight away (before the next one), so a crash can never apply one twice; if it
+/// fails, everything after it waits.
 pub fn handle_requests<'a>(
     pending: Vec<(&'a OtherDevice, &'a StatusRequest)>,
     waiting: Waiting<'_>,
@@ -723,22 +779,28 @@ pub fn handle_requests<'a>(
 ) -> Round<'a> {
     let mut round = Round::default();
     let mut blocked: HashSet<&str> = HashSet::new();
+    let now = waiting.now;
     for (from, req) in pending {
+        let entry = || WaitingSince {
+            since: now.to_rfc3339(),
+            from_device: from.device_id.clone(),
+            seq: req.seq,
+        };
         if round.stopped || blocked.contains(req.project_id.as_str()) {
+            waiting.since.entry(req.id.clone()).or_insert_with(entry);
             continue;
         }
         let (applied, reason) = match apply(from, req) {
             Outcome::Later(why) => {
-                let first = waiting
-                    .since
-                    .entry(req.id.clone())
-                    .or_insert_with(|| waiting.now.to_rfc3339());
-                let waited = chrono::DateTime::parse_from_rfc3339(first)
-                    .map(|t| waiting.now.signed_duration_since(t))
-                    .unwrap_or_default();
+                let e = waiting.since.entry(req.id.clone()).or_insert_with(entry);
+                if e.from_device.is_empty() {
+                    // An entry from the first v0.6.1 builds: fill in who sent it.
+                    e.from_device = from.device_id.clone();
+                    e.seq = req.seq;
+                }
                 if waiting.pressure {
                     (false, Some(format!("{why} Too many changes were waiting there, so this one wasn't made. Try again.")))
-                } else if waited >= chrono::Duration::days(GIVE_UP_AFTER_DAYS) {
+                } else if waited(e, now) >= chrono::Duration::days(GIVE_UP_AFTER_DAYS) {
                     (false, Some(format!("{why} It still couldn't be done after {GIVE_UP_AFTER_DAYS} days, so nothing changed. Try again once it's sorted out there.")))
                 } else {
                     blocked.insert(req.project_id.as_str());
@@ -757,6 +819,7 @@ pub fn handle_requests<'a>(
         };
         if !record(note) {
             round.stopped = true;
+            waiting.since.entry(req.id.clone()).or_insert_with(entry);
             continue;
         }
         waiting.since.remove(&req.id);
@@ -765,13 +828,16 @@ pub fn handle_requests<'a>(
             round.applied.push((from, req));
         }
     }
-    // Keep the "first tried" times bounded: forget the oldest beyond the cap (a request
-    // withdrawn by its sender leaves one behind until then).
+    // Keep the entries bounded: forget very old ones (refused or withdrawn by now), then the
+    // oldest beyond the cap.
+    waiting
+        .since
+        .retain(|_, e| waited(e, now) < chrono::Duration::days(FORGET_WAITING_AFTER_DAYS));
     while waiting.since.len() > MAX_WAITING_SINCE {
         let oldest = waiting
             .since
             .iter()
-            .min_by(|a, b| a.1.cmp(b.1))
+            .min_by(|a, b| a.1.since.cmp(&b.1.since))
             .map(|(k, _)| k.clone());
         match oldest {
             Some(k) => waiting.since.remove(&k),
@@ -781,28 +847,65 @@ pub fn handle_requests<'a>(
     round
 }
 
+/// Which senders' lists can be trusted for moving marks this sync: read cleanly (folder
+/// online, no problem, downloaded) and not older than the newest list already read from that
+/// computer. `newest` (sender → RFC 3339 `updatedAt`, kept in settings) is updated. An old
+/// copy (a Drive version restore, a conflict, a stale local copy) may lack a request that's
+/// still waiting, so it never moves a mark.
+pub fn trusted_lists(
+    others: &[OtherDevice],
+    online: bool,
+    newest: &mut BTreeMap<String, String>,
+) -> HashSet<String> {
+    let mut out = HashSet::new();
+    if !online {
+        return out;
+    }
+    let parse = |s: &str| chrono::DateTime::parse_from_rfc3339(s).ok();
+    for d in others
+        .iter()
+        .filter(|d| d.problem.is_none() && !d.not_downloaded)
+    {
+        let Some(t) = parse(&d.updated_at) else {
+            continue; // can't tell how old it is
+        };
+        match newest.get(&d.device_id).and_then(|s| parse(s)) {
+            Some(seen) if t < seen => continue,
+            _ => {}
+        }
+        newest.insert(d.device_id.clone(), d.updated_at.clone());
+        out.insert(d.device_id.clone());
+    }
+    out
+}
+
 /// How far each sender's "dealt with up to" number may move: below the lowest request from it
-/// to this computer still not dealt with. Only senders whose list was read cleanly just now
-/// (folder online, no problem, downloaded) get a limit; for the rest nothing moves, because a
-/// missing or half-synced list proves nothing about what still waits.
+/// to this computer still not dealt with, and below any request from it this computer has
+/// seen waiting (even if this copy of the list doesn't have it). Only senders in `trusted`
+/// (see `trusted_lists`) get a limit; for the rest nothing moves, because a missing,
+/// half-synced or old list proves nothing about what still waits.
 pub fn mark_limits(
     own_id: &str,
     others: &[OtherDevice],
-    online: bool,
+    trusted: &HashSet<String>,
     marks: &BTreeMap<String, u64>,
     handled: &[Handled],
+    waiting: &BTreeMap<String, WaitingSince>,
 ) -> BTreeMap<String, u64> {
-    if !online {
-        return BTreeMap::new();
-    }
     others
         .iter()
-        .filter(|d| d.problem.is_none() && !d.not_downloaded)
+        .filter(|d| trusted.contains(&d.device_id))
         .map(|d| {
             let lowest = incoming(own_id, std::slice::from_ref(d), marks, handled)
                 .first()
                 .map_or(u64::MAX, |(_, r)| r.seq);
-            (d.device_id.clone(), lowest)
+            let seen = waiting
+                .values()
+                .filter(|w| w.from_device == d.device_id)
+                .map(|w| w.seq)
+                .min()
+                .unwrap_or(u64::MAX);
+            (d.device_id.clone(), lowest.min(seen))
         })
         .collect()
 }

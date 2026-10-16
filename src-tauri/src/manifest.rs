@@ -23,13 +23,22 @@ pub fn write_json_atomic(path: &Path, value: &Json, hidden: bool) -> io::Result<
         file.write_all(&bytes)?;
         file.sync_all()?;
         drop(file);
-        fs::rename(&tmp, path)?;
-        sync_dir(dir)
+        fs::rename(&tmp, path)
     })();
     if result.is_err() {
         let _ = fs::remove_file(&tmp);
+        return result;
     }
-    result
+    // The new file is in place. Making the rename itself survive a power cut is best effort:
+    // failing that doesn't undo the write, so callers (e.g. a status change from another
+    // computer) must see it as done, not retry or refuse it as "nothing changed".
+    if let Err(e) = sync_dir(dir) {
+        log::warn!(
+            "saved {}, but couldn't flush its folder: {e}",
+            path.display()
+        );
+    }
+    Ok(())
 }
 
 /// A project file is a few KB. Anything bigger than this isn't one of Nest's, so it's never

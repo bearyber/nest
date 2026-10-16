@@ -7,9 +7,9 @@ use std::path::PathBuf;
 use nest_lib::devices::{
     advance_marks, annotate, build_own, claim_allowed, clean_temp_files, devices_dir,
     handle_requests, incoming, mark_limits, merge, note_needed, notes_pressure, read_others,
-    take_back_requests, taken_back_marks, trim_handled, valid_device_id, valid_status, write_own,
-    DeviceFile, DeviceProject, Handled, OtherDevice, Outcome, StatusRequest, Waiting, MAX_FILES,
-    MAX_FILE_BYTES, NOTES_PRESSURE,
+    take_back_requests, taken_back_marks, trim_handled, trusted_lists, valid_device_id,
+    valid_status, write_own, DeviceFile, DeviceProject, Handled, OtherDevice, Outcome,
+    StatusRequest, Waiting, WaitingSince, MAX_FILES, MAX_FILE_BYTES, NOTES_PRESSURE,
 };
 use nest_lib::index::ProjectRow;
 use nest_lib::plan::ClientValue;
@@ -470,7 +470,8 @@ fn too_many_requests_are_refused() {
 struct Owner {
     marks: std::collections::BTreeMap<String, u64>,
     notes: Vec<Handled>,
-    since: std::collections::BTreeMap<String, String>,
+    since: std::collections::BTreeMap<String, WaitingSince>,
+    newest: std::collections::BTreeMap<String, String>,
     now: chrono::DateTime<chrono::Utc>,
     tried: Vec<String>,
 }
@@ -481,6 +482,7 @@ impl Default for Owner {
             marks: Default::default(),
             notes: vec![],
             since: Default::default(),
+            newest: Default::default(),
             now: chrono::DateTime::parse_from_rfc3339("2026-10-16T10:00:00Z")
                 .unwrap()
                 .with_timezone(&chrono::Utc),
@@ -530,7 +532,8 @@ impl Owner {
         );
         let applied: Vec<String> = round.applied.iter().map(|(_, r)| r.id.clone()).collect();
         self.notes.extend(recorded);
-        let limits = mark_limits(MAC, others, online, &self.marks, &self.notes);
+        let trusted = trusted_lists(others, online, &mut self.newest);
+        let limits = mark_limits(MAC, others, &trusted, &self.marks, &self.notes, &self.since);
         advance_marks(&mut self.marks, &self.notes, &limits);
         let marks = self.marks.clone();
         self.notes.retain(|h| {
@@ -545,7 +548,12 @@ impl Owner {
 }
 
 fn pc_sends(dir: &std::path::Path, requests: Vec<StatusRequest>) -> Vec<OtherDevice> {
-    let mut pc = build_own(PC, "Studio PC", &[], "t");
+    pc_sends_at(dir, requests, &chrono::Utc::now().to_rfc3339())
+}
+
+/// The PC's list as saved at `at` (its `updatedAt`).
+fn pc_sends_at(dir: &std::path::Path, requests: Vec<StatusRequest>, at: &str) -> Vec<OtherDevice> {
+    let mut pc = build_own(PC, "Studio PC", &[], at);
     pc.requests = requests;
     write_own(dir, &pc, &mut None).unwrap();
     read_others(dir, MAC, &mut HashMap::new())
@@ -804,8 +812,14 @@ fn taking_a_list_back_keeps_its_waiting_requests() {
 
     let mut s = nest_lib::settings::Settings::default();
     s.handled_seq.insert(PC.into(), 10);
-    s.waiting_since
-        .insert("x".into(), "2026-10-01T00:00:00Z".into());
+    s.waiting_since.insert(
+        "x".into(),
+        WaitingSince {
+            since: "2026-10-01T00:00:00Z".into(),
+            from_device: PC.into(),
+            seq: 3,
+        },
+    );
     take_back_requests(&mut s, &back[0]);
     assert_eq!(s.handled_seq.get(PC), Some(&6));
     assert_eq!(s.handled_requests.len(), 1);
@@ -860,4 +874,94 @@ fn only_old_nest_temp_files_are_cleaned_from_the_shared_folder() {
         "two hours old: maybe another computer's write"
     );
     assert!(lookalike.exists());
+}
+
+/// Re-review W1: #5 waits; then an OLD copy of the PC's list (a Drive version restore, a
+/// conflict) reads cleanly without #5. The mark must not jump past #5: when the current list
+/// is back, #5 is still applied. Both guards are checked on their own.
+#[test]
+fn an_old_copy_of_the_list_never_skips_a_waiting_request() {
+    let (_tmp, dir) = shared();
+    let r5 = req("r5", 5, MAC, "m1", "done");
+    let r6 = req("r6", 6, MAC, "m2", "done");
+    let current = pc_sends_at(
+        &dir,
+        vec![r5.clone(), r6.clone()],
+        "2026-10-16T10:00:00+00:00",
+    );
+    let stuck = |r: &StatusRequest| {
+        if r.project_id == "m1" {
+            later()
+        } else {
+            Outcome::Applied
+        }
+    };
+    let fine = |_: &StatusRequest| Outcome::Applied;
+
+    // (b) The old copy is older than the list already read: not trusted.
+    let mut mac = Owner::default();
+    assert_eq!(mac.sync(&current, stuck), ["r6"]);
+    let old = pc_sends_at(&dir, vec![r6.clone()], "2026-10-15T10:00:00+00:00");
+    assert!(mac.sync(&old, fine).is_empty());
+    assert_eq!(mac.marks.get(PC), None, "an older list moves nothing");
+
+    // (a) Even if that copy looks newest (a restart forgot the times, or clocks differ),
+    // #5 was seen waiting here, so the mark stays below it.
+    mac.newest.clear();
+    let old_but_new_looking = pc_sends_at(&dir, vec![r6.clone()], "2026-10-17T10:00:00+00:00");
+    assert!(mac.sync(&old_but_new_looking, fine).is_empty());
+    assert_eq!(mac.marks.get(PC), None, "held below #5, which waits");
+
+    // The current list is back (newer again): #5 is applied, #6 not again.
+    let back = pc_sends_at(&dir, vec![r5, r6], "2026-10-18T10:00:00+00:00");
+    assert_eq!(mac.sync(&back, fine), ["r5"]);
+    assert_eq!(mac.marks.get(PC), Some(&6));
+}
+
+/// Re-review N1: requests held back behind a waiting one for the same project start waiting
+/// then too, so after 3 days the whole chain is refused together (not 3 days each).
+#[test]
+fn a_held_back_chain_is_refused_together() {
+    let (_tmp, dir) = shared();
+    let others = pc_sends(
+        &dir,
+        vec![
+            req("r1", 1, MAC, "m1", "done"),
+            req("r2", 2, MAC, "m1", "active"),
+            req("r3", 3, MAC, "m1", "done"),
+        ],
+    );
+    let mut mac = Owner::default();
+    assert!(mac.sync(&others, |_| later()).is_empty());
+    assert_eq!(mac.tried, ["r1"]);
+    assert_eq!(mac.since.len(), 3, "r2 and r3 wait too");
+    assert_eq!(mac.since["r3"].seq, 3);
+    assert_eq!(mac.since["r3"].from_device, PC);
+
+    mac.now += chrono::Duration::days(3);
+    assert!(mac.sync(&others, |_| later()).is_empty());
+    let refused: Vec<&str> = mac.notes.iter().map(|h| h.id.as_str()).collect();
+    assert_eq!(
+        refused,
+        ["r1", "r2", "r3"],
+        "all three in one sync, in order"
+    );
+    assert!(mac.notes.iter().all(|h| !h.applied));
+    assert_eq!(mac.marks.get(PC), Some(&3));
+}
+
+/// A waiting entry saved as a plain time by the first v0.6.1 builds still reads.
+#[test]
+fn waiting_entries_written_as_a_plain_time_still_read() {
+    let v = serde_json::json!({
+        "old": "2026-10-16T10:00:00+00:00",
+        "new": {"since": "2026-10-16T11:00:00+00:00", "fromDevice": PC, "seq": 7}
+    });
+    let m: std::collections::BTreeMap<String, WaitingSince> = serde_json::from_value(v).unwrap();
+    assert_eq!(m["old"].since, "2026-10-16T10:00:00+00:00");
+    assert_eq!(m["old"].seq, 0);
+    assert_eq!(m["new"].from_device, PC);
+    assert_eq!(m["new"].seq, 7);
+    let back = serde_json::to_value(&m["new"]).unwrap();
+    assert_eq!(back["fromDevice"], PC);
 }
