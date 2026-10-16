@@ -10,7 +10,7 @@
 //!   note and never "fixed"; the last good copy of each computer is kept;
 //! - paths from other computers are display-only and never used to touch anything.
 
-use std::collections::HashMap;
+use std::collections::{BTreeMap, HashMap, HashSet};
 use std::fs;
 use std::io::Read;
 use std::path::{Path, PathBuf};
@@ -50,6 +50,12 @@ pub struct DeviceFile {
     /// v0.3.2: requests from other computers this one has dealt with (applied or refused), so
     /// their senders can drop them.
     pub handled: Vec<Handled>,
+    /// v0.6.1: per sending computer, the request number up to which every request has been
+    /// dealt with (`handled` also lists ones above it, dealt with while an earlier one waits).
+    /// Lets "This is this computer" take back exactly where this list was. Missing in older
+    /// files.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub handled_upto: Option<BTreeMap<String, u64>>,
 }
 
 /// "Please mark this project done (or active)", from one computer to the one that has it.
@@ -159,6 +165,7 @@ pub fn build_own(device_id: &str, name: &str, rows: &[ProjectRow], updated_at: &
         projects,
         requests: vec![],
         handled: vec![],
+        handled_upto: None,
     }
 }
 
@@ -226,6 +233,8 @@ pub struct OtherDevice {
     pub requests: Vec<StatusRequest>,
     #[serde(skip)]
     pub handled: Vec<Handled>,
+    #[serde(skip)]
+    pub handled_upto: Option<BTreeMap<String, u64>>,
     /// Plain words when the latest file couldn't be used (the last good copy is shown).
     pub problem: Option<String>,
     /// Only a cloud placeholder so far (e.g. iCloud `.icloud`): "not downloaded yet".
@@ -278,6 +287,7 @@ pub fn read_others(
                         projects: file.projects,
                         requests: file.requests,
                         handled: file.handled,
+                        handled_upto: file.handled_upto,
                         problem: None,
                         not_downloaded: false,
                     },
@@ -296,6 +306,7 @@ pub fn read_others(
                     projects: vec![],
                     requests: vec![],
                     handled: vec![],
+                    handled_upto: None,
                     problem: None,
                     not_downloaded: false,
                 });
@@ -315,6 +326,7 @@ pub fn read_others(
                     projects: vec![],
                     requests: vec![],
                     handled: vec![],
+                    handled_upto: None,
                     problem: None,
                     not_downloaded: true,
                 },
@@ -625,22 +637,173 @@ pub fn valid_status(s: &str) -> bool {
 }
 
 /// Requests other computers sent to this one that it hasn't dealt with yet, oldest first per
-/// sender. `done_seq` is the highest request number already dealt with from each sender, so a
-/// request can never be applied twice (even if a stale synced copy brings it back).
+/// sender. `done_seq` is the number up to which every request from each sender has been dealt
+/// with, and `handled` lists the ones dealt with above it, so a request can never be applied
+/// twice (even if a stale synced copy brings it back).
 pub fn incoming<'a>(
     own_id: &str,
     others: &'a [OtherDevice],
-    done_seq: &std::collections::BTreeMap<String, u64>,
+    done_seq: &BTreeMap<String, u64>,
+    handled: &[Handled],
 ) -> Vec<(&'a OtherDevice, &'a StatusRequest)> {
+    let seen_seq: HashSet<(&str, u64)> = handled
+        .iter()
+        .map(|h| (h.from_device.as_str(), h.seq))
+        .collect();
+    let seen_id: HashSet<&str> = handled.iter().map(|h| h.id.as_str()).collect();
     let mut out: Vec<(&OtherDevice, &StatusRequest)> = others
         .iter()
         .flat_map(|d| d.requests.iter().map(move |r| (d, r)))
         .filter(|(d, r)| {
-            r.to_device == own_id && r.seq > done_seq.get(&d.device_id).copied().unwrap_or(0)
+            r.to_device == own_id
+                && r.seq > done_seq.get(&d.device_id).copied().unwrap_or(0)
+                && !seen_seq.contains(&(d.device_id.as_str(), r.seq))
+                && !seen_id.contains(r.id.as_str())
         })
         .collect();
     out.sort_by(|(a, ra), (b, rb)| a.device_id.cmp(&b.device_id).then(ra.seq.cmp(&rb.seq)));
     out
+}
+
+/// What applying one request here came to.
+#[derive(Debug, Clone, PartialEq)]
+pub enum Outcome {
+    Applied,
+    /// Can pass (a file busy or locked, the project file mid-sync, a folder offline): stays
+    /// waiting and is tried again at the next sync.
+    Later,
+    /// Won't ever work; the reason goes back to the sender in plain words.
+    Refused(String),
+}
+
+/// One round of dealing with requests (see `handle_requests`).
+#[derive(Debug, Default)]
+pub struct Round<'a> {
+    /// Applied this round, in order.
+    pub applied: Vec<(&'a OtherDevice, &'a StatusRequest)>,
+    /// Per sender, the lowest request number still waiting (tried again next sync).
+    pub waiting: BTreeMap<String, u64>,
+    /// Something was recorded (applied or refused).
+    pub recorded: bool,
+    /// Recording failed: the rest wait, and nothing more should be handled until a restart.
+    pub stopped: bool,
+}
+
+/// Deal with `pending` (from `incoming`): each request on its own. One that can't be applied
+/// right now waits, and only later requests for the same project wait with it (so they keep
+/// their order); requests for other projects go ahead. `record` saves each dealt-with request
+/// straight away (before the next one), so a crash can never apply one twice; if it fails,
+/// everything after it waits.
+pub fn handle_requests<'a>(
+    pending: Vec<(&'a OtherDevice, &'a StatusRequest)>,
+    mut apply: impl FnMut(&OtherDevice, &StatusRequest) -> Outcome,
+    mut record: impl FnMut(Handled) -> bool,
+) -> Round<'a> {
+    let mut round = Round::default();
+    let mut blocked: HashSet<&str> = HashSet::new();
+    for (from, req) in pending {
+        let wait = |round: &mut Round<'a>| {
+            let w = round
+                .waiting
+                .entry(from.device_id.clone())
+                .or_insert(req.seq);
+            *w = (*w).min(req.seq);
+        };
+        if round.stopped || blocked.contains(req.project_id.as_str()) {
+            wait(&mut round);
+            continue;
+        }
+        let (applied, reason) = match apply(from, req) {
+            Outcome::Later => {
+                blocked.insert(req.project_id.as_str());
+                wait(&mut round);
+                continue;
+            }
+            Outcome::Applied => (true, None),
+            Outcome::Refused(r) => (false, Some(r)),
+        };
+        let note = Handled {
+            id: req.id.clone(),
+            from_device: from.device_id.clone(),
+            seq: req.seq,
+            applied,
+            reason,
+        };
+        if !record(note) {
+            round.stopped = true;
+            wait(&mut round);
+            continue;
+        }
+        round.recorded = true;
+        if applied {
+            round.applied.push((from, req));
+        }
+    }
+    round
+}
+
+/// After a round: move each sender's "dealt with up to" number as far as it safely goes,
+/// which is just below its lowest request still waiting. Returns whether anything moved.
+pub fn advance_marks(
+    marks: &mut BTreeMap<String, u64>,
+    handled: &[Handled],
+    waiting: &BTreeMap<String, u64>,
+) -> bool {
+    let mut moved = false;
+    for h in handled {
+        if waiting.get(&h.from_device).is_some_and(|w| h.seq >= *w) {
+            continue;
+        }
+        let m = marks.entry(h.from_device.clone()).or_insert(0);
+        if h.seq > *m {
+            *m = h.seq;
+            moved = true;
+        }
+    }
+    moved
+}
+
+/// A dealt-with note is still needed while its number is above its sender's mark: it's the
+/// only thing stopping that request from being applied again.
+pub fn note_needed(h: &Handled, marks: &BTreeMap<String, u64>) -> bool {
+    h.seq > marks.get(&h.from_device).copied().unwrap_or(0)
+}
+
+/// Keep at most `max` notes: drop the oldest ones the marks already cover first, and only
+/// then (never in practice: a sender holds at most `MAX_REQUESTS`) the oldest of the rest.
+pub fn trim_handled(handled: &mut Vec<Handled>, marks: &BTreeMap<String, u64>, max: usize) {
+    let mut extra = handled.len().saturating_sub(max);
+    if extra == 0 {
+        return;
+    }
+    handled.retain(|h| {
+        if extra > 0 && !note_needed(h, marks) {
+            extra -= 1;
+            false
+        } else {
+            true
+        }
+    });
+    if extra > 0 {
+        handled.drain(..extra);
+    }
+}
+
+/// "This is this computer": where the old list was, per sender. Lists from before v0.6.1
+/// dealt with requests strictly in order, so their highest dealt-with number is the mark.
+pub fn taken_back_marks(
+    handled: &[Handled],
+    handled_upto: Option<&BTreeMap<String, u64>>,
+) -> BTreeMap<String, u64> {
+    if let Some(m) = handled_upto {
+        return m.clone();
+    }
+    let mut marks = BTreeMap::new();
+    for h in handled {
+        let m = marks.entry(h.from_device.clone()).or_insert(0);
+        *m = (*m).max(h.seq);
+    }
+    marks
 }
 
 /// What showing a project needs to know about requests: the latest one this computer is still

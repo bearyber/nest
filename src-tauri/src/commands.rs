@@ -1005,16 +1005,16 @@ pub(crate) fn apply_request(
         return RequestOutcome::Refused(format!("That project is archived on {here}."));
     }
     let Some(id) = located.id else {
-        return RequestOutcome::Refused(format!("That project's file can't be read on {here}."));
+        // Its project file couldn't be read at the last look (a sync app mid-download?).
+        return RequestOutcome::Later;
     };
     if let Err(e) = manifest::update_status(&path.join(plan::MANIFEST_NAME), &id, status) {
-        // Only "something changed the file just now" is worth retrying; anything else (an
-        // unreadable file, a different project, a read-only file) won't fix itself, so it's
-        // refused with the reason instead of blocking that computer's later requests.
-        // Retry what can pass: the file was changed just now, or it couldn't be read/saved for
-        // a moment (a sync app or antivirus holding it, a NAS hiccup). Refuse only what won't
-        // fix itself: a damaged project file, or a folder that now holds another project.
-        let lasting = e.contains("can't be read") || e.contains("different project");
+        // Retry what can pass: the file was changed just now, it's busy or locked (a sync app
+        // or antivirus holding it; on Windows that can show as "access denied"), or it couldn't
+        // be read for a moment (missing or half-written mid-sync, a NAS hiccup). A waiting
+        // request only holds back later requests for this same project. Refuse only what
+        // won't fix itself: the folder now holds another project.
+        let lasting = e.contains("different project");
         if !lasting {
             log::info!("request will be retried: {e}");
             return RequestOutcome::Later;

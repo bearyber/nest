@@ -145,68 +145,64 @@ fn sync_inner(state: &AppState, dev: &Devices) -> bool {
         .cloned()
         .collect();
 
-    // 2a. Requests sent to this computer: each applied once, in order per sender, and recorded
-    // straight away (so a crash can never apply it twice). One that can't be applied right now
-    // (jobs folder offline…) waits, and so do the ones after it from the same computer.
+    // 2a. Requests sent to this computer: each applied once and recorded straight away (so a
+    // crash can never apply it twice). One that can't be applied right now (a file busy, the
+    // project file mid-sync, its jobs folder offline…) waits for the next sync; only later
+    // requests for that same project wait with it. Only what won't ever work is refused.
     let mut refusal_updates: Vec<(String, Option<String>)> = vec![];
     let mut new_changes: Vec<(String, ChangedBy)> = vec![];
     let mut changed_requests = false;
-    let mut blocked: Vec<String> = vec![];
     let paused = dev
         .runtime
         .lock()
         .map(|rt| rt.requests_paused)
         .unwrap_or(true);
-    let pending = if paused {
-        vec![]
-    } else {
-        devices::incoming(&id, &all, &settings.handled_seq)
-    };
-    for (from, req) in pending {
-        if blocked.contains(&from.device_id) {
-            continue;
-        }
-        let outcome = if forgotten(&from.device_id) {
-            RequestOutcome::Refused(format!("{} was removed on {name}.", from.name))
-        } else {
-            crate::commands::apply_request(state, &req.project_id, &req.status, &name)
-        };
-        let (applied, reason) = match outcome {
-            RequestOutcome::Later => {
-                blocked.push(from.device_id.clone());
-                continue;
-            }
-            RequestOutcome::Applied => (true, None),
-            RequestOutcome::Refused(r) => (false, Some(r)),
-        };
-        let note = devices::Handled {
-            id: req.id.clone(),
-            from_device: from.device_id.clone(),
-            seq: req.seq,
-            applied,
-            reason,
-        };
-        let (sender, seq) = (from.device_id.clone(), req.seq);
-        let saved = crate::settings_cmd::edit_settings_quietly(state, move |s| {
-            s.handled_requests.push(note);
-            if s.handled_requests.len() > devices::MAX_HANDLED {
-                let extra = s.handled_requests.len() - devices::MAX_HANDLED;
-                s.handled_requests.drain(..extra); // keep the newest
-            }
-            let n = s.handled_seq.entry(sender).or_insert(0);
-            *n = (*n).max(seq);
-            Ok(())
-        });
-        if let Err(e) = saved {
-            // Can't record it: stop here, rather than risk applying requests again and again.
-            log::warn!("couldn't record a Devices request: {}", e.message);
+    if !paused {
+        let pending =
+            devices::incoming(&id, &all, &settings.handled_seq, &settings.handled_requests);
+        let round = devices::handle_requests(
+            pending,
+            |from, req| {
+                if forgotten(&from.device_id) {
+                    return devices::Outcome::Refused(format!(
+                        "{} was removed on {name}.",
+                        from.name
+                    ));
+                }
+                match crate::commands::apply_request(state, &req.project_id, &req.status, &name) {
+                    RequestOutcome::Applied => devices::Outcome::Applied,
+                    RequestOutcome::Later => devices::Outcome::Later,
+                    RequestOutcome::Refused(r) => devices::Outcome::Refused(r),
+                }
+            },
+            |note| {
+                let saved = crate::settings_cmd::edit_settings_quietly(state, move |s| {
+                    s.handled_requests.push(note);
+                    devices::trim_handled(
+                        &mut s.handled_requests,
+                        &s.handled_seq,
+                        devices::MAX_HANDLED,
+                    );
+                    Ok(())
+                });
+                match saved {
+                    Ok(()) => true,
+                    Err(e) => {
+                        log::warn!("couldn't record a Devices request: {}", e.message);
+                        false
+                    }
+                }
+            },
+        );
+        if round.stopped {
+            // Can't record what was dealt with: stop handling requests until Nest restarts,
+            // rather than risk applying one again and again.
             if let Ok(mut rt) = dev.runtime.lock() {
                 rt.requests_paused = true;
             }
-            break;
         }
-        changed_requests = true;
-        if applied {
+        changed_requests |= round.recorded;
+        for (from, req) in &round.applied {
             new_changes.push((
                 req.project_id.clone(),
                 ChangedBy {
@@ -215,6 +211,22 @@ fn sync_inner(state: &AppState, dev: &Devices) -> bool {
                     at: now_rfc3339(),
                 },
             ));
+        }
+        // Move each sender's "dealt with up to" number to just below what still waits.
+        let moves = state.settings.lock().is_ok_and(|s| {
+            let mut marks = s.handled_seq.clone();
+            devices::advance_marks(&mut marks, &s.handled_requests, &round.waiting)
+        });
+        if moves {
+            let waiting = round.waiting.clone();
+            if let Err(e) = crate::settings_cmd::edit_settings_quietly(state, move |s| {
+                let notes = s.handled_requests.clone();
+                devices::advance_marks(&mut s.handled_seq, &notes, &waiting);
+                Ok(())
+            }) {
+                // Harmless: the notes still stop anything being applied twice.
+                log::warn!("couldn't save Devices request numbers: {}", e.message);
+            }
         }
     }
 
@@ -226,13 +238,21 @@ fn sync_inner(state: &AppState, dev: &Devices) -> bool {
     let current = state
         .settings
         .lock()
-        .map(|s| (s.handled_requests.clone(), s.outgoing_requests.clone()))
+        .map(|s| {
+            (
+                s.handled_requests.clone(),
+                s.outgoing_requests.clone(),
+                s.handled_seq.clone(),
+            )
+        })
         .unwrap_or_default();
     let stale_notes: Vec<String> = current
         .0
         .iter()
         .filter(|h| {
-            if !online {
+            // A note above its sender's mark is what stops that request being applied
+            // again (a stale synced copy could bring it back), so it stays.
+            if !online || devices::note_needed(h, &current.2) {
                 return false;
             }
             // Only when the sender's list was read fine and no longer has the request. A list
@@ -289,6 +309,7 @@ fn sync_inner(state: &AppState, dev: &Devices) -> bool {
         if let Ok(s) = state.settings.lock() {
             own.requests = s.outgoing_requests.clone();
             own.handled = s.handled_requests.clone();
+            own.handled_upto = Some(s.handled_seq.clone());
         }
         match devices::write_own(&dir, &own, &mut last) {
             Ok(true) => saved = Some(own.updated_at.clone()),
@@ -608,12 +629,13 @@ pub fn devices_claim(app: AppHandle, device_id: String) -> AppResult<DevicesView
                 (
                     d.name.clone(),
                     d.updated_at.clone(),
+                    devices::taken_back_marks(&d.handled, d.handled_upto.as_ref()),
                     d.handled.clone(),
                     d.requests.clone(),
                 )
             })
         });
-    let Some((name, updated_at, old_handled, old_requests)) = found else {
+    let Some((name, updated_at, old_marks, old_handled, old_requests)) = found else {
         return Err(AppError::new(
             "That computer isn't in the synced folder any more",
         ));
@@ -628,9 +650,10 @@ pub fn devices_claim(app: AppHandle, device_id: String) -> AppResult<DevicesView
         s.forgotten_devices.retain(|d| d != &id);
         // Take back what that computer had dealt with and was waiting on, so requests are
         // neither applied twice nor lost.
-        for h in &old_handled {
-            let seq = s.handled_seq.entry(h.from_device.clone()).or_insert(0);
-            *seq = (*seq).max(h.seq);
+        // Its marks only (not its highest number): requests it left waiting stay waiting.
+        for (from, upto) in &old_marks {
+            let seq = s.handled_seq.entry(from.clone()).or_insert(0);
+            *seq = (*seq).max(*upto);
         }
         s.handled_requests = old_handled.clone();
         for q in &old_requests {
