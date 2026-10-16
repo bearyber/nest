@@ -47,9 +47,13 @@ pub struct Settings {
     /// Per sending computer, the number up to which every request to this computer has been
     /// dealt with (ones above it are in `handled_requests`): nothing is applied twice.
     pub handled_seq: std::collections::BTreeMap<String, u64>,
-    /// v0.6.1: when each request waiting here was first tried (request id → RFC 3339), so one
-    /// that can't be done for days is refused with its reason (see devices.rs).
-    pub waiting_since: std::collections::BTreeMap<String, String>,
+    /// v0.6.1: requests waiting here (request id → sender, number, since when), so one that
+    /// can't be done for days is refused with its reason, and no mark moves past it (see
+    /// devices.rs).
+    pub waiting_since: std::collections::BTreeMap<String, crate::devices::WaitingSince>,
+    /// v0.6.1: the newest `updatedAt` read from each other computer's list, so an older copy
+    /// coming back never moves a mark.
+    pub newest_lists: std::collections::BTreeMap<String, String>,
     /// Archive (M5, spec §12a #21): a folder Nest scans like a jobs folder, but whose projects
     /// are archived (read-only in Nest, hidden behind the Archived filter). Off until chosen.
     pub archive_folder: Option<PathBuf>,
@@ -116,6 +120,7 @@ impl Default for Settings {
             handled_requests: vec![],
             handled_seq: Default::default(),
             waiting_since: Default::default(),
+            newest_lists: Default::default(),
             archive_folder: None,
             archive_after_days: None,
             archive_dismissed: vec![],

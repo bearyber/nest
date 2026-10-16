@@ -216,25 +216,41 @@ fn sync_inner(state: &AppState, dev: &Devices) -> bool {
             ));
         }
         // Move each sender's "dealt with up to" number to just below its lowest request still
-        // waiting, only for senders whose list was read cleanly just now; and keep when each
-        // waiting request was first tried.
+        // waiting (in its list, or seen waiting here before), only for senders whose list was
+        // read cleanly just now and isn't older than one already read; and keep the waiting
+        // requests and the newest list times.
+        let mut newest = settings.newest_lists.clone();
+        let trusted = devices::trusted_lists(&all, online, &mut newest);
         let moves = |s: &Settings| {
             let mut marks = s.handled_seq.clone();
-            let limits =
-                devices::mark_limits(&id, &all, online, &s.handled_seq, &s.handled_requests);
+            let limits = devices::mark_limits(
+                &id,
+                &all,
+                &trusted,
+                &s.handled_seq,
+                &s.handled_requests,
+                &since,
+            );
             devices::advance_marks(&mut marks, &s.handled_requests, &limits)
         };
         let needed = state
             .settings
             .lock()
-            .is_ok_and(|s| moves(&s) || s.waiting_since != since);
+            .is_ok_and(|s| moves(&s) || s.waiting_since != since || s.newest_lists != newest);
         if needed {
             if let Err(e) = crate::settings_cmd::edit_settings_quietly(state, |s| {
-                let limits =
-                    devices::mark_limits(&id, &all, online, &s.handled_seq, &s.handled_requests);
+                let limits = devices::mark_limits(
+                    &id,
+                    &all,
+                    &trusted,
+                    &s.handled_seq,
+                    &s.handled_requests,
+                    &since,
+                );
                 let notes = s.handled_requests.clone();
                 devices::advance_marks(&mut s.handled_seq, &notes, &limits);
                 s.waiting_since = since;
+                s.newest_lists = newest;
                 Ok(())
             }) {
                 // Harmless: the notes still stop anything being applied twice.
