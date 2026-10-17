@@ -202,10 +202,8 @@ pub fn run() {
             resolve_cmd::resolve_projects,
             resolve_cmd::resolve_export_to_editor,
             resolve_cmd::editor_add_resolve_drp,
-            resolve_cmd::resolve_waiting_list,
             resolve_cmd::resolve_try_now,
-            resolve_cmd::resolve_remove_waiting,
-            resolve_cmd::resolve_set_library,
+            resolve_cmd::resolve_skip_project,
             resolve_cmd::project_resolve,
         ])
         .build(context)

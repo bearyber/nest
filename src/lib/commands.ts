@@ -15,7 +15,6 @@ import type {
   ResolveLibrary,
   ResolveProject,
   ResolveStatus,
-  ResolveWaitingView,
   RescanSummary,
   UpdateInfo,
   WhatsNew,
@@ -211,27 +210,30 @@ export const requestStatus = (key: string, status: "active" | "done") => invoke<
 export const resolveStatus = () => invoke<ResolveStatus>("resolve_status");
 /** Resolve's libraries and the open one (rejects with plain words if Resolve can't answer). */
 export const resolveLibraries = () => invoke<ResolveLibraries>("resolve_libraries");
-/** The projects in Resolve's open library ("Choose from Resolve…"). */
-export const resolveProjects = () => invoke<ResolveProject[]>("resolve_projects");
+/** The projects in one of Resolve's libraries ("Choose from Resolve…"); null = the open one.
+ *  Another library only when no real project is open in Resolve (else it rejects with what
+ *  to do); Resolve is always switched back. */
+export const resolveProjects = (library: ResolveLibrary | null = null) =>
+  invoke<ResolveProject[]>("resolve_projects", { library });
 /** Export a project from Resolve into the open editor; resolves to the template path for
- *  `template.resolve.drp`. `folder` as in `ResolveProject` ("" = the top level). */
-export const resolveExportToEditor = (sessionId: string, projectName: string, folder: string) =>
-  invoke<string>("resolve_export_to_editor", { sessionId, projectName, folder });
+ *  `template.resolve.drp`. `folder` as in `ResolveProject` ("" = the top level); `library` as
+ *  in `resolveProjects`. */
+export const resolveExportToEditor = (
+  sessionId: string,
+  projectName: string,
+  folder: string,
+  library: ResolveLibrary | null = null,
+) => invoke<string>("resolve_export_to_editor", { sessionId, projectName, folder, library });
 /** A `.drp` dropped on the template editor becomes its Resolve project; resolves to the
  *  template path for `template.resolve.drp`. */
 export const editorAddResolveDrp = (sessionId: string, path: string) =>
   invoke<string>("editor_add_resolve_drp", { sessionId, path });
 /** The details panel: a project's Resolve project (null = none, or it can't be read here). */
 export const projectResolve = (key: string) => invoke<ProjectResolve | null>("project_resolve", { key });
-export const resolveWaitingList = () => invoke<ResolveWaitingView>("resolve_waiting_list");
 /** Try the waiting projects now (can take a while if Resolve is slow). */
-export const resolveTryNow = () => invoke<ResolveWaitingView>("resolve_try_now");
-/** Take one project off the waiting list (by its id). */
-export const resolveRemoveWaiting = (id: string) =>
-  invoke<ResolveWaitingView>("resolve_remove_waiting", { id });
-/** Settings: the library to add to (null = the one open in Resolve). */
-export const resolveSetLibrary = (library: ResolveLibrary | null) =>
-  invoke<SettingsView>("resolve_set_library", { library });
+export const resolveTryNow = () => invoke<void>("resolve_try_now");
+/** "Don't add": take this project off the waiting list (its file then says "skipped"). */
+export const resolveSkipProject = (key: string) => invoke<void>("resolve_skip_project", { key });
 
 // ── What's new ──
 /** The note to show after an update, or null. */

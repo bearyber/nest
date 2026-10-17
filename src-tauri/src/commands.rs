@@ -316,7 +316,6 @@ fn build_plan(
         kit,
         resolve: plan::ResolveChoice {
             on: request.resolve,
-            library: settings.resolve_library.clone(),
         },
     };
     let mut plan = plan::plan_project(loaded, &request.values, &ctx);

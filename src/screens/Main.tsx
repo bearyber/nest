@@ -28,6 +28,8 @@ import {
   openSettings,
   projectResolve,
   projectSizes,
+  resolveSkipProject,
+  resolveTryNow,
   pendingUpdate,
   whatsNew,
   whatsNewSeen,
@@ -881,6 +883,18 @@ export default function Main() {
               .catch(fail)
           }
           resolve={readable && resolveInfo?.key === selectedKey ? resolveInfo.r : null}
+          onResolveTryNow={() =>
+            resolveTryNow()
+              .catch(fail)
+              .finally(() => setResolveTick((n) => n + 1))
+          }
+          onResolveSkip={() =>
+            selectedRow
+              ? resolveSkipProject(selectedRow.key)
+                  .catch(fail)
+                  .finally(() => setResolveTick((n) => n + 1))
+              : Promise.resolve()
+          }
           sizes={selectedRow && sizeInfo?.key === selectedRow.key ? sizeInfo.sizes : null}
           measuring={!!selectedRow && sizeInfo?.key === selectedRow.key && sizeInfo.measuring}
           onMeasure={() => selectedRow && measure(selectedRow.key)}

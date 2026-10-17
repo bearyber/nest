@@ -21,7 +21,7 @@ use std::time::{Duration, Instant};
 use serde::{Deserialize, Serialize};
 
 use crate::manifest::{read_json_object, write_json_atomic};
-use crate::settings::ResolveLibrary;
+use crate::template::ResolveLibrary;
 
 /// The Lua helper, bundled.
 pub const SCRIPT: &str = include_str!("resolve.lua");
@@ -93,7 +93,7 @@ pub enum Outcome {
     /// Resolve has a real project open in another library: switching would close it.
     Busy,
     NoFolder,
-    /// The library chosen in Settings isn't in Resolve.
+    /// Resolve couldn't switch to the template's library.
     NoLibrary,
     /// Nest's copy of the `.drp` is gone.
     Missing,
@@ -183,11 +183,19 @@ pub enum Op<'a> {
     /// The open library, the open project's name and what it holds.
     State,
     Libraries,
-    Projects,
+    /// Every project in `library` (None = the open one).
+    Projects {
+        library: Option<&'a ResolveLibrary>,
+        /// Switch to `library` first (and back after).
+        switch: bool,
+    },
     Export {
         name: &'a str,
         folder: &'a str,
         dest: &'a Path,
+        library: Option<&'a ResolveLibrary>,
+        /// Switch to `library` first (and back after).
+        switch: bool,
     },
     Add {
         drp: &'a Path,
@@ -208,14 +216,38 @@ pub fn args(op: &Op) -> Vec<String> {
     let path = |p: &Path| hex(&p.to_string_lossy());
     let ip =
         |l: Option<&ResolveLibrary>| hex(l.and_then(|l| l.ip_address.as_deref()).unwrap_or(""));
+    let flag = |switch: bool| hex(if switch { "1" } else { "0" });
+    let db_type =
+        |l: Option<&ResolveLibrary>| hex(l.map(|l| l.db_type.as_str()).unwrap_or_default());
+    let db_name =
+        |l: Option<&ResolveLibrary>| hex(l.map(|l| l.db_name.as_str()).unwrap_or_default());
     match op {
         Op::Status => vec!["status".into()],
         Op::State => vec!["state".into()],
         Op::Libraries => vec!["libraries".into()],
-        Op::Projects => vec!["projects".into()],
-        Op::Export { name, folder, dest } => {
-            vec!["export".into(), hex(name), hex(folder), path(dest)]
-        }
+        Op::Projects { library, switch } => vec![
+            "projects".into(),
+            flag(*switch),
+            db_type(*library),
+            db_name(*library),
+            ip(*library),
+        ],
+        Op::Export {
+            name,
+            folder,
+            dest,
+            library,
+            switch,
+        } => vec![
+            "export".into(),
+            hex(name),
+            hex(folder),
+            path(dest),
+            flag(*switch),
+            db_type(*library),
+            db_name(*library),
+            ip(*library),
+        ],
         Op::Add {
             drp,
             name,
@@ -227,9 +259,9 @@ pub fn args(op: &Op) -> Vec<String> {
             path(drp),
             hex(name),
             hex(folder),
-            hex(library.map(|l| l.db_type.as_str()).unwrap_or_default()),
-            hex(library.map(|l| l.db_name.as_str()).unwrap_or_default()),
-            hex(if *switch { "1" } else { "0" }),
+            db_type(*library),
+            db_name(*library),
+            flag(*switch),
             ip(*library),
         ],
         Op::Switch { library } => vec![
@@ -241,10 +273,12 @@ pub fn args(op: &Op) -> Vec<String> {
     }
 }
 
-/// How long a run of `op` may take.
+/// How long a run of `op` may take: never cut a run between a switch and the switch back.
 pub fn time_limit(op: &Op) -> Duration {
     match op {
-        Op::Add { switch: true, .. } => SWITCH_TIMEOUT,
+        Op::Add { switch: true, .. }
+        | Op::Projects { switch: true, .. }
+        | Op::Export { switch: true, .. } => SWITCH_TIMEOUT,
         _ => TIMEOUT,
     }
 }
@@ -398,6 +432,55 @@ pub fn decide(
     }
 }
 
+/// Where a project goes, given the template's library and what Resolve has on this computer.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Target<'a> {
+    /// The library open in Resolve (the template names none).
+    Open,
+    /// The template's library (maybe the open one).
+    Library(&'a ResolveLibrary),
+    /// The template's library isn't in Resolve here: the open one instead, and the project
+    /// says so (`missing_note`).
+    Missing(&'a ResolveLibrary),
+}
+
+/// Pick the library. `available` = Resolve's list on this computer (empty = it didn't say:
+/// then the template's library is tried, and a switch that fails says "no library").
+pub fn target<'a>(
+    wanted: Option<&'a ResolveLibrary>,
+    current: &ResolveLibrary,
+    available: &[ResolveLibrary],
+) -> Target<'a> {
+    match wanted {
+        None => Target::Open,
+        Some(w) if w.same(current) => Target::Library(w),
+        Some(w) if !available.is_empty() && !available.iter().any(|a| a.same(w)) => {
+            Target::Missing(w)
+        }
+        Some(w) => Target::Library(w),
+    }
+}
+
+/// The project's note when its template's library isn't on this computer.
+pub fn missing_note(wanted: &ResolveLibrary, current: &ResolveLibrary) -> String {
+    format!(
+        "“{}” isn't on this computer, so it went into “{}”.",
+        wanted.db_name, current.db_name
+    )
+}
+
+/// Looking inside another library while a real project is open.
+pub fn browse_busy_message(library: &ResolveLibrary) -> String {
+    format!(
+        "Close your project in Resolve first. Nest has to switch library to look inside “{}”.",
+        library.db_name
+    )
+}
+
+/// What to do when Resolve runs but doesn't let Nest in.
+pub const SCRIPTING_HINT: &str =
+    "Turn on External scripting in Resolve: Preferences → System → General → Local.";
+
 /// No answer from the helper: by how long Resolve's process has run (None = it doesn't).
 pub fn not_answering(running_for: Option<Duration>) -> ResolveStatus {
     match running_for {
@@ -490,6 +573,19 @@ pub struct AddReport {
     pub back: Back,
     /// The library Resolve was in when Nest switched (Some only when a switch was asked).
     pub from: Option<ResolveLibrary>,
+    /// The template's library isn't on this computer, so it went into the open one
+    /// (`missing_note`).
+    pub note: Option<String>,
+}
+
+/// How a look inside a library (its projects, an export) went, and the switch back if there
+/// was one.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Browsed<T> {
+    pub result: Result<T, Problem>,
+    pub back: Back,
+    /// The library Resolve was in when Nest switched (Some only when it switched).
+    pub from: Option<ResolveLibrary>,
 }
 
 /// Does the rest of the pass wait? Yes when Resolve can't be reached (not running, starting,
@@ -543,25 +639,39 @@ impl Link<'_> {
 
     /// The open library, the open project and what it holds.
     pub fn state(&self) -> Result<OpenState, Problem> {
-        let lines = self.ask(&Op::State)?;
+        self.look(false).map(|(state, _)| state)
+    }
+
+    /// The state, and Resolve's libraries too when `with_list`.
+    fn look(&self, with_list: bool) -> Result<(OpenState, Vec<ResolveLibrary>), Problem> {
+        let lines = self.ask(if with_list {
+            &Op::Libraries
+        } else {
+            &Op::State
+        })?;
         let mut current = None;
         let mut open = String::new();
         let mut contents = None;
+        let mut list: Vec<ResolveLibrary> = vec![];
         for l in lines {
             match l {
                 Line::Current(lib) => current = Some(lib),
                 Line::Open(name) => open = name,
                 Line::Contents(c) => contents = Some(c),
+                Line::Library(lib) if !list.contains(&lib) => list.push(lib),
                 _ => {}
             }
         }
         let current = current
             .ok_or_else(|| Problem::Failed("Resolve didn't say which library is open".into()))?;
-        Ok(OpenState {
-            current,
-            open,
-            contents,
-        })
+        Ok((
+            OpenState {
+                current,
+                open,
+                contents,
+            },
+            list,
+        ))
     }
 
     /// Switch Resolve to `library` (the helper checks again that nothing real is open).
@@ -572,47 +682,134 @@ impl Link<'_> {
     }
 
     pub fn libraries(&self) -> Result<Libraries, Problem> {
-        let lines = self.ask(&Op::Libraries)?;
-        let mut out = Libraries::default();
-        for l in lines {
-            match l {
-                Line::Current(lib) => out.current = Some(lib),
-                Line::Library(lib) if !out.libraries.contains(&lib) => out.libraries.push(lib),
-                _ => {}
-            }
+        let (state, libraries) = self.look(true)?;
+        Ok(Libraries {
+            current: Some(state.current),
+            libraries,
+        })
+    }
+
+    /// Does looking inside `library` need a switch? Ok(None) = no (none given, or it's the open
+    /// one); Ok(Some(open library)) = yes, and nothing real is open; Err = not now (a real
+    /// project is open: switching would close it), or Resolve can't be reached.
+    fn switch_for(
+        &self,
+        library: Option<&ResolveLibrary>,
+    ) -> Result<Option<ResolveLibrary>, Problem> {
+        let Some(library) = library else {
+            return Ok(None);
+        };
+        let state = self.state()?;
+        if library.same(&state.current) {
+            Ok(None)
+        } else if nothing_real_open(state.contents) {
+            Ok(Some(state.current))
+        } else {
+            Err(Problem::Plain(browse_busy_message(library)))
         }
-        Ok(out)
     }
 
-    pub fn projects(&self) -> Result<Vec<ResolveProject>, Problem> {
-        Ok(self
-            .ask(&Op::Projects)?
-            .into_iter()
-            .filter_map(|l| match l {
-                Line::Project { folder, name } => Some(ResolveProject { folder, name }),
-                _ => None,
-            })
-            .collect())
-    }
-
-    /// Export `name` (in `folder`, "" = the top level) to the `.drp` file `dest`.
-    pub fn export(&self, name: &str, folder: &str, dest: &Path) -> Result<(), Problem> {
-        let couldnt = || Problem::Plain(format!("Resolve couldn't export {name}."));
-        let lines = match self.ask(&Op::Export { name, folder, dest }) {
+    /// Run `op` (which may switch library: `switch`) and read its answer, the switch back too.
+    /// The helper's own "busy" / "no-library" become plain words about `library`.
+    fn run_in(
+        &self,
+        op: &Op,
+        switch: bool,
+        library: Option<&ResolveLibrary>,
+    ) -> (Result<Vec<Line>, Problem>, Back) {
+        let lines = match self.ask_raw(op) {
             Ok(lines) => lines,
+            Err(e) => return (Err(e), back_of(switch, None)),
+        };
+        let back = back_of(switch, Some(&lines));
+        let name = library.map(|l| l.db_name.as_str()).unwrap_or_default();
+        let result = self.check(lines).and_then(|lines| match result_of(&lines) {
+            Some(("busy", _)) => Err(Problem::Plain(match library {
+                Some(l) => browse_busy_message(l),
+                None => "Close your project in Resolve first.".into(),
+            })),
+            Some(("no-library", _)) => Err(Problem::Plain(format!(
+                "Resolve couldn't open the library “{name}” on this computer."
+            ))),
+            _ => Ok(lines),
+        });
+        (result, back)
+    }
+
+    /// The projects in `library` (None = the one open in Resolve). Another library: only when
+    /// nothing real is open, and Resolve is always switched back.
+    pub fn projects(&self, library: Option<&ResolveLibrary>) -> Browsed<Vec<ResolveProject>> {
+        let from = match self.switch_for(library) {
+            Ok(from) => from,
+            Err(e) => {
+                return Browsed {
+                    result: Err(e),
+                    back: Back::NoSwitch,
+                    from: None,
+                }
+            }
+        };
+        let switch = from.is_some();
+        let (lines, back) = self.run_in(&Op::Projects { library, switch }, switch, library);
+        Browsed {
+            result: lines.map(|lines| {
+                lines
+                    .into_iter()
+                    .filter_map(|l| match l {
+                        Line::Project { folder, name } => Some(ResolveProject { folder, name }),
+                        _ => None,
+                    })
+                    .collect()
+            }),
+            back,
+            from,
+        }
+    }
+
+    /// Export `name` (in `folder`, "" = the top level) of `library` (None = the open one) to
+    /// the `.drp` file `dest`. Another library: as `projects`.
+    pub fn export(
+        &self,
+        name: &str,
+        folder: &str,
+        dest: &Path,
+        library: Option<&ResolveLibrary>,
+    ) -> Browsed<()> {
+        let from = match self.switch_for(library) {
+            Ok(from) => from,
+            Err(e) => {
+                return Browsed {
+                    result: Err(e),
+                    back: Back::NoSwitch,
+                    from: None,
+                }
+            }
+        };
+        let switch = from.is_some();
+        let op = Op::Export {
+            name,
+            folder,
+            dest,
+            library,
+            switch,
+        };
+        let (lines, back) = self.run_in(&op, switch, library);
+        let couldnt = || Problem::Plain(format!("Resolve couldn't export {name}."));
+        let result = match lines {
             Err(Problem::Failed(why)) => {
                 log::info!("Resolve export of {name}: {why}");
-                return Err(couldnt());
+                Err(couldnt())
             }
-            Err(e) => return Err(e),
+            Err(e) => Err(e),
+            Ok(lines) => match result_of(&lines) {
+                Some(("ok", _)) if dest.is_file() => Ok(()),
+                Some(("no-folder", _)) => Err(Problem::Plain(format!(
+                    "Resolve couldn't export {name}: the folder \"{folder}\" isn't in that library."
+                ))),
+                _ => Err(couldnt()),
+            },
         };
-        match result_of(&lines) {
-            Some(("ok", _)) if dest.is_file() => Ok(()),
-            Some(("no-folder", _)) => Err(Problem::Plain(format!(
-                "Resolve couldn't export {name}: the folder \"{folder}\" isn't in Resolve's open library."
-            ))),
-            _ => Err(couldnt()),
-        }
+        Browsed { result, back, from }
     }
 
     /// Add the `.drp` as project `name` in `folder` of `library` (None = the open one).
@@ -630,14 +827,28 @@ impl Link<'_> {
             outcome,
             back: Back::NoSwitch,
             from: None,
+            note: None,
         };
         if !drp.is_file() {
             return report(Outcome::Missing);
         }
-        let state = match self.state() {
-            Ok(state) => state,
+        // With a library: Resolve's list too, to know whether this computer has it.
+        let (state, available) = match self.look(library.is_some()) {
+            Ok(found) => found,
             Err(Problem::Status(s)) => return report(Outcome::Unreachable(s)),
             Err(e) => return report(Outcome::Failed(e.message())),
+        };
+        let (library, note) = match target(library, &state.current, &available) {
+            Target::Open => (None, None),
+            Target::Library(l) => (Some(l), None),
+            Target::Missing(l) => {
+                log::info!(
+                    "Resolve library {} isn't on this computer: adding to {}",
+                    l.db_name,
+                    state.current.db_name
+                );
+                (None, Some(missing_note(l, &state.current)))
+            }
         };
         if decide(library, &state.current, state.contents) == When::WaitForNoProject {
             return report(Outcome::Busy);
@@ -661,6 +872,7 @@ impl Link<'_> {
                     outcome: Outcome::Unreachable(s),
                     back: back_of(switch, None),
                     from,
+                    note: None,
                 }
             }
             Err(e) => {
@@ -668,6 +880,7 @@ impl Link<'_> {
                     outcome: Outcome::Failed(e.message()),
                     back: back_of(switch, None),
                     from,
+                    note: None,
                 }
             }
         };
@@ -684,10 +897,13 @@ impl Link<'_> {
                 other => Outcome::Failed(format!("unexpected answer {other:?}")),
             },
         };
+        // Only an added project went somewhere else than its template says.
+        let note = note.filter(|_| outcome == Outcome::Added);
         AddReport {
             outcome,
             back,
             from,
+            note,
         }
     }
 }
@@ -1185,6 +1401,12 @@ pub struct ProjectResolve {
     pub status: String,
     /// RFC 3339 of the last change; "" when unknown.
     pub at: String,
+    /// The project file's note (e.g. it went into another library, or why Nest stopped).
+    pub note: Option<String>,
+    /// It's on this computer's waiting list (Try now / Don't add apply).
+    pub waiting: bool,
+    /// What stops it going in right now, in plain words (only while it waits).
+    pub problem: Option<String>,
 }
 
 /// The `resolve` part of a manifest, if it has one with a name. Read-only.
@@ -1209,7 +1431,39 @@ pub fn project_resolve(manifest: &serde_json::Value) -> Option<ProjectResolve> {
             .map(str::to_string),
         status: text("status"),
         at: text("at"),
+        note: Some(text("note")).filter(|n| !n.is_empty()),
+        waiting: false,
+        problem: None,
     })
+}
+
+/// What stops a waiting project going into Resolve, from its last try (or, not tried yet,
+/// what the last try of any project found). None = nothing to do but wait (Resolve isn't
+/// open, is starting, or was busy a moment).
+pub fn waiting_problem(entry: &WaitingEntry, last: Option<ResolveStatus>) -> Option<String> {
+    let library = entry.library.as_ref().map(|l| l.db_name.as_str());
+    let key = match entry.last_outcome.as_deref() {
+        Some(key) => key,
+        None => Outcome::Unreachable(last?).key(),
+    };
+    match key {
+        "scriptingOff" => Some(SCRIPTING_HINT.into()),
+        "busy" => library.map(|l| {
+            format!("Close your project in Resolve first. Nest has to switch library to add it to “{l}”.")
+        }),
+        "noLibrary" => Some(format!(
+            "Resolve couldn't open the library “{}” on this computer.",
+            library.unwrap_or_default()
+        )),
+        "noFolder" => Some(format!(
+            "Resolve couldn't make the folder “{}”. Nest will try again.",
+            entry.folder
+        )),
+        "failed" => Some("Resolve didn't take it last time. Nest will try again.".into()),
+        "notInstalled" => Some(ResolveStatus::NotInstalled.message().into()),
+        "noHelper" => Some(ResolveStatus::NoHelper.message().into()),
+        _ => None,
+    }
 }
 
 #[cfg(test)]
@@ -1287,6 +1541,39 @@ mod tests {
         });
         assert_eq!(&a[3..], ["x", "x", "x", "x30", "x"]);
         assert_eq!(args(&Op::Status), ["status"]);
+        // Projects and export name their library the same way, hex only.
+        let a = args(&Op::Projects {
+            library: Some(&lib),
+            switch: true,
+        });
+        assert_eq!(
+            a,
+            [
+                "projects",
+                &hex("1"),
+                &hex("Disk"),
+                &hex("Work"),
+                &hex("10.0.0.5")
+            ]
+        );
+        assert_eq!(
+            args(&Op::Projects {
+                library: None,
+                switch: false
+            }),
+            ["projects", "x30", "x", "x", "x"]
+        );
+        let a = args(&Op::Export {
+            name: "꿈 Grade",
+            folder: "A/B",
+            dest: Path::new("/tmp/x.drp"),
+            library: Some(&lib),
+            switch: false,
+        });
+        assert_eq!(a.len(), 8);
+        assert_eq!(unhex(&a[1]).unwrap(), "꿈 Grade");
+        assert_eq!(unhex(&a[4]).unwrap(), "0");
+        assert_eq!(unhex(&a[6]).unwrap(), "Work");
         assert_eq!(
             args(&Op::Switch { library: &lib }),
             ["switch", &hex("Disk"), &hex("Work"), &hex("10.0.0.5")]
@@ -1306,6 +1593,12 @@ mod tests {
         assert_eq!(time_limit(&add(true)), SWITCH_TIMEOUT);
         assert_eq!(time_limit(&add(false)), TIMEOUT);
         assert_eq!(time_limit(&Op::State), TIMEOUT);
+        let projects = |switch| Op::Projects {
+            library: Some(&l),
+            switch,
+        };
+        assert_eq!(time_limit(&projects(true)), SWITCH_TIMEOUT);
+        assert_eq!(time_limit(&projects(false)), TIMEOUT);
         assert!(SWITCH_TIMEOUT >= Duration::from_secs(120));
     }
 
@@ -1324,8 +1617,15 @@ mod tests {
         }
         // Emptiness comes from contents, never from a project's name.
         assert!(!SCRIPT.contains("Untitled"));
-        // The switch back gets the library table exactly as Resolve gave it.
+        // The switch back gets the library table exactly as Resolve gave it, in one place that
+        // add, projects and export all go through.
         assert!(SCRIPT.contains("SetCurrentDatabase(before)"));
+        assert_eq!(SCRIPT.matches("SetCurrentDatabase(before)").count(), 1);
+        assert_eq!(
+            SCRIPT.matches("in_library(").count(),
+            4,
+            "defined once, used thrice"
+        );
         // Resolve's lists carry a "__flags" entry: only numbered entries count as items, or an
         // empty project looks busy forever (found on Resolve 21.1, 2026-10-17).
         assert!(SCRIPT.contains(r#"if type(k) == "number" then n = n + 1 end"#));
@@ -1589,8 +1889,11 @@ mod tests {
         let mut before = |l: &ResolveLibrary| heard.borrow_mut().push(l.clone());
 
         // Into the open library: added, no switch.
+        // With a library Nest asks for the libraries too (the state comes with them); a
+        // list without libraries = Resolve didn't say: the template's library is tried.
         let answers = [
             ("state", state("Work", REAL)),
+            ("libraries", state("Work", REAL)),
             ("add", Ok("NEST result added\n".to_string())),
         ];
         let run = fake(&answers, &calls, &limits);
@@ -1609,13 +1912,14 @@ mod tests {
         let r = link.add(&drp, "Grade", "Acme", Some(&home), &mut before);
         assert_eq!(r.outcome, Outcome::Busy);
         assert_eq!(calls.borrow().len(), 1, "only asked about the state");
+        assert_eq!(calls.borrow()[0][0], "libraries");
         assert!(heard.borrow().is_empty());
 
         // Another library, nothing open: switches (longer limit), and back.
         calls.borrow_mut().clear();
         limits.borrow_mut().clear();
         let answers = [
-            ("state", state("Work", EMPTY)),
+            ("libraries", state("Work", EMPTY)),
             (
                 "add",
                 Ok("NEST switched\nNEST back ok\nNEST result exists\n".to_string()),
@@ -1635,7 +1939,7 @@ mod tests {
 
         // The switch back failed: still added, and said so.
         let answers = [
-            ("state", state("Work", EMPTY)),
+            ("libraries", state("Work", EMPTY)),
             (
                 "add",
                 Ok("NEST switched\nNEST back fail\nNEST result added\n".to_string()),
@@ -1651,7 +1955,7 @@ mod tests {
 
         // Timed out after the switch: unreachable (no try counted), switch back unknown.
         let answers = [
-            ("state", state("Work", EMPTY)),
+            ("libraries", state("Work", EMPTY)),
             ("add", Err(RunError::Timeout)),
         ];
         let run = fake(&answers, &calls, &limits);
@@ -1757,6 +2061,7 @@ mod tests {
             outcome,
             back,
             from: None,
+            note: None,
         };
         for s in [
             ResolveStatus::NoAnswer,
@@ -1802,10 +2107,12 @@ mod tests {
                 run: &run,
                 running: &long,
             };
+            let b = link.export("꿈 Grade", "", &dest, None);
             assert_eq!(
-                link.export("꿈 Grade", "", &dest).unwrap_err().message(),
+                b.result.unwrap_err().message(),
                 "Resolve couldn't export 꿈 Grade."
             );
+            assert_eq!(b.back, Back::NoSwitch);
         }
     }
 
@@ -1842,7 +2149,7 @@ mod tests {
         let libs = link.libraries().unwrap();
         assert_eq!(libs.current, Some(lib("Local Database")));
         assert_eq!(libs.libraries, vec![lib("Local Database"), lib("Archive")]);
-        let projects = link.projects().unwrap();
+        let projects = link.projects(None).result.unwrap();
         assert_eq!(projects.len(), 2);
         assert_eq!(projects[1].folder, "Acme");
         assert_eq!(projects[1].name, "Two");
@@ -1975,7 +2282,15 @@ mod tests {
                 library: Some("Work".into()),
                 status: "added".into(),
                 at: "2026-10-17T10:00:00+02:00".into(),
+                note: None,
+                waiting: false,
+                problem: None,
             })
+        );
+        let noted = serde_json::json!({ "resolve": { "name": "G", "note": "went elsewhere" } });
+        assert_eq!(
+            project_resolve(&noted).unwrap().note.as_deref(),
+            Some("went elsewhere")
         );
         let open = serde_json::json!({ "resolve": { "name": "한국 프로젝트", "library": null } });
         let r = project_resolve(&open).unwrap();
@@ -2101,5 +2416,268 @@ mod tests {
         .is_err());
         assert!(!drp_copy(&config, "p2").exists());
         assert_eq!(fs::read_dir(config.join(DRP_DIR)).unwrap().count(), 1);
+    }
+
+    #[test]
+    fn a_template_library_this_computer_lacks_falls_back_to_the_open_one() {
+        let (work, client) = (lib("Local Database"), lib("Client Work"));
+        let here = [work.clone(), lib("Archive")];
+        assert_eq!(target(None, &work, &here), Target::Open);
+        assert_eq!(
+            target(Some(&lib("Archive")), &work, &here),
+            Target::Library(&here[1])
+        );
+        assert_eq!(target(Some(&work), &work, &here), Target::Library(&work));
+        assert_eq!(
+            target(Some(&client), &work, &here),
+            Target::Missing(&client)
+        );
+        // Resolve gave no list: try it (a failed switch says "no library").
+        assert_eq!(target(Some(&client), &work, &[]), Target::Library(&client));
+        // Same name, other type: not that library.
+        let pg = ResolveLibrary {
+            db_type: "PostgreSQL".into(),
+            db_name: "Archive".into(),
+            ip_address: None,
+        };
+        assert_eq!(target(Some(&pg), &work, &here), Target::Missing(&pg));
+        assert_eq!(
+            missing_note(&client, &work),
+            "“Client Work” isn't on this computer, so it went into “Local Database”."
+        );
+    }
+
+    fn libraries_answer(
+        current: &str,
+        contents: Contents,
+        others: &[&str],
+    ) -> Result<String, RunError> {
+        let mut out = format!(
+            "NEST current {} {} x\nNEST open x\nNEST contents {} {} {}\n",
+            hex("Disk"),
+            hex(current),
+            contents.timelines,
+            contents.clips,
+            contents.folders
+        );
+        for o in others {
+            out.push_str(&format!("NEST library {} {} x\n", hex("Disk"), hex(o)));
+        }
+        out.push_str("NEST result ok\n");
+        Ok(out)
+    }
+
+    #[test]
+    fn add_goes_into_the_open_library_when_the_templates_isnt_here() {
+        let dir = tempfile::tempdir().unwrap();
+        let drp = dir.path().join("x.drp");
+        fs::write(&drp, "drp").unwrap();
+        let long = || Some(Duration::from_secs(600));
+        let calls = Calls::default();
+        let limits = RefCell::new(vec![]);
+        let mut before = |_: &ResolveLibrary| {};
+        let answers = [
+            (
+                "libraries",
+                libraries_answer("Local Database", REAL, &["Local Database"]),
+            ),
+            ("add", Ok("NEST result added\n".to_string())),
+        ];
+        let run = fake(&answers, &calls, &limits);
+        let link = Link {
+            run: &run,
+            running: &long,
+        };
+        let client = lib("Client Work");
+        let r = link.add(&drp, "Grade", "Acme", Some(&client), &mut before);
+        assert_eq!((r.outcome, r.back), (Outcome::Added, Back::NoSwitch));
+        assert_eq!(
+            r.note.as_deref(),
+            Some("“Client Work” isn't on this computer, so it went into “Local Database”.")
+        );
+        let add = calls.borrow()[1].clone();
+        assert_eq!(unhex(&add[6]).unwrap(), "0", "no switch");
+        assert_eq!(unhex(&add[5]).unwrap(), "", "into the open library");
+
+        // The library is here: switched to as before (nothing real open), no note.
+        calls.borrow_mut().clear();
+        let answers = [
+            (
+                "libraries",
+                libraries_answer("Local Database", EMPTY, &["Local Database", "Client Work"]),
+            ),
+            (
+                "add",
+                Ok("NEST switched\nNEST back ok\nNEST result added\n".to_string()),
+            ),
+        ];
+        let run = fake(&answers, &calls, &limits);
+        let link = Link {
+            run: &run,
+            running: &long,
+        };
+        let r = link.add(&drp, "Grade", "Acme", Some(&client), &mut before);
+        assert_eq!(
+            (r.outcome, r.back, r.note),
+            (Outcome::Added, Back::Done, None)
+        );
+        assert_eq!(unhex(&calls.borrow()[1][5]).unwrap(), "Client Work");
+        assert_eq!(unhex(&calls.borrow()[1][6]).unwrap(), "1");
+    }
+
+    #[test]
+    fn projects_and_export_in_another_library_follow_the_switch_rule() {
+        let dir = tempfile::tempdir().unwrap();
+        let dest = dir.path().join("Grade.drp");
+        let long = || Some(Duration::from_secs(600));
+        let calls = Calls::default();
+        let limits = RefCell::new(vec![]);
+        let archive = lib("Archive");
+
+        // A real project open: nothing switches, and the user hears what to do.
+        let answers = [("state", state("Work", REAL))];
+        let run = fake(&answers, &calls, &limits);
+        let link = Link {
+            run: &run,
+            running: &long,
+        };
+        let b = link.projects(Some(&archive));
+        assert_eq!(
+            b.result.unwrap_err().message(),
+            "Close your project in Resolve first. Nest has to switch library to look inside “Archive”."
+        );
+        assert_eq!(b.back, Back::NoSwitch);
+        let e = link.export("Grade", "", &dest, Some(&archive));
+        assert!(e
+            .result
+            .unwrap_err()
+            .message()
+            .starts_with("Close your project"));
+        assert!(
+            calls.borrow().iter().all(|c| c[0] == "state"),
+            "only asked about the state"
+        );
+
+        // The open library: no switch at all.
+        calls.borrow_mut().clear();
+        let answers = [
+            ("state", state("Work", REAL)),
+            (
+                "projects",
+                Ok(format!("NEST project x {}\nNEST result ok\n", hex("One"))),
+            ),
+        ];
+        let run = fake(&answers, &calls, &limits);
+        let link = Link {
+            run: &run,
+            running: &long,
+        };
+        let b = link.projects(Some(&lib("Work")));
+        assert_eq!(b.result.unwrap().len(), 1);
+        assert_eq!(b.back, Back::NoSwitch);
+        assert_eq!(unhex(&calls.borrow()[1][1]).unwrap(), "0");
+
+        // Nothing real open: switches (longer limit), lists, and is switched back.
+        calls.borrow_mut().clear();
+        limits.borrow_mut().clear();
+        let answers = [
+            ("state", state("Work", EMPTY)),
+            (
+                "projects",
+                Ok(format!(
+                    "NEST switched\nNEST project x {}\nNEST back ok\nNEST result ok\n",
+                    hex("Old")
+                )),
+            ),
+            (
+                "export",
+                Ok("NEST switched\nNEST back fail\nNEST result ok\n".to_string()),
+            ),
+        ];
+        let run = fake(&answers, &calls, &limits);
+        let link = Link {
+            run: &run,
+            running: &long,
+        };
+        let b = link.projects(Some(&archive));
+        assert_eq!(b.result.unwrap()[0].name, "Old");
+        assert_eq!((b.back, b.from), (Back::Done, Some(lib("Work"))));
+        assert_eq!(unhex(&calls.borrow()[1][1]).unwrap(), "1", "switch");
+        assert_eq!(unhex(&calls.borrow()[1][3]).unwrap(), "Archive");
+        assert_eq!(limits.borrow()[1], SWITCH_TIMEOUT);
+        // The switch back failed: reported for the caller to deal with.
+        fs::write(&dest, "drp").unwrap();
+        let e = link.export("Grade", "", &dest, Some(&archive));
+        assert_eq!((e.back, e.from), (Back::Failed, Some(lib("Work"))));
+        assert!(e.result.is_ok());
+
+        // The helper found something open after all, or no such library: plain words.
+        let answers = [
+            ("state", state("Work", EMPTY)),
+            ("projects", Ok("NEST result busy\n".to_string())),
+            ("export", Ok("NEST result no-library\n".to_string())),
+        ];
+        let run = fake(&answers, &calls, &limits);
+        let link = Link {
+            run: &run,
+            running: &long,
+        };
+        let b = link.projects(Some(&archive));
+        assert!(b
+            .result
+            .unwrap_err()
+            .message()
+            .starts_with("Close your project"));
+        assert_eq!(b.back, Back::NoSwitch);
+        let e = link.export("Grade", "", &dest, Some(&archive));
+        assert_eq!(
+            e.result.unwrap_err().message(),
+            "Resolve couldn't open the library “Archive” on this computer."
+        );
+
+        // Timed out after the switch: not known whether it's back.
+        let answers = [
+            ("state", state("Work", EMPTY)),
+            ("projects", Err(RunError::Timeout)),
+        ];
+        let run = fake(&answers, &calls, &limits);
+        let link = Link {
+            run: &run,
+            running: &long,
+        };
+        let b = link.projects(Some(&archive));
+        assert_eq!(b.back, Back::Unknown);
+        assert!(b.result.is_err());
+    }
+
+    #[test]
+    fn a_waiting_project_says_what_stops_it_in_plain_words() {
+        let mut e = entry("2026-10-17T09:00:00+08:00");
+        assert_eq!(waiting_problem(&e, None), None, "not tried");
+        assert_eq!(
+            waiting_problem(&e, Some(ResolveStatus::ScriptingOff)).as_deref(),
+            Some("Turn on External scripting in Resolve: Preferences → System → General → Local.")
+        );
+        e.last_outcome = Some("notRunning".into());
+        assert_eq!(waiting_problem(&e, Some(ResolveStatus::ScriptingOff)), None);
+        e.last_outcome = Some("scriptingOff".into());
+        assert_eq!(waiting_problem(&e, None).as_deref(), Some(SCRIPTING_HINT));
+        e.last_outcome = Some("busy".into());
+        assert_eq!(
+            waiting_problem(&e, None),
+            None,
+            "open library: busy can't happen"
+        );
+        e.library = Some(lib("Client Work"));
+        assert_eq!(
+            waiting_problem(&e, None).as_deref(),
+            Some("Close your project in Resolve first. Nest has to switch library to add it to “Client Work”.")
+        );
+        e.last_outcome = Some("noFolder".into());
+        assert!(waiting_problem(&e, None).unwrap().contains("“Acme”"));
+        for quiet in ["starting", "noAnswer", "notRunning"] {
+            e.last_outcome = Some(quiet.into());
+            assert_eq!(waiting_problem(&e, None), None, "{quiet}");
+        }
     }
 }

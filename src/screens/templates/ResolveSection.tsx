@@ -1,7 +1,16 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Button } from "../../components/ui";
-import { resolveExportToEditor, resolveProjects, resolveStatus } from "../../lib/commands";
-import { errorMessage, type Field, type ResolveProject, type ResolveStarter, type ResolveStatus } from "../../lib/types";
+import { resolveExportToEditor, resolveLibraries, resolveProjects, resolveStatus } from "../../lib/commands";
+import { libraryKey, sameLibrary } from "../../lib/resolve";
+import {
+  errorMessage,
+  type Field,
+  type ResolveLibraries,
+  type ResolveLibrary,
+  type ResolveProject,
+  type ResolveStarter,
+  type ResolveStatus,
+} from "../../lib/types";
 import NameField, { NameView } from "./NameField";
 import styles from "./editor.module.css";
 
@@ -46,11 +55,23 @@ interface Props {
   dropping?: boolean;
 }
 
+/** "Choose from Resolve…" list: the projects of one library (`from`; null = the open one). */
+type Pick = {
+  kind: "pick";
+  projects: ResolveProject[];
+  libraries: ResolveLibraries;
+  from: ResolveLibrary | null;
+  /** Looking inside another library (Resolve switches and back: may take a moment). */
+  loading: boolean;
+  /** Why that library's projects can't be shown (e.g. close your project first). */
+  note: string | null;
+};
+
 type Step =
   | { kind: "idle" }
   | { kind: "asking" }
   | { kind: "line"; text: string }
-  | { kind: "pick"; projects: ResolveProject[] }
+  | Pick
   | { kind: "exporting"; name: string };
 
 /** A row in the "Choose from Resolve…" list: a folder (heading) or a project. */
@@ -84,9 +105,14 @@ export function pickRows(projects: ResolveProject[], filter: string): PickRow[] 
   return rows;
 }
 
-/** One pattern (Name in Resolve, Put it in folder): shown with chips; click to change it. */
-function PatternRow({
-  id,
+/** The libraries to offer: what Resolve listed, plus `saved` if Resolve didn't list it (closed,
+ *  or not on this computer), so a choice is never lost. */
+export function libraryChoices(listed: ResolveLibrary[], saved: ResolveLibrary | null | undefined): ResolveLibrary[] {
+  return saved && !listed.some((l) => sameLibrary(l, saved)) ? [...listed, saved] : listed;
+}
+
+/** A pattern (Name in Resolve, the folder): shown with chips; click to change it. */
+function PatternValue({
   label,
   value,
   empty,
@@ -97,7 +123,6 @@ function PatternRow({
   onNewBlank,
   onChip,
 }: {
-  id: string;
   label: string;
   value: string;
   /** What shows when the pattern is empty. */
@@ -110,52 +135,44 @@ function PatternRow({
   onChip: (key: string) => void;
 }) {
   const [editing, setEditing] = useState(false);
-  return (
-    <>
-      <span id={id} className={styles.resolveLabel}>
-        {label}
-      </span>
-      <div>
-        {editing ? (
-          <NameField
-            value={value}
-            fields={fields}
-            label={label}
-            allowSlash={allowSlash}
-            placeholder={placeholder}
-            onCommit={(v) => {
-              setEditing(false);
-              if (v !== value) onCommit(v);
-            }}
-            onCancel={() => setEditing(false)}
-            onNewBlank={onNewBlank}
-            onChip={(key) => onChip(key)}
-          />
-        ) : (
-          // Not a <button>: the name's chips are buttons themselves.
-          <div
-            role="button"
-            tabIndex={0}
-            className={styles.resolveValue}
-            aria-labelledby={id}
-            onClick={() => setEditing(true)}
-            onKeyDown={(e) => {
-              if (e.key === "Enter" || e.key === " ") {
-                e.preventDefault();
-                setEditing(true);
-              }
-            }}
-          >
-            {value ? <NameView name={value} fields={fields} onChip={() => setEditing(true)} /> : empty}
-          </div>
-        )}
-      </div>
-    </>
+  return editing ? (
+    <NameField
+      value={value}
+      fields={fields}
+      label={label}
+      allowSlash={allowSlash}
+      placeholder={placeholder}
+      onCommit={(v) => {
+        setEditing(false);
+        if (v !== value) onCommit(v);
+      }}
+      onCancel={() => setEditing(false)}
+      onNewBlank={onNewBlank}
+      onChip={(key) => onChip(key)}
+    />
+  ) : (
+    // Not a <button>: the name's chips are buttons themselves.
+    <div
+      role="button"
+      tabIndex={0}
+      className={styles.resolveValue}
+      aria-label={label}
+      onClick={() => setEditing(true)}
+      onKeyDown={(e) => {
+        if (e.key === "Enter" || e.key === " ") {
+          e.preventDefault();
+          setEditing(true);
+        }
+      }}
+    >
+      {value ? <NameView name={value} fields={fields} onChip={() => setEditing(true)} /> : empty}
+    </div>
   );
 }
 
 /** "Resolve project" under the files (v0.8): a DaVinci Resolve starter project; Create adds a
- *  copy of it to Resolve for each new job. Chosen from Resolve, or a dropped .drp. */
+ *  copy of it to Resolve for each new job, into the library and folder set here. Chosen from
+ *  Resolve (any of its libraries), or a dropped .drp. */
 export default function ResolveSection({
   sessionId,
   value,
@@ -171,6 +188,9 @@ export default function ResolveSection({
   const [step, setStep] = useState<Step>({ kind: "idle" });
   const [filter, setFilter] = useState("");
   const [active, setActive] = useState(0);
+  /** Resolve's libraries (null = not known: Resolve closed, or not asked yet). */
+  const [libs, setLibs] = useState<ResolveLibraries | null>(null);
+  const pickerRef = useRef<HTMLDivElement>(null);
   const listRef = useRef<HTMLDivElement>(null);
   const live = useRef(true);
   // Set on every mount too: React's development double mount runs the cleanup once, and a
@@ -181,6 +201,16 @@ export default function ResolveSection({
       live.current = false;
     };
   }, []);
+
+  // "Goes into" lists Resolve's libraries once there's a starter project (quietly: Resolve
+  // may well be closed, and then the saved choice still shows).
+  const hasStarter = !!value;
+  useEffect(() => {
+    if (!hasStarter) return;
+    resolveLibraries()
+      .then((l) => live.current && setLibs(l))
+      .catch(() => {});
+  }, [hasStarter]);
 
   const rows = useMemo(() => (step.kind === "pick" ? pickRows(step.projects, filter) : []), [step, filter]);
   const choices = rows.filter((r): r is Extract<PickRow, { kind: "project" }> => r.kind === "project");
@@ -198,13 +228,17 @@ export default function ResolveSection({
         setStep({ kind: "line", text: STATUS_LINE[status] });
         return;
       }
-      const projects = await resolveProjects();
+      const [projects, libraries] = await Promise.all([
+        resolveProjects(null),
+        resolveLibraries().catch((): ResolveLibraries => ({ current: null, libraries: [] })),
+      ]);
       if (!live.current) return;
+      if (libraries.libraries.length) setLibs(libraries);
       setFilter("");
       setActive(0);
       setStep(
-        projects.length
-          ? { kind: "pick", projects }
+        projects.length || libraries.libraries.length > 1
+          ? { kind: "pick", projects, libraries, from: null, loading: false, note: null }
           : { kind: "line", text: "There are no projects in the library open in Resolve." },
       );
     } catch (e) {
@@ -212,10 +246,30 @@ export default function ResolveSection({
     }
   };
 
+  /** "From:" another library: its projects (Rust switches Resolve there and back). */
+  const lookIn = async (key: string) => {
+    if (step.kind !== "pick") return;
+    const { current, libraries } = step.libraries;
+    const chosen = libraries.find((l) => libraryKey(l) === key) ?? null;
+    const from = chosen && current && sameLibrary(chosen, current) ? null : chosen;
+    setFilter("");
+    setActive(0);
+    setStep({ ...step, from, loading: true, note: null });
+    const still = (s: Step): s is Pick => s.kind === "pick" && libraryKey(s.from) === libraryKey(from);
+    try {
+      const projects = await resolveProjects(from);
+      if (live.current) setStep((s) => (still(s) ? { ...s, projects, loading: false } : s));
+    } catch (e) {
+      if (live.current) setStep((s) => (still(s) ? { ...s, projects: [], loading: false, note: errorMessage(e) } : s));
+    }
+    listRef.current?.focus();
+  };
+
   const pick = async (p: ResolveProject) => {
+    const from = step.kind === "pick" ? step.from : null;
     setStep({ kind: "exporting", name: p.name });
     try {
-      const drp = await resolveExportToEditor(sessionId, p.name, p.folder);
+      const drp = await resolveExportToEditor(sessionId, p.name, p.folder, from);
       if (!live.current) return;
       onChange(value ? { ...value, drp } : { drp, folder: defaultFolder(fields), on: true });
       setStep({ kind: "idle" });
@@ -234,19 +288,18 @@ export default function ResolveSection({
 
   const picker = step.kind === "pick" && (
     <div
-      ref={listRef}
+      ref={pickerRef}
       className={`${styles.picker} ${styles.resolvePicker}`}
-      role="listbox"
-      aria-label="Projects in Resolve"
-      tabIndex={-1}
       // Clicking a project mustn't take the focus away first (WebKit doesn't focus buttons).
       onMouseDown={(e) => {
-        if (!(e.target as HTMLElement).closest("input")) e.preventDefault();
+        if (!(e.target as HTMLElement).closest("input, select")) e.preventDefault();
       }}
       onBlur={(e) => {
-        if (!listRef.current?.contains(e.relatedTarget as Node | null)) setStep({ kind: "idle" });
+        if (!pickerRef.current?.contains(e.relatedTarget as Node | null)) setStep({ kind: "idle" });
       }}
       onKeyDown={(e) => {
+        // The library dropdown keeps its own keys.
+        if ((e.target as HTMLElement).tagName === "SELECT" && e.key !== "Escape") return;
         if (e.key === "ArrowDown" || e.key === "ArrowUp") {
           e.preventDefault();
           const n = Math.max(1, choices.length);
@@ -254,7 +307,7 @@ export default function ResolveSection({
         } else if (e.key === "Enter") {
           e.preventDefault();
           const c = choices[active];
-          if (c) void pick(c.project);
+          if (c && !step.loading) void pick(c.project);
         } else if (e.key === "Escape") {
           e.preventDefault();
           e.stopPropagation();
@@ -262,6 +315,22 @@ export default function ResolveSection({
         }
       }}
     >
+      {step.libraries.libraries.length > 1 && (
+        <label className={styles.resolveFrom}>
+          From
+          <select
+            className={styles.select}
+            value={libraryKey(step.from ?? step.libraries.current)}
+            onChange={(e) => void lookIn(e.target.value)}
+          >
+            {step.libraries.libraries.map((l) => (
+              <option key={libraryKey(l)} value={libraryKey(l)}>
+                {step.libraries.current && sameLibrary(l, step.libraries.current) ? `${l.dbName} (open in Resolve)` : l.dbName}
+              </option>
+            ))}
+          </select>
+        </label>
+      )}
       {step.projects.length > 8 && (
         <input
           className={styles.input}
@@ -275,27 +344,43 @@ export default function ResolveSection({
           }}
         />
       )}
-      {rows.map((r) =>
-        r.kind === "folder" ? (
-          <div key={r.key} className={styles.resolveFolder} style={{ paddingLeft: 8 + r.depth * 14 }} role="presentation">
-            {r.name}
+      <div ref={listRef} className={styles.resolveList} role="listbox" aria-label="Projects in Resolve" tabIndex={-1}>
+        {step.loading ? (
+          <div className={styles.resolveFolder} role="status">
+            <span className={styles.spinner} aria-hidden="true" /> Looking inside “{step.from?.dbName}”…
+          </div>
+        ) : step.note ? (
+          <div className={styles.resolveNote} role="status">
+            {step.note}
           </div>
         ) : (
-          <button
-            key={r.key}
-            type="button"
-            role="option"
-            aria-selected={choices[active] === r}
-            className={`${styles.pickItem} ${choices[active] === r ? styles.pickActive : ""}`}
-            style={{ paddingLeft: 8 + r.depth * 14 }}
-            onMouseEnter={() => setActive(choices.indexOf(r))}
-            onClick={() => void pick(r.project)}
-          >
-            {r.project.name}
-          </button>
-        ),
-      )}
-      {rows.length === 0 && <div className={styles.resolveFolder}>No project is called that.</div>}
+          rows.map((r) =>
+            r.kind === "folder" ? (
+              <div key={r.key} className={styles.resolveFolder} style={{ paddingLeft: 8 + r.depth * 14 }} role="presentation">
+                {r.name}
+              </div>
+            ) : (
+              <button
+                key={r.key}
+                type="button"
+                role="option"
+                aria-selected={choices[active] === r}
+                className={`${styles.pickItem} ${choices[active] === r ? styles.pickActive : ""}`}
+                style={{ paddingLeft: 8 + r.depth * 14 }}
+                onMouseEnter={() => setActive(choices.indexOf(r))}
+                onClick={() => void pick(r.project)}
+              >
+                {r.project.name}
+              </button>
+            ),
+          )
+        )}
+        {!step.loading && !step.note && rows.length === 0 && (
+          <div className={styles.resolveFolder}>
+            {step.projects.length ? "No project is called that." : "There are no projects in this library."}
+          </div>
+        )}
+      </div>
     </div>
   );
 
@@ -310,15 +395,18 @@ export default function ResolveSection({
       </p>
     ) : null;
 
+  const saved = value?.library ?? null;
+  const intoChoices = libraryChoices(libs?.libraries ?? [], saved);
+
   return (
     <section
       className={`${styles.resolve} ${dropping ? styles.resolveDrop : ""}`}
       aria-label="Resolve project"
       data-resolve-section
     >
+      <h3 className={styles.resolveTitle}>Resolve project</h3>
       {!value ? (
         <>
-          <h3 className={styles.resolveTitle}>Resolve project</h3>
           <p className={styles.hint}>Add a DaVinci Resolve starter project. New jobs get their own copy in Resolve.</p>
           <div className={styles.resolveLine}>
             <span className={styles.resolveAnchor}>
@@ -333,58 +421,93 @@ export default function ResolveSection({
         </>
       ) : (
         <>
-          <div className={styles.resolveLine}>
-            <h3 className={styles.resolveTitle}>
-              Resolve project: <span className={styles.resolveName}>{drpName(value.drp)}</span>
-            </h3>
-            <span className={styles.resolveAnchor}>
-              <button type="button" className={styles.fillLink} disabled={busy} onClick={() => void choose()}>
-                Change…
-              </button>
-              {picker}
-            </span>
-            <span aria-hidden="true" className={styles.hint}>
-              ·
-            </span>
-            <button type="button" className={styles.fillLink} disabled={busy} onClick={onRemove}>
-              Remove
-            </button>
-          </div>
-          {line}
           <div className={styles.resolveGrid}>
-            <PatternRow
-              id="resolve-name"
-              label="Name in Resolve"
-              value={value.name ?? ""}
-              empty={
-                <span className={styles.resolveEmpty}>
-                  <NameView name={folderName} fields={fields} />
-                  <span>same as the job folder</span>
-                </span>
-              }
-              placeholder="Same as the job folder"
-              fields={fields}
-              onCommit={(v) => {
-                const next: ResolveStarter = { ...value, name: v };
-                if (!v) delete next.name;
-                onChange(next);
-              }}
-              onNewBlank={onNewBlank}
-              onChip={onChip}
-            />
-            <PatternRow
-              id="resolve-folder"
-              label="Put it in folder"
-              value={value.folder}
-              empty={<span className={styles.resolveEmpty}>None (the top of the library)</span>}
-              fields={fields}
-              allowSlash
-              onCommit={(v) => onChange({ ...value, folder: v.replace(/^\/+|\/+$/g, "").replace(/\/{2,}/g, "/") })}
-              onNewBlank={onNewBlank}
-              onChip={onChip}
-            />
+            <span className={styles.resolveLabel}>Starter</span>
+            <div className={styles.resolveLine}>
+              <span className={styles.resolveName}>{drpName(value.drp)}</span>
+              <span className={styles.resolveAnchor}>
+                <button type="button" className={styles.fillLink} disabled={busy} onClick={() => void choose()}>
+                  Change…
+                </button>
+                {picker}
+              </span>
+              <span aria-hidden="true" className={styles.hint}>
+                ·
+              </span>
+              <button type="button" className={styles.fillLink} disabled={busy} onClick={onRemove}>
+                Remove
+              </button>
+            </div>
+            {line && (
+              <>
+                <span />
+                {line}
+              </>
+            )}
+
+            <span className={styles.resolveLabel}>Name in Resolve</span>
+            <div>
+              <PatternValue
+                label="Name in Resolve"
+                value={value.name ?? ""}
+                empty={
+                  <span className={styles.resolveEmpty}>
+                    <NameView name={folderName} fields={fields} />
+                    <span>same as the job folder</span>
+                  </span>
+                }
+                placeholder="Same as the job folder"
+                fields={fields}
+                onCommit={(v) => {
+                  const next: ResolveStarter = { ...value, name: v };
+                  if (!v) delete next.name;
+                  onChange(next);
+                }}
+                onNewBlank={onNewBlank}
+                onChip={onChip}
+              />
+            </div>
+
+            <span className={styles.resolveLabel}>Goes into</span>
+            <div className={styles.resolveLine}>
+              <select
+                className={styles.select}
+                aria-label="Library in Resolve"
+                value={libraryKey(saved)}
+                onChange={(e) => {
+                  const library = intoChoices.find((l) => libraryKey(l) === e.target.value);
+                  const next: ResolveStarter = { ...value, library };
+                  if (!library) delete next.library;
+                  onChange(next);
+                }}
+              >
+                <option value="">The library open in Resolve</option>
+                {intoChoices.map((l) => (
+                  <option key={libraryKey(l)} value={libraryKey(l)}>
+                    {l.dbName}
+                  </option>
+                ))}
+              </select>
+              <span aria-hidden="true" className={styles.resolveSep}>
+                ›
+              </span>
+              <PatternValue
+                label="Folder in Resolve"
+                value={value.folder}
+                empty={<span className={styles.resolveEmpty}>the top of the library</span>}
+                fields={fields}
+                allowSlash
+                onCommit={(v) => onChange({ ...value, folder: v.replace(/^\/+|\/+$/g, "").replace(/\/{2,}/g, "/") })}
+                onNewBlank={onNewBlank}
+                onChip={onChip}
+              />
+            </div>
             <span />
-            <p className={styles.hint}>Use / for folders inside folders. Leave empty for none.</p>
+            <p className={styles.hint}>
+              Use / for folders inside folders. If this computer's Resolve doesn't have the library, the project goes
+              into the open one.
+            </p>
+
             <span />
             <label className={styles.resolveCheck}>
               <input type="checkbox" checked={value.on} onChange={(e) => onChange({ ...value, on: e.target.checked })} />

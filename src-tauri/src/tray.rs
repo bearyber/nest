@@ -41,6 +41,8 @@ const ID_NEW: &str = "tray:new";
 const ID_NEW_FROM: &str = "tray:new-from:";
 const ID_RECENT: &str = "tray:recent:";
 const ID_OPEN: &str = "tray:open";
+/// "Resolve: N waiting": opens Nest (the details panel shows each project's Resolve line).
+const ID_RESOLVE: &str = "tray:resolve";
 const ID_QUIT: &str = "tray:quit";
 const QUIT_INSTEAD: &str = "Quit instead";
 
@@ -222,7 +224,7 @@ pub fn menu_model(inputs: &TrayInputs) -> Vec<TrayItem> {
         })
         .collect();
     if let Some(n) = inputs.resolve_waiting.filter(|n| *n > 0) {
-        status.push(TrayItem::Text(format!("Resolve: {n} waiting")));
+        status.push(action(ID_RESOLVE.into(), &format!("Resolve: {n} waiting")));
     }
     if !status.is_empty() {
         items.push(TrayItem::Separator);
@@ -638,7 +640,7 @@ pub fn on_menu(app: &AppHandle, id: &str) {
                     .show(|_| {});
             }
         });
-    } else if id == ID_OPEN {
+    } else if id == ID_OPEN || id == ID_RESOLVE {
         show_main(app);
     } else if id == ID_QUIT {
         quit(app);
@@ -1082,7 +1084,7 @@ mod tests {
                 "tray:new",
                 "-",
                 "text:Studio PC: seen 3 min ago",
-                "text:Resolve: 2 waiting",
+                "tray:resolve",
                 "-",
                 "tray:open",
                 "tray:quit",

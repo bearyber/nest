@@ -1,14 +1,5 @@
 import { describe, expect, it } from "vitest";
-import {
-  createdMessage,
-  libraryKey,
-  outcomeWords,
-  plannedLine,
-  projectLine,
-  sameLibrary,
-  statusLine,
-  toastForNotice,
-} from "./resolve";
+import { createdMessage, libraryKey, plannedLine, projectLine, sameLibrary, toastForNotice } from "./resolve";
 
 describe("Resolve words", () => {
   it("preview line: folders inside folders, or the top level", () => {
@@ -19,7 +10,16 @@ describe("Resolve words", () => {
   });
 
   it("details line for each status", () => {
-    const r = { name: "Grade", folder: "", library: null, status: "added", at: "2026-10-17T10:00:00+02:00" };
+    const r = {
+      name: "Grade",
+      folder: "",
+      library: null,
+      status: "added",
+      at: "2026-10-17T10:00:00+02:00",
+      note: null,
+      waiting: false,
+      problem: null,
+    };
     const added = projectLine(r);
     expect(added).toMatch(/^Resolve project: Grade · added /);
     expect(added).toMatch(/17/);
@@ -30,21 +30,6 @@ describe("Resolve words", () => {
     expect(projectLine({ ...r, status: "skipped" })).toMatch(/not added/);
     expect(projectLine({ ...r, status: "failed" })).toMatch(/stopped trying/);
     expect(projectLine({ ...r, status: "somethingNew" })).toBe("Resolve project: Grade");
-  });
-
-  it("last result words, unknown ones as they are", () => {
-    expect(outcomeWords(null)).toBe("Not tried yet");
-    expect(outcomeWords("notRunning")).toBe("Resolve wasn't open");
-    expect(outcomeWords("busy")).toMatch(/another library/);
-    expect(outcomeWords("later")).toBe("later");
-  });
-
-  it("status line: ✓ when ready; the scripting hint allows for Resolve just opening", () => {
-    expect(statusLine("ready")).toEqual({ text: "✓ Resolve is ready", ok: true });
-    expect(statusLine("scriptingOff").text).toMatch(/External scripting using.*Local/);
-    expect(statusLine("scriptingOff").text).toMatch(/If Resolve has just opened, wait a few seconds\.$/);
-    expect(statusLine("notRunning").text).toMatch(/^Open Resolve to check/);
-    expect(statusLine("notInstalled").text).toMatch(/isn't installed/);
   });
 
   it("libraries compare by type and name; none = the open one", () => {

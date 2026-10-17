@@ -19,6 +19,9 @@ interface Props {
   onDismissArchive: () => void;
   /** Its Resolve project, from its .project.json (null = none, or not known here). */
   resolve?: ProjectResolve | null;
+  /** While it waits for Resolve here: try the waiting list now, or take it off ("Don't add"). */
+  onResolveTryNow?: () => Promise<void>;
+  onResolveSkip?: () => Promise<void>;
   /** Folder sizes: the last measurement (null = none yet), and whether one is running. */
   sizes: Sizes | null;
   measuring: boolean;
@@ -30,6 +33,49 @@ interface Props {
 }
 
 type Inside = Sizes | "loading" | "error";
+
+/** "Resolve project: Grade · waiting for Resolve", what stops it (plain words, same line) and,
+ *  while it waits on this computer, Try now and Don't add. */
+function ResolveLine({
+  resolve,
+  onTryNow,
+  onSkip,
+}: {
+  resolve: ProjectResolve;
+  onTryNow?: () => Promise<void>;
+  onSkip?: () => Promise<void>;
+}) {
+  const [working, setWorking] = useState<"try" | "skip" | null>(null);
+  const run = (kind: "try" | "skip", f?: () => Promise<void>) => {
+    if (!f) return;
+    setWorking(kind);
+    f().finally(() => setWorking(null));
+  };
+  const why = resolve.waiting ? (resolve.problem ?? resolve.note) : resolve.note;
+  return (
+    <div className={styles.resolve}>
+      <p
+        className={styles.note}
+        title={[resolve.folder && `Folder in Resolve: ${resolve.folder}`, resolve.library && `Library: ${resolve.library}`]
+          .filter(Boolean)
+          .join("\n") || undefined}
+      >
+        {projectLine(resolve)}
+        {why && <span className={styles.resolveWhy}> · {why}</span>}
+      </p>
+      {resolve.waiting && (
+        <div className={styles.resolveActions}>
+          <Button onClick={() => run("try", onTryNow)} disabled={!!working}>
+            {working === "try" ? "Trying…" : "Try now"}
+          </Button>
+          <Button onClick={() => run("skip", onSkip)} disabled={!!working} title="Resolve won't get this project">
+            Don't add
+          </Button>
+        </div>
+      )}
+    </div>
+  );
+}
 
 /** Size rows: each folder opens in Finder/Explorer, and ▸ shows what's inside it, as deep as
  *  you like. "Loose files" opens the folder they're in. */
@@ -207,6 +253,8 @@ export default function Inspector({
   onArchive,
   onDismissArchive,
   resolve = null,
+  onResolveTryNow,
+  onResolveSkip,
   sizes,
   measuring,
   onMeasure,
@@ -369,16 +417,7 @@ export default function Inspector({
           </div>
         ))}
       </dl>
-      {resolve && (
-        <p
-          className={styles.note}
-          title={[resolve.folder && `Folder in Resolve: ${resolve.folder}`, resolve.library && `Library: ${resolve.library}`]
-            .filter(Boolean)
-            .join("\n") || undefined}
-        >
-          {projectLine(resolve)}
-        </p>
-      )}
+      {resolve && <ResolveLine resolve={resolve} onTryNow={onResolveTryNow} onSkip={onResolveSkip} />}
 
       {!p.device && !p.error && (
         <div className={styles.section}>

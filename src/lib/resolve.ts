@@ -1,5 +1,5 @@
-// Plain words for Resolve starter projects (New Project, details, Settings).
-import type { PlannedResolve, ProjectResolve, ResolveLibrary, ResolveStatus } from "./types";
+// Plain words for Resolve starter projects (template editor, New Project, details).
+import type { PlannedResolve, ProjectResolve, ResolveLibrary } from "./types";
 
 /** "17 Oct" in this computer's language (empty if the time can't be read). */
 export function shortDay(iso: string): string {
@@ -38,65 +38,6 @@ export function projectStatusWords(r: ProjectResolve): string {
 export function projectLine(r: ProjectResolve): string {
   const words = projectStatusWords(r);
   return `Resolve project: ${r.name}${words ? ` · ${words}` : ""}`;
-}
-
-/** The waiting list's "last result" (Rust `Outcome::key`). */
-export function outcomeWords(key: string | null): string {
-  switch (key) {
-    case null:
-    case "":
-      return "Not tried yet";
-    case "added":
-      return "Added";
-    case "exists":
-      return "Already in Resolve";
-    case "busy":
-      return "A project was open in another library";
-    case "noFolder":
-      return "Couldn't make the folder in Resolve";
-    case "noLibrary":
-      return "The library isn't in Resolve";
-    case "missing":
-      return "Nest's copy is gone";
-    case "scriptingOff":
-      return "Resolve didn't let Nest in";
-    case "notInstalled":
-      return "Resolve isn't installed";
-    case "notRunning":
-      return "Resolve wasn't open";
-    case "failed":
-      return "Resolve didn't do it";
-    default:
-      return key;
-  }
-}
-
-/** Settings' status line. `ok` = the ✓ look. */
-export function statusLine(s: ResolveStatus): { text: string; ok: boolean } {
-  switch (s) {
-    case "ready":
-      return { text: "✓ Resolve is ready", ok: true };
-    case "scriptingOff":
-      return {
-        text:
-          "Resolve isn't letting Nest in. In Resolve, open Preferences → System → General and set " +
-          "“External scripting using” to Local. If Resolve has just opened, wait a few seconds.",
-        ok: false,
-      };
-    case "notRunning":
-      return { text: "Open Resolve to check that Nest can reach it.", ok: false };
-    case "notInstalled":
-      return { text: "DaVinci Resolve isn't installed on this computer.", ok: false };
-    case "starting":
-      return { text: "Resolve is starting… Check again in a few seconds.", ok: false };
-    case "noAnswer":
-      return {
-        text: "Resolve didn't answer. If a window is open in Resolve (Preferences, a render), close it and check again.",
-        ok: false,
-      };
-    case "noHelper":
-      return { text: "Nest couldn't talk to Resolve's script runner. Reinstalling Resolve may help.", ok: false };
-  }
 }
 
 /** One string per library (for a <select> value). "" = the library open in Resolve. */

@@ -90,32 +90,10 @@ pub struct Settings {
     pub client_kits: std::collections::BTreeMap<String, PathBuf>,
     /// v0.7: the "<CODE> is ready" note after your very first project was shown (once).
     pub first_project_tip_seen: bool,
-    /// Resolve starter projects: the library (database) Nest adds them to on this computer.
-    /// None = whichever library is open in Resolve.
-    pub resolve_library: Option<ResolveLibrary>,
-    /// Keys this version doesn't know (e.g. written by a newer Nest): kept on every save.
+    /// Keys this version doesn't know (an older `resolveLibrary`, from before the library moved
+    /// into each template, included) (e.g. written by a newer Nest): kept on every save.
     #[serde(flatten)]
     pub other: serde_json::Map<String, serde_json::Value>,
-}
-
-/// A DaVinci Resolve project library (Resolve calls it a database): its type ("Disk",
-/// "PostgreSQL"…) and name, exactly as Resolve reports them.
-#[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct ResolveLibrary {
-    pub db_type: String,
-    pub db_name: String,
-    /// The server's address for a network (PostgreSQL) library, as Resolve reports it; kept so
-    /// switching back gives Resolve exactly the library it had.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub ip_address: Option<String>,
-}
-
-impl ResolveLibrary {
-    /// The same library (type and name; the address may be missing on one side).
-    pub fn same(&self, other: &ResolveLibrary) -> bool {
-        self.db_type == other.db_type && self.db_name == other.db_name
-    }
 }
 
 /// Template sync bookkeeping for one template id (kept in settings, never in the template).
@@ -165,7 +143,6 @@ impl Default for Settings {
             kits_folder: None,
             client_kits: Default::default(),
             first_project_tip_seen: false,
-            resolve_library: None,
             other: serde_json::Map::new(),
         }
     }
@@ -802,6 +779,24 @@ mod tests {
         let v: serde_json::Value = serde_json::from_str(&text).unwrap();
         assert_eq!(v["futureOption"]["a"], 1);
         assert_eq!(v["lastTemplate"], "blank");
+    }
+
+    #[test]
+    fn an_old_resolve_library_setting_reads_fine_and_is_kept() {
+        // Before the library moved into each template, Settings kept one per computer.
+        let dir = tempfile::tempdir().unwrap();
+        fs::write(
+            dir.path().join(SETTINGS_FILE),
+            r#"{ "jobsRoots": ["D:/Jobs"], "resolveLibrary": { "dbType": "Disk", "dbName": "Work" } }"#,
+        )
+        .unwrap();
+        let s = load(dir.path()).unwrap().unwrap();
+        assert_eq!(s.jobs_roots, vec![PathBuf::from("D:/Jobs")]);
+        save(dir.path(), &s).unwrap();
+        let v: serde_json::Value =
+            serde_json::from_str(&fs::read_to_string(dir.path().join(SETTINGS_FILE)).unwrap())
+                .unwrap();
+        assert_eq!(v["resolveLibrary"]["dbName"], "Work");
     }
 
     #[test]

@@ -11,7 +11,6 @@ use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::Mutex;
 use std::time::Duration;
 
-use serde::Serialize;
 use tauri::{AppHandle, Emitter, Manager, State};
 
 use crate::commands::{lock, AppState};
@@ -23,9 +22,8 @@ use crate::resolve::{
     Next, Outcome, Recover, ResolveProject, ResolveStatus, RunError, Switched, WaitingEntry,
     WaitingList, SWITCH_TIMEOUT, UNREADABLE,
 };
-use crate::settings::ResolveLibrary;
-use crate::settings_cmd::SettingsView;
 use crate::staged::OnDisk;
+use crate::template::ResolveLibrary;
 
 pub const CHANGED_EVENT: &str = "resolve-changed";
 /// How often the watcher looks for Resolve opening while something waits.
@@ -47,7 +45,7 @@ pub struct ResolveState {
     count: AtomicUsize,
     /// Nest may have left Resolve in another library (the list's `switched`).
     switched: AtomicBool,
-    /// What the last try found (Settings shows the scripting hint from this).
+    /// What the last try found (a project not tried yet shows the scripting hint from this).
     last: Mutex<Option<ResolveStatus>>,
 }
 
@@ -325,8 +323,13 @@ fn try_once(app: &AppHandle, state: &AppState, rs: &ResolveState) -> bool {
                 _ => ResolveStatus::Ready,
             },
         );
-        let next = after(&mut entry, &outcome, now());
-        changed |= settle(app, state, rs, entry, next);
+        let mut next = after(&mut entry, &outcome, now());
+        // Went into the open library because the template's isn't on this computer: say so.
+        let note = report.note.clone();
+        if let (Next::Done { notice, .. }, Some(note)) = (&mut next, &note) {
+            *notice = format!("{notice}. {note}");
+        }
+        changed |= settle(app, state, rs, entry, next, note);
         // After `settle`, so this notice is the one that shows.
         after_switch(app, state, rs, &report);
         // Resolve went away, won't let Nest in, or is left elsewhere: the rest wait too.
@@ -432,18 +435,20 @@ fn set_last(rs: &ResolveState, s: ResolveStatus) {
     }
 }
 
-/// Write what a try decided: the list, the project's file, Nest's copy, the notice.
+/// Write what a try decided: the list, the project's file (with `note` when it went somewhere
+/// else than its template says), Nest's copy, the notice.
 fn settle(
     app: &AppHandle,
     state: &AppState,
     rs: &ResolveState,
     entry: WaitingEntry,
     next: Next,
+    note: Option<String>,
 ) -> bool {
     let id = entry.id.clone();
     let (status, message) = match &next {
         Next::Keep => {
-            // Removed meanwhile (Remove in Settings): not put back.
+            // Removed meanwhile (Don't add): not put back.
             if let Err(e) = change_list(state, rs, |list| {
                 if let Some(e) = list.entries.iter_mut().find(|e| e.id == id) {
                     *e = entry.clone();
@@ -456,7 +461,10 @@ fn settle(
         Next::Done { status, notice } => (*status, notice.clone()),
         Next::GiveUp { note } => ("failed", note.clone()),
     };
-    let note = matches!(next, Next::GiveUp { .. }).then_some(message.as_str());
+    let note = match &next {
+        Next::GiveUp { .. } => Some(message.as_str()),
+        _ => note.as_deref(),
+    };
     let file = entry.project_dir.join(MANIFEST_NAME);
     if let Err(e) = resolve::update_manifest(&file, &id, status, &now().to_rfc3339(), note) {
         // The project's folder may be offline or moved: Resolve has the project either way.
@@ -525,7 +533,7 @@ pub fn resolve_status(state: State<'_, AppState>) -> ResolveStatus {
     with_link(&state.config_dir, |l| l.status()).unwrap_or_else(|s| s)
 }
 
-/// Resolve's libraries and the one open now (Settings).
+/// Resolve's libraries and the one open now (the template editor).
 #[tauri::command(async)]
 pub fn resolve_libraries(state: State<'_, AppState>) -> AppResult<Libraries> {
     with_link(&state.config_dir, |l| l.libraries())
@@ -533,24 +541,69 @@ pub fn resolve_libraries(state: State<'_, AppState>) -> AppResult<Libraries> {
         .map_err(problem)
 }
 
-/// The projects in Resolve's open library ("Choose from Resolve…").
+/// After a look inside another library: if Resolve may not be back where it was, the worker
+/// is told (the waiting list's `switched`), so it puts Resolve back as soon as it safely can.
+/// A failed switch back is what the user hears, whatever else happened.
+fn settle_browse<T>(
+    app: &AppHandle,
+    state: &AppState,
+    rs: &ResolveState,
+    b: resolve::Browsed<T>,
+    to: Option<&ResolveLibrary>,
+) -> AppResult<T> {
+    if let (Some(from), Some(to)) = (&b.from, to) {
+        if matches!(b.back, Back::Failed | Back::Unknown) {
+            let rec = Switched {
+                from: from.clone(),
+                to: to.clone(),
+                at: now().to_rfc3339(),
+                back_failed: b.back == Back::Failed,
+            };
+            if let Err(e) = change_list(state, rs, |list| list.switched = Some(rec)) {
+                log::warn!("{e}");
+            }
+            let _ = app.emit(CHANGED_EVENT, ());
+        }
+        if b.back == Back::Failed {
+            return Err(AppError::new(resolve::switch_back_message(from)));
+        }
+    }
+    b.result.map_err(problem)
+}
+
+/// The projects in one of Resolve's libraries (None = the open one) for "Choose from
+/// Resolve…". Another library only when nothing real is open; Resolve is switched back.
 #[tauri::command(async)]
-pub fn resolve_projects(state: State<'_, AppState>) -> AppResult<Vec<ResolveProject>> {
-    with_link(&state.config_dir, |l| l.projects())
-        .map_err(|s| AppError::new(s.message()))?
-        .map_err(problem)
+pub fn resolve_projects(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    rs: State<'_, ResolveState>,
+    library: Option<ResolveLibrary>,
+) -> AppResult<Vec<ResolveProject>> {
+    if crate::update::installing(&app) {
+        return Err(AppError::new(crate::update::UPDATING));
+    }
+    let b = with_link(&state.config_dir, |l| l.projects(library.as_ref()))
+        .map_err(|s| AppError::new(s.message()))?;
+    settle_browse(&app, &state, &rs, b, library.as_ref())
 }
 
 /// The template editor's "Choose from Resolve…": export `project_name` (in `folder`, "" = the
-/// top level) from Resolve's open library into the editor session `session_id`, staged like a
-/// dropped file. Returns the template path to put in `resolve.drp`.
+/// top level) from `library` (None = the open one) into the editor session `session_id`,
+/// staged like a dropped file. Returns the template path to put in `resolve.drp`.
 #[tauri::command(async)]
 pub fn resolve_export_to_editor(
+    app: AppHandle,
     state: State<'_, AppState>,
+    rs: State<'_, ResolveState>,
     session_id: String,
     project_name: String,
     folder: String,
+    library: Option<ResolveLibrary>,
 ) -> AppResult<String> {
+    if crate::update::installing(&app) {
+        return Err(AppError::new(crate::update::UPDATING));
+    }
     let closed = || AppError::new("The editor was closed. Open the template again.");
     if !lock(&state.editor_sessions)?.contains_key(&session_id) {
         return Err(closed());
@@ -567,11 +620,11 @@ pub fn resolve_export_to_editor(
     fs::create_dir_all(&dir)
         .map_err(|e| AppError::new(format!("Couldn't make room for the export: {e}")))?;
     let dest = dir.join(&file_name);
-    with_link(&state.config_dir, |l| {
-        l.export(&project_name, &folder, &dest)
+    let b = with_link(&state.config_dir, |l| {
+        l.export(&project_name, &folder, &dest, library.as_ref())
     })
-    .map_err(|s| AppError::new(s.message()))?
-    .map_err(problem)?;
+    .map_err(|s| AppError::new(s.message()))?;
+    settle_browse(&app, &state, &rs, b, library.as_ref())?;
     let size = fs::metadata(&dest)
         .map(|m| m.len())
         .map_err(|e| AppError::new(format!("The export can't be read: {e}")))?;
@@ -604,88 +657,67 @@ pub fn editor_add_resolve_drp(
         .map_err(AppError::new)
 }
 
-/// The details panel: the project's Resolve project, from its `.project.json` (None = none,
-/// or the project is on another computer / offline / its file can't be read). Read-only.
+/// A project's folder and manifest id, if it's on this computer and its file can be read.
+fn project_file(state: &AppState, key: &str) -> Option<(std::path::PathBuf, serde_json::Value)> {
+    if key.starts_with("remote:") {
+        return None;
+    }
+    let (dir, _) = crate::commands::project_folder(state, key, false).ok()?;
+    let manifest = read_json_object(&dir.join(MANIFEST_NAME)).ok()?;
+    Some((dir, manifest))
+}
+
+/// The details panel: the project's Resolve project, from its `.project.json`, and while it
+/// waits on this computer what stops it, in plain words (None = none, or the project is on
+/// another computer / offline / its file can't be read). Read-only.
 #[tauri::command(async)]
 pub fn project_resolve(
     state: State<'_, AppState>,
+    rs: State<'_, ResolveState>,
     key: String,
 ) -> AppResult<Option<resolve::ProjectResolve>> {
-    if key.starts_with("remote:") {
-        return Ok(None);
-    }
-    let Ok((dir, _)) = crate::commands::project_folder(&state, &key, false) else {
+    let Some((_, manifest)) = project_file(&state, &key) else {
         return Ok(None);
     };
-    Ok(read_json_object(&dir.join(MANIFEST_NAME))
-        .ok()
-        .and_then(|m| resolve::project_resolve(&m)))
-}
-
-/// The waiting list (Settings / main window).
-#[derive(Debug, Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct WaitingView {
-    pub entries: Vec<WaitingEntry>,
-    /// What the last try found; `scriptingOff` = show the hint.
-    pub last_status: Option<ResolveStatus>,
-    /// Plain words for `last_status` (None when ready or unknown).
-    pub hint: Option<String>,
-    /// The waiting list file is damaged: "The waiting list can't be read." (`entries` is then
-    /// empty because nothing could be read, not because nothing waits).
-    pub problem: Option<String>,
-    /// Nest couldn't switch Resolve back to the library it was in: plain words saying which,
-    /// and what to do.
-    pub switch_back: Option<String>,
-}
-
-fn waiting_view(state: &AppState, rs: &ResolveState) -> WaitingView {
-    let last = rs.last.lock().ok().and_then(|l| *l);
-    view_of(read_list(state, rs), last)
-}
-
-/// The view of a waiting list as read (or not) and the last status.
-fn view_of(list: Result<WaitingList, String>, last: Option<ResolveStatus>) -> WaitingView {
-    let hint = last
-        .filter(|s| *s != ResolveStatus::Ready)
-        .map(|s| s.message().to_string());
-    match list {
-        Ok(list) => WaitingView {
-            switch_back: list
-                .switched
-                .as_ref()
-                .filter(|s| s.back_failed)
-                .map(|s| s.message()),
-            entries: list.entries,
-            last_status: last,
-            hint,
-            problem: None,
-        },
-        Err(_) => WaitingView {
-            entries: vec![],
-            last_status: last,
-            hint,
-            problem: Some(UNREADABLE.to_string()),
-            switch_back: None,
-        },
+    let Some(mut r) = resolve::project_resolve(&manifest) else {
+        return Ok(None);
+    };
+    if r.status == "waiting" {
+        let id = manifest["id"].as_str().unwrap_or_default();
+        let last = rs.last.lock().ok().and_then(|l| *l);
+        with_waiting(&mut r, read_list(&state, &rs), id, last);
     }
+    Ok(Some(r))
 }
 
-#[tauri::command(async)]
-pub fn resolve_waiting_list(
-    state: State<'_, AppState>,
-    rs: State<'_, ResolveState>,
-) -> WaitingView {
-    waiting_view(&state, &rs)
+/// Fill in `waiting` and `problem` from this computer's waiting list. A list that can't be
+/// read, or Resolve left in another library, comes first: nothing goes in until it's fixed.
+fn with_waiting(
+    r: &mut resolve::ProjectResolve,
+    list: Result<WaitingList, String>,
+    id: &str,
+    last: Option<ResolveStatus>,
+) {
+    let list = match list {
+        Ok(list) => list,
+        Err(_) => {
+            r.problem = Some(UNREADABLE.to_string());
+            return;
+        }
+    };
+    let Some(entry) = list.entries.iter().find(|e| !id.is_empty() && e.id == id) else {
+        return;
+    };
+    r.waiting = true;
+    r.problem = match list.switched.as_ref().filter(|s| s.back_failed) {
+        Some(s) => Some(s.message()),
+        None => resolve::waiting_problem(entry, last),
+    };
 }
 
 /// "Try now": try the waiting projects (waits for a try already running to finish).
 #[tauri::command(async)]
-pub fn resolve_try_now(
-    app: AppHandle,
-    state: State<'_, AppState>,
-    rs: State<'_, ResolveState>,
-) -> AppResult<WaitingView> {
+pub fn resolve_try_now(app: AppHandle, rs: State<'_, ResolveState>) -> AppResult<()> {
     if crate::update::installing(&app) {
         return Err(AppError::new(crate::update::UPDATING));
     }
@@ -708,17 +740,25 @@ pub fn resolve_try_now(
             },
         );
     }
-    Ok(waiting_view(&state, &rs))
+    let _ = app.emit(CHANGED_EVENT, ());
+    Ok(())
 }
 
-/// Take a project off the waiting list (Resolve won't get it). Its `.drp` copy goes too.
+/// "Don't add" in the details panel: take this project off the waiting list (Resolve won't
+/// get it). Its `.drp` copy goes too, and its file says "skipped".
 #[tauri::command(async)]
-pub fn resolve_remove_waiting(
+pub fn resolve_skip_project(
     app: AppHandle,
     state: State<'_, AppState>,
     rs: State<'_, ResolveState>,
-    id: String,
-) -> AppResult<WaitingView> {
+    key: String,
+) -> AppResult<()> {
+    let gone = || AppError::new("That project isn't waiting for Resolve any more.");
+    let (dir, manifest) = project_file(&state, &key).ok_or_else(gone)?;
+    let id = manifest["id"].as_str().unwrap_or_default().to_string();
+    if id.is_empty() {
+        return Err(gone());
+    }
     let mut removed: Option<WaitingEntry> = None;
     change_list(&state, &rs, |list| {
         if let Some(i) = list.entries.iter().position(|e| e.id == id) {
@@ -726,9 +766,9 @@ pub fn resolve_remove_waiting(
         }
     })
     .map_err(AppError::new)?;
-    let entry = removed.ok_or_else(|| AppError::new("That project isn't waiting any more."))?;
+    let entry = removed.ok_or_else(gone)?;
     remove_copy(&state.config_dir, &entry.id);
-    let file = entry.project_dir.join(MANIFEST_NAME);
+    let file = dir.join(MANIFEST_NAME);
     if let Err(e) = resolve::update_manifest(&file, &entry.id, "skipped", &now().to_rfc3339(), None)
     {
         log::info!(
@@ -738,64 +778,78 @@ pub fn resolve_remove_waiting(
     }
     let _ = app.emit(CHANGED_EVENT, ());
     crate::tray::refresh_soon(&app);
-    Ok(waiting_view(&state, &rs))
-}
-
-/// Settings: the library Nest adds Resolve projects to on this computer (None = the one open
-/// in Resolve).
-#[tauri::command(async)]
-pub fn resolve_set_library(
-    app: AppHandle,
-    library: Option<ResolveLibrary>,
-) -> AppResult<SettingsView> {
-    let library = library.filter(|l| !l.db_name.trim().is_empty());
-    crate::settings_cmd::edit_settings(&app, |s| {
-        s.resolve_library = library;
-        Ok(())
-    })
+    Ok(())
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
 
-    #[test]
-    fn a_damaged_waiting_list_says_so_instead_of_looking_empty() {
-        let v = view_of(Err("bad json".into()), Some(ResolveStatus::Ready));
-        assert_eq!(
-            v.problem.as_deref(),
-            Some("The waiting list can't be read.")
-        );
-        assert!(v.entries.is_empty());
-        let v = view_of(Ok(WaitingList::default()), None);
-        assert_eq!(v.problem, None);
-        assert_eq!(v.switch_back, None);
-    }
-
-    #[test]
-    fn a_failed_switch_back_shows_in_the_waiting_view() {
-        let lib = |n: &str| ResolveLibrary {
+    fn lib(n: &str) -> ResolveLibrary {
+        ResolveLibrary {
             db_type: "Disk".into(),
             db_name: n.into(),
             ip_address: None,
-        };
-        let mut list = WaitingList {
-            switched: Some(Switched {
-                from: lib("Home"),
-                to: lib("Work"),
-                at: "t".into(),
-                back_failed: false,
-            }),
-            ..Default::default()
-        };
-        // Not tried yet (a run in progress or stopped): nothing to say.
-        assert_eq!(view_of(Ok(list.clone()), None).switch_back, None);
-        list.switched.as_mut().unwrap().back_failed = true;
+        }
+    }
+
+    fn waiting() -> resolve::ProjectResolve {
+        resolve::project_resolve(&serde_json::json!({
+            "id": "p1", "resolve": { "name": "Grade", "status": "waiting" }
+        }))
+        .unwrap()
+    }
+
+    fn entry(id: &str) -> WaitingEntry {
+        WaitingEntry {
+            id: id.into(),
+            job_code: "ACME-W01".into(),
+            project_dir: "/Jobs/x".into(),
+            drp: "/c/resolve/p1.drp".into(),
+            name: "Grade".into(),
+            folder: "Acme".into(),
+            library: None,
+            created_at: "t".into(),
+            tries: 0,
+            last_outcome: Some("scriptingOff".into()),
+            last_try: None,
+        }
+    }
+
+    #[test]
+    fn the_details_panel_hears_about_its_own_waiting_entry() {
+        let mut list = WaitingList::default();
+        list.entries.push(entry("p1"));
+        let mut r = waiting();
+        with_waiting(&mut r, Ok(list.clone()), "p1", None);
+        assert!(r.waiting);
+        assert_eq!(r.problem.as_deref(), Some(resolve::SCRIPTING_HINT));
+        // Another project's entry, or none: not waiting here (made on another computer).
+        let mut r = waiting();
+        with_waiting(&mut r, Ok(list.clone()), "p2", None);
+        assert!(!r.waiting && r.problem.is_none());
+        let mut r = waiting();
+        with_waiting(&mut r, Ok(list.clone()), "", None);
+        assert!(!r.waiting);
+        // Resolve left in another library: that first.
+        list.switched = Some(Switched {
+            from: lib("Home"),
+            to: lib("Work"),
+            at: "t".into(),
+            back_failed: true,
+        });
+        let mut r = waiting();
+        with_waiting(&mut r, Ok(list), "p1", None);
         assert_eq!(
-            view_of(Ok(list), Some(ResolveStatus::ScriptingOff))
-                .switch_back
-                .as_deref(),
+            r.problem.as_deref(),
             Some("Nest couldn't switch Resolve back to Home. Choose it in Resolve's Project Libraries.")
+        );
+        // A damaged list says so instead of looking empty.
+        let mut r = waiting();
+        with_waiting(&mut r, Err("bad json".into()), "p1", None);
+        assert_eq!(
+            r.problem.as_deref(),
+            Some("The waiting list can't be read.")
         );
     }
 

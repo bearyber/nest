@@ -122,6 +122,41 @@ local function main()
     return true
   end
 
+  -- Run `work` (it gives back the result word) and say its result. With `switch` "1", in the
+  -- library (dbtype, dbname, ip): switching closes the open project, so only when nothing real
+  -- is open (else "busy"); everything after the switch runs protected, and the switch back to
+  -- exactly the library Resolve had ALWAYS happens and is reported ("back ok" / "back fail").
+  -- Without a switch: where Resolve is, back in the folder it was in after.
+  local function in_library(switch, dbtype, dbname, ip, work)
+    if switch ~= "1" then
+      local start = here()
+      local ok, result = pcall(work)
+      pcall(back_to, start)
+      if ok then say("result", result) else say("result", "failed", hex(result)) end
+      return
+    end
+    if not nothing_real_open() then say("result", "busy") return end
+    local before = pm:GetCurrentDatabase()
+    if type(before) ~= "table" then
+      say("result", "failed", hex("Resolve didn't say which library is open"))
+      return
+    end
+    if not pm:SetCurrentDatabase(db_of(dbtype, dbname, ip)) then
+      say("result", "no-library")
+      return
+    end
+    say("switched")
+    pm = resolve:GetProjectManager()
+    local ok, result = pcall(work)
+    -- Exactly the library Resolve had (every field it gave), checked.
+    local back_ok, back = pcall(function()
+      return resolve:GetProjectManager():SetCurrentDatabase(before)
+    end)
+    say("back", (back_ok and back) and "ok" or "fail")
+    pcall(function() pm = resolve:GetProjectManager() end)
+    if ok then say("result", result) else say("result", "failed", hex(result)) end
+  end
+
   if op == "status" then
     say("result", "ready")
     return
@@ -141,40 +176,37 @@ local function main()
     return
   end
 
+  -- Every project in a library, with its folder: projects <switch> <dbtype> <dbname> <ip>
   if op == "projects" then
-    local start = here()
-    local count_ = 0
-    local function walk(path, depth)
-      for _, n in ipairs(names(pm:GetProjectListInCurrentFolder())) do
-        say("project", hex(path), hex(n))
-        count_ = count_ + 1
-      end
-      if depth >= 8 or count_ > 5000 then return end
-      for _, f in ipairs(names(pm:GetFolderListInCurrentFolder())) do
-        if pm:OpenFolder(f) then
-          walk(path == "" and f or (path .. "/" .. f), depth + 1)
-          pm:GotoParentFolder()
+    in_library(a[1], a[2], a[3], a[4], function()
+      local count_ = 0
+      local function walk(path, depth)
+        for _, n in ipairs(names(pm:GetProjectListInCurrentFolder())) do
+          say("project", hex(path), hex(n))
+          count_ = count_ + 1
+        end
+        if depth >= 8 or count_ > 5000 then return end
+        for _, f in ipairs(names(pm:GetFolderListInCurrentFolder())) do
+          if pm:OpenFolder(f) then
+            walk(path == "" and f or (path .. "/" .. f), depth + 1)
+            pm:GotoParentFolder()
+          end
         end
       end
-    end
-    pm:GotoRootFolder()
-    walk("", 0)
-    back_to(start)
-    say("result", "ok")
+      pm:GotoRootFolder()
+      walk("", 0)
+      return "ok"
+    end)
     return
   end
 
+  -- export <name> <folder> <dest> <switch> <dbtype> <dbname> <ip>
   if op == "export" then
     local name, folder, dest = a[1], a[2], a[3]
-    local start = here()
-    if not goto_folder(folder, false) then
-      back_to(start)
-      say("result", "no-folder")
-      return
-    end
-    local ok = pm:ExportProject(name, dest, true)
-    back_to(start)
-    say("result", ok and "ok" or "failed")
+    in_library(a[4], a[5], a[6], a[7], function()
+      if not goto_folder(folder, false) then return "no-folder" end
+      return pm:ExportProject(name, dest, true) and "ok" or "failed"
+    end)
     return
   end
 
@@ -189,55 +221,17 @@ local function main()
     return
   end
 
+  -- add <drp> <name> <folder> <dbtype> <dbname> <switch> <ip>
   if op == "add" then
-    local drp, name, folder, dbtype, dbname, switch, ip = a[1], a[2], a[3], a[4], a[5], a[6], a[7]
-    local before = pm:GetCurrentDatabase()
-    local switched = false
-    local start = nil
-    if switch == "1" then
-      -- Switching libraries closes the open project: only when nothing real is open.
-      if not nothing_real_open() then say("result", "busy") return end
-      if type(before) ~= "table" then
-        say("result", "failed", hex("Resolve didn't say which library is open"))
-        return
-      end
-      if not pm:SetCurrentDatabase(db_of(dbtype, dbname, ip)) then
-        say("result", "no-library")
-        return
-      end
-      switched = true
-      say("switched")
-      pm = resolve:GetProjectManager()
-    else
-      start = here()
-    end
-
-    -- Everything after the switch runs on its own, so the switch back always happens.
-    local ok, result = pcall(function()
+    local drp, name, folder = a[1], a[2], a[3]
+    in_library(a[6], a[4], a[5], a[7], function()
       if not goto_folder(folder, true) then return "no-folder" end
-      local exists = false
       for _, n in ipairs(names(pm:GetProjectListInCurrentFolder())) do
-        if n:lower() == name:lower() then exists = true end
+        if n:lower() == name:lower() then return "exists" end
       end
-      if exists then return "exists" end
       if pm:ImportProject(drp, name) then return "added" end
       return "failed"
     end)
-
-    if switched then
-      -- Exactly the library Resolve had (every field it gave), checked.
-      local back_ok, back = pcall(function()
-        return resolve:GetProjectManager():SetCurrentDatabase(before)
-      end)
-      say("back", (back_ok and back) and "ok" or "fail")
-    else
-      pcall(back_to, start)
-    end
-    if ok then
-      say("result", result)
-    else
-      say("result", "failed", hex(result))
-    end
     return
   end
 

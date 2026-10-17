@@ -13,7 +13,7 @@ use unicode_normalization::UnicodeNormalization;
 use crate::kits::KitListing;
 use crate::template_from_folder::SkipReason;
 
-use crate::settings::ResolveLibrary;
+use crate::template::ResolveLibrary;
 
 use crate::names::{
     next_code, normalize_client_code, sanitize_segment, CodePattern, NameError, Transform,
@@ -79,17 +79,15 @@ pub struct PlanContext {
     pub own_code: Option<String>,
     /// v0.5: the client's kit as the command found it. None = no client chosen.
     pub kit: Option<KitInput>,
-    /// Resolve starter project: New Project's box and this computer's library.
+    /// Resolve starter project: New Project's box.
     pub resolve: ResolveChoice,
 }
 
-/// New Project's "Add to Resolve" box and the library from Settings.
+/// New Project's "Add to Resolve" box.
 #[derive(Debug, Clone, Default)]
 pub struct ResolveChoice {
     /// The box in New Project. None = the template's default (`resolve.on`).
     pub on: Option<bool>,
-    /// The library Nest adds to. None = whichever library is open in Resolve.
-    pub library: Option<ResolveLibrary>,
 }
 
 /// The Resolve project Create will add (nothing is a file in the job folder).
@@ -102,14 +100,14 @@ pub struct PlannedResolve {
     pub name: String,
     /// Resolve's project folder, `/` between folders inside folders. "" = the top level.
     pub folder: String,
-    /// The library chosen in Settings; None = the one open in Resolve.
+    /// The template's library; None = the one open in Resolve.
     #[serde(default)]
     pub library: Option<ResolveLibrary>,
     /// For the preview: the library's name, or "the library open in Resolve".
     pub library_label: String,
 }
 
-/// What the preview says when no library is chosen in Settings.
+/// What the preview says when the template names no library.
 pub const OPEN_LIBRARY_LABEL: &str = "the library open in Resolve";
 
 /// The chosen client and what Nest found for their kit (read before planning, cached).
@@ -512,8 +510,8 @@ fn plan_resolve(
         drp: r.drp.clone(),
         name,
         folder,
-        library: ctx.resolve.library.clone(),
-        library_label: match &ctx.resolve.library {
+        library: r.library.clone(),
+        library_label: match &r.library {
             Some(l) => l.db_name.clone(),
             None => OPEN_LIBRARY_LABEL.to_string(),
         },
@@ -2139,16 +2137,20 @@ mod tests {
         let t = with_resolve(json!({
             "drp": "files/Grade.drp",
             "name": "{jobCode} {song|upper}: <Final>?",
-            "folder": "{client|upper}/{year}"
+            "folder": "{client|upper}/{year}",
+            "library": { "dbType": "Disk", "dbName": "Work 2026" }
         }));
-        let mut c = ctx();
-        c.resolve.library = Some(ResolveLibrary {
-            db_type: "Disk".into(),
-            db_name: "Work 2026".into(),
-            ip_address: None,
-        });
-        let plan = plan_project(&t, &values("A/B", "Hey \"You\" | *"), &c);
+        let plan = plan_project(&t, &values("A/B", "Hey \"You\" | *"), &ctx());
         let r = plan.resolve.clone().unwrap();
+        // The template's library goes with the project (not this computer's settings).
+        assert_eq!(
+            r.library,
+            Some(ResolveLibrary {
+                db_type: "Disk".into(),
+                db_name: "Work 2026".into(),
+                ip_address: None,
+            })
+        );
         assert_eq!(r.name, "VX-L01 HEY YOU Final");
         assert_eq!(r.folder, "VERTEX STUDIO/2026");
         assert_eq!(r.library_label, "Work 2026");

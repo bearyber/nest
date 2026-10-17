@@ -659,6 +659,7 @@ fn a_resolve_project_is_staged_saved_and_kept() {
         name: None,
         folder: "{client}".into(),
         on: true,
+        library: None,
     });
     let p = preview(&draft, &session.loaded(draft.clone()), &Example::new(TODAY));
     assert!(

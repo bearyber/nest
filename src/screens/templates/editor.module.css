@@ -611,6 +611,33 @@
   outline: none;
 }
 
+/* "From: [library]" at the top of the list. */
+.resolveFrom {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding: 2px 4px 6px;
+  font-size: var(--text-small);
+  color: var(--text-secondary);
+}
+
+.resolveList {
+  display: grid;
+  outline: none;
+}
+
+.resolveNote {
+  max-width: 300px;
+  padding: 4px 8px;
+  font-size: var(--text-small);
+  color: var(--text-secondary);
+}
+
+/* The › between the library and the folder. */
+.resolveSep {
+  color: var(--text-tertiary);
+}
+
 .resolveFolder {
   padding: 4px 8px 2px;
   font-size: var(--text-small);

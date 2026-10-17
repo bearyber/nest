@@ -67,6 +67,30 @@ pub struct ResolveStarter {
     /// Ticked in New Project by default.
     #[serde(default = "yes")]
     pub on: bool,
+    /// The Resolve library it goes into. None = the library open in Resolve. A library this
+    /// computer's Resolve doesn't have: the open one instead (and the project says so).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub library: Option<ResolveLibrary>,
+}
+
+/// A DaVinci Resolve project library (Resolve calls it a database): its type ("Disk",
+/// "PostgreSQL"…) and name, exactly as Resolve reports them.
+#[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ResolveLibrary {
+    pub db_type: String,
+    pub db_name: String,
+    /// The server's address for a network (PostgreSQL) library, as Resolve reports it; kept so
+    /// switching back gives Resolve exactly the library it had.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub ip_address: Option<String>,
+}
+
+impl ResolveLibrary {
+    /// The same library (type and name; the address may be missing on one side).
+    pub fn same(&self, other: &ResolveLibrary) -> bool {
+        self.db_type == other.db_type && self.db_name == other.db_name
+    }
 }
 
 fn default_resolve_folder() -> String {
@@ -376,6 +400,11 @@ impl Template {
                     p.push("the Resolve project's name is empty".to_string());
                 }
                 self.check_pattern(name, false, p);
+            }
+            if let Some(l) = &r.library {
+                if l.db_name.trim().is_empty() || l.db_type.trim().is_empty() {
+                    p.push("the Resolve library has no name".to_string());
+                }
             }
             if r.folder.contains('\\') {
                 p.push(format!("\"{}\" uses \\; Resolve folders use /", r.folder));
@@ -826,5 +855,40 @@ mod tests {
         assert!(!serde_json::to_string(&Template::from_json(VALID).unwrap())
             .unwrap()
             .contains("resolve"));
+    }
+
+    #[test]
+    fn resolve_library_round_trips_with_the_template() {
+        let mut v: serde_json::Value = serde_json::from_str(VALID).unwrap();
+        v["resolve"] = serde_json::json!({
+            "drp": "files/Grade.drp",
+            "library": { "dbType": "PostgreSQL", "dbName": "클라이언트 Work", "ipAddress": "10.0.0.5" }
+        });
+        let t = Template::from_json(&v.to_string()).unwrap();
+        assert_eq!(
+            t.resolve.as_ref().unwrap().library,
+            Some(ResolveLibrary {
+                db_type: "PostgreSQL".into(),
+                db_name: "클라이언트 Work".into(),
+                ip_address: Some("10.0.0.5".into()),
+            })
+        );
+        let again = Template::from_json(&serde_json::to_string(&t).unwrap()).unwrap();
+        assert_eq!(again, t);
+        // None = the library open in Resolve: not written at all (older Nests read it as before).
+        let mut v: serde_json::Value = serde_json::from_str(VALID).unwrap();
+        v["resolve"] = serde_json::json!({ "drp": "files/Grade.drp", "library": null });
+        let t = Template::from_json(&v.to_string()).unwrap();
+        assert_eq!(t.resolve.as_ref().unwrap().library, None);
+        assert!(!serde_json::to_string(&t).unwrap().contains("library"));
+        // A library without a name is refused.
+        assert_refused(
+            problems_with(|v| {
+                v["resolve"] = serde_json::json!({
+                    "drp": "a.drp", "library": { "dbType": "Disk", "dbName": " " }
+                })
+            }),
+            "the Resolve library has no name",
+        );
     }
 }

@@ -49,6 +49,9 @@ export interface ResolveStarter {
   folder: string;
   /** Ticked in New Project by default (Rust fills in true when absent). */
   on: boolean;
+  /** The Resolve library it goes into; absent = the library open in Resolve. A library this
+   *  computer's Resolve doesn't have: the open one instead (the project's note says so). */
+  library?: ResolveLibrary;
 }
 
 /** A Resolve project library (Resolve calls it a database), exactly as Resolve names it. */
@@ -56,7 +59,7 @@ export interface ResolveLibrary {
   dbType: string;
   dbName: string;
   /** A network (PostgreSQL) library's server address, as Resolve reports it; keep it when
-   *  passing a library back (absent for disk libraries and older settings). */
+   *  passing a library back (absent for disk libraries). */
   ipAddress?: string | null;
 }
 
@@ -67,7 +70,7 @@ export interface PlannedResolve {
   name: string;
   /** `/` between folders inside folders; "" = the top level. */
   folder: string;
-  /** The library from Settings; null = the one open in Resolve. */
+  /** The template's library; null = the one open in Resolve. */
   library: ResolveLibrary | null;
   /** The library's name, or "the library open in Resolve". */
   libraryLabel: string;
@@ -99,26 +102,6 @@ export interface ResolveProject {
   name: string;
 }
 
-/** A project waiting to go into Resolve (Rust `resolve::WaitingEntry`). */
-export interface ResolveWaitingEntry {
-  /** The project's manifest id (= its key in the list). */
-  id: string;
-  jobCode: string;
-  projectDir: string;
-  /** Nest's own copy of the .drp. */
-  drp: string;
-  name: string;
-  folder: string;
-  library: ResolveLibrary | null;
-  createdAt: string;
-  /** Failed tries (not counting "Resolve isn't open"). */
-  tries: number;
-  /** added · exists · busy · noFolder · noLibrary · missing · starting · scriptingOff ·
-   *  noAnswer · noHelper · notInstalled · notRunning · failed */
-  lastOutcome: string | null;
-  lastTry: string | null;
-}
-
 /** A project's Resolve project from its `.project.json` (Rust `resolve::ProjectResolve`). */
 export interface ProjectResolve {
   name: string;
@@ -130,21 +113,12 @@ export interface ProjectResolve {
   status: string;
   /** RFC 3339 of the last change; "" when unknown. */
   at: string;
-}
-
-/** The Resolve waiting list (Rust `WaitingView`). */
-export interface ResolveWaitingView {
-  entries: ResolveWaitingEntry[];
-  /** What the last try found; null = not tried yet. */
-  lastStatus: ResolveStatus | null;
-  /** Plain words for `lastStatus` (null when ready or unknown), e.g. the scripting hint. */
-  hint: string | null;
-  /** "The waiting list can't be read." when its file is damaged (then `entries` is empty
-   *  because nothing could be read, not because nothing waits); null otherwise. */
-  problem?: string | null;
-  /** Nest couldn't switch Resolve back to the library it was in: plain words saying which
-   *  and what to do; null otherwise. */
-  switchBack?: string | null;
+  /** The project file's note (it went into another library, why Nest stopped…); null = none. */
+  note: string | null;
+  /** On this computer's waiting list (Try now / Don't add apply). */
+  waiting: boolean;
+  /** What stops it going in right now, in plain words (only while it waits); null = nothing. */
+  problem: string | null;
 }
 
 export interface ClientValue {
@@ -408,8 +382,6 @@ export interface Settings {
   clientKits: Record<string, string>;
   /** v0.7: the note after your very first project was shown (once). */
   firstProjectTipSeen: boolean;
-  /** Resolve starter projects: the library Nest adds to here; null = the one open in Resolve. */
-  resolveLibrary: ResolveLibrary | null;
 }
 
 export interface SettingsView {
