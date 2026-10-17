@@ -23,6 +23,7 @@ pub mod template_io;
 pub mod template_sync;
 mod template_sync_cmd;
 pub mod tidy;
+mod tray;
 mod update;
 mod whats_new;
 mod window;
@@ -52,11 +53,7 @@ pub fn run() {
     // the first plugin registered.
     if !cfg!(debug_assertions) {
         builder = builder.plugin(tauri_plugin_single_instance::init(|app, _args, _cwd| {
-            if let Some(w) = app.get_webview_window("main") {
-                let _ = w.unminimize();
-                let _ = w.show();
-                let _ = w.set_focus();
-            }
+            tray::show_main(app);
         }));
     }
     builder
@@ -73,17 +70,29 @@ pub fn run() {
                 .rotation_strategy(RotationStrategy::KeepOne)
                 .build(),
         )
-        .plugin(tauri_plugin_window_state::Builder::default().build())
+        // Visibility is Nest's own business (tray.rs): a window hidden in the menu bar at quit
+        // must not start hidden next time.
+        .plugin(
+            tauri_plugin_window_state::Builder::default()
+                .with_state_flags(
+                    tauri_plugin_window_state::StateFlags::all()
+                        - tauri_plugin_window_state::StateFlags::VISIBLE,
+                )
+                .build(),
+        )
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_clipboard_manager::init())
         .plugin(tauri_plugin_updater::Builder::new().build())
         .plugin(tauri_plugin_autostart::init(
             tauri_plugin_autostart::MacosLauncher::LaunchAgent,
-            None,
+            // Opened at login: start in the menu bar / notification area if the icon is on.
+            Some(vec![tray::HIDDEN_ARG]),
         ))
         .manage(update::Pending::default())
         .manage(kits_cmd::Kits::default())
+        .manage(tray::Tray::default())
+        .on_window_event(tray::on_window_event)
         .setup(move |app| {
             if let Err(e) = setup(app, started_at) {
                 startup::fail(&e);
@@ -116,6 +125,8 @@ pub fn run() {
             settings_cmd::move_jobs_root,
             settings_cmd::set_default_space,
             settings_cmd::set_launch_at_login,
+            settings_cmd::set_show_in_menu_bar,
+            settings_cmd::set_new_project_open,
             settings_cmd::set_personal_root,
             settings_cmd::choose_personal_root,
             settings_cmd::set_archive_folder,
@@ -186,12 +197,16 @@ pub fn run() {
         ])
         .build(context)
         .unwrap_or_else(|e| startup::fail(&StartupError::new(Step::Other, e)))
-        .run(|app, event| {
+        .run(|app, event| match event {
+            // ⌘Q, Quit Nest, the installer: from now on closing the window really closes it.
+            tauri::RunEvent::ExitRequested { .. } => tray::quit_requested(app),
             // Save this computer's list one last time, so a change made just before quitting
             // reaches the other computers.
-            if let tauri::RunEvent::Exit = event {
-                devices_cmd::sync_on_quit(app);
-            }
+            tauri::RunEvent::Exit => devices_cmd::sync_on_quit(app),
+            // macOS: Dock click, Spotlight or Finder while Nest runs hidden: show the window.
+            #[cfg(target_os = "macos")]
+            tauri::RunEvent::Reopen { .. } => tray::show_main(app),
+            _ => {}
         });
 }
 
@@ -203,11 +218,21 @@ fn setup(app: &mut tauri::App, started_at: std::time::SystemTime) -> Result<(), 
         Err(e) => log::warn!("couldn't find the log folder: {e}"),
     }
     let state = init_state(app)?;
-    let theme = state
+    let (theme, menu_bar_icon, at_login) = state
         .settings
         .lock()
-        .map(|s| s.theme.clone())
+        .map(|s| (s.theme.clone(), s.show_in_menu_bar, s.launch_at_login))
         .unwrap_or_default();
+    // Opened at login (`--hidden`) or relaunched by an update while hidden: start in the menu
+    // bar / notification area, no window.
+    // (Both are read: the note is removed either way.)
+    let asked_hidden = std::env::args().any(|a| a == tray::HIDDEN_ARG)
+        | tray::take_start_hidden_note(&state.config_dir, std::time::SystemTime::now());
+    let hidden = tray::start_hidden(
+        menu_bar_icon,
+        state.first_run.load(std::sync::atomic::Ordering::SeqCst),
+        asked_hidden,
+    );
     app.manage(state);
     let main = app
         .get_webview_window("main")
@@ -216,6 +241,31 @@ fn setup(app: &mut tauri::App, started_at: std::time::SystemTime) -> Result<(), 
     app.manage(window::Material {
         applied: window::apply_appearance(&main, &theme),
     });
+    // The window starts hidden (tauri.conf.json) and shows here, unless Nest starts in the
+    // menu bar.
+    tray::start(app.handle());
+    if hidden {
+        log::info!("started in the menu bar / notification area");
+        if let Some(t) = app.try_state::<tray::Tray>() {
+            t.started_hidden();
+        }
+        #[cfg(target_os = "macos")]
+        app.set_activation_policy(tauri::ActivationPolicy::Accessory);
+    } else {
+        main.show()
+            .map_err(|e| StartupError::new(Step::Window, e))?;
+    }
+    // Open-at-login entries made before v0.7 open without `--hidden`: write them again (only
+    // if still on, so a login item turned off in System Settings stays off).
+    if at_login && !cfg!(debug_assertions) {
+        use tauri_plugin_autostart::ManagerExt;
+        let launcher = app.autolaunch();
+        if launcher.is_enabled().unwrap_or(false) {
+            if let Err(e) = launcher.enable() {
+                log::warn!("couldn't refresh open at login: {e}");
+            }
+        }
+    }
     update::start(app.handle());
     devices_cmd::start(app.handle());
     settings_cmd::tidy_template_copies_once(app.handle());
@@ -226,16 +276,20 @@ fn setup(app: &mut tauri::App, started_at: std::time::SystemTime) -> Result<(), 
         let bar = menu::build(app.handle()).map_err(|e| StartupError::new(Step::MenuBar, e))?;
         app.set_menu(bar)
             .map_err(|e| StartupError::new(Step::MenuBar, e))?;
-        app.on_menu_event(|app, event| {
-            if event.id().0 == menu::SETTINGS {
-                if let Err(e) = settings_cmd::open_settings_window(app) {
-                    log::warn!("couldn't open Settings: {e}");
-                }
-            } else if let Err(e) = app.emit("menu", event.id().0.as_str()) {
-                log::warn!("couldn't pass on a menu command: {e}");
-            }
-        });
     }
+    // Menu clicks from the menu bar (macOS) and the menu bar / notification area icon (both).
+    app.on_menu_event(|app, event| {
+        let id = event.id().0.as_str();
+        if tray::handles(id) {
+            tray::on_menu(app, id);
+        } else if id == menu::SETTINGS {
+            if let Err(e) = settings_cmd::open_settings_window(app) {
+                log::warn!("couldn't open Settings: {e}");
+            }
+        } else if let Err(e) = app.emit("menu", id) {
+            log::warn!("couldn't pass on a menu command: {e}");
+        }
+    });
     Ok(())
 }
 

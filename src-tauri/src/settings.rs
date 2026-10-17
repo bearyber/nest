@@ -29,6 +29,11 @@ pub struct Settings {
     /// "system" | "light" | "dark".
     pub theme: String,
     pub launch_at_login: bool,
+    /// v0.7: keep running with an icon in the macOS menu bar / Windows notification area when
+    /// the window is closed (tray.rs). On by default; off = closing the window quits.
+    pub show_in_menu_bar: bool,
+    /// v0.7: the one-time "Nest is still running" note was shown.
+    pub close_note_shown: bool,
     /// v0.3.0 tidied extra copies of your templates into the bin once (decision T-A).
     pub tidied_template_copies: bool,
     /// Devices (v0.3.0): off until a shared folder is chosen. The id is a random UUID made
@@ -112,6 +117,8 @@ impl Default for Settings {
             hidden_templates: vec![],
             theme: "system".into(),
             launch_at_login: false,
+            show_in_menu_bar: true,
+            close_note_shown: false,
             tidied_template_copies: false,
             device_id: None,
             device_name: None,
@@ -553,6 +560,21 @@ pub fn save(config_dir: &Path, settings: &Settings) -> AppResult<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn menu_bar_icon_is_on_by_default_and_open_at_login_off() {
+        let s = Settings::default();
+        assert!(s.show_in_menu_bar);
+        assert!(!s.close_note_shown);
+        assert!(!s.launch_at_login);
+        // A settings file from before v0.7 (no key) gets the icon too.
+        let old: Settings = serde_json::from_str(r#"{"jobsRoots":["/Jobs"]}"#).unwrap();
+        assert!(old.show_in_menu_bar);
+        assert!(!old.close_note_shown);
+        // Turned off stays off.
+        let off: Settings = serde_json::from_str(r#"{"showInMenuBar":false}"#).unwrap();
+        assert!(!off.show_in_menu_bar);
+    }
 
     #[test]
     fn missing_file_is_none_and_round_trip_works() {

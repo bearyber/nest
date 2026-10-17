@@ -3,6 +3,7 @@ import { getVersion } from "@tauri-apps/api/app";
 import { listen } from "@tauri-apps/api/event";
 import { Menu } from "@tauri-apps/api/menu";
 import { getCurrentWindow } from "@tauri-apps/api/window";
+import { setNewProjectOpen } from "../lib/commands";
 import Icon from "../components/Icon";
 import FirstSteps, { FirstProjectNote } from "../components/FirstSteps";
 import Inspector from "../components/Inspector";
@@ -509,6 +510,22 @@ export default function Main() {
       .catch(() => {});
     return () => unlisten?.();
   }, [runMenu]);
+
+  // Menu bar / notification area icon (tray.rs): "New Project…" and "New from ›".
+  useEffect(() => {
+    let unlisten: (() => void) | undefined;
+    listen<string | null>("open-new-project", (e) => {
+      setSheetTemplate(e.payload ?? undefined);
+      setSheetOpen(true);
+    })
+      .then((u) => (unlisten = u))
+      .catch(() => {});
+    return () => unlisten?.();
+  }, []);
+  // An update never installs by itself while the sheet is open (tray.rs).
+  useEffect(() => {
+    setNewProjectOpen(sheetOpen).catch(() => {});
+  }, [sheetOpen]);
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
