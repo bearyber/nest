@@ -28,9 +28,13 @@ local function names(list)
   return out
 end
 
+-- Only numbered entries are items: Resolve's lists also carry a "__flags" entry (seen in
+-- Resolve 21.1), which must not count as a clip or a folder.
 local function count(list)
   local n = 0
-  for _ in pairs(list or {}) do n = n + 1 end
+  for k in pairs(list or {}) do
+    if type(k) == "number" then n = n + 1 end
+  end
   return n
 end
 

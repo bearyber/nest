@@ -1326,6 +1326,9 @@ mod tests {
         assert!(!SCRIPT.contains("Untitled"));
         // The switch back gets the library table exactly as Resolve gave it.
         assert!(SCRIPT.contains("SetCurrentDatabase(before)"));
+        // Resolve's lists carry a "__flags" entry: only numbered entries count as items, or an
+        // empty project looks busy forever (found on Resolve 21.1, 2026-10-17).
+        assert!(SCRIPT.contains(r#"if type(k) == "number" then n = n + 1 end"#));
     }
 
     #[test]
