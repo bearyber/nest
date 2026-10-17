@@ -97,6 +97,10 @@ export const removeJobsRoot = (path: string) => s<SettingsView>("remove_jobs_roo
 export const moveJobsRoot = (path: string, to: number) => s<SettingsView>("move_jobs_root", { path, to });
 export const setDefaultSpace = (name: string) => s<SettingsView>("set_default_space", { name });
 export const setLaunchAtLogin = (on: boolean) => s<SettingsView>("set_launch_at_login", { on });
+/** v0.7: the menu bar (macOS) / notification area (Windows) icon. */
+export const setShowInMenuBar = (on: boolean) => s<SettingsView>("set_show_in_menu_bar", { on });
+/** v0.7: tells Rust while the New Project sheet is open (an update never installs then). */
+export const setNewProjectOpen = (open: boolean) => s<void>("set_new_project_open", { open });
 /** Opens the folder picker; null when cancelled. */
 export const setArchiveFolder = () => s<SettingsView | null>("set_archive_folder");
 /** Rust asks first if the archive folder holds projects; null = cancelled. */

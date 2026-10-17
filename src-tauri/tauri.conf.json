@@ -20,7 +20,8 @@
         "minWidth": 900,
         "minHeight": 560,
         "center": true,
-        "transparent": true
+        "transparent": true,
+        "visible": false
       }
     ],
     "security": {

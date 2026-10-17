@@ -273,6 +273,10 @@ export interface Settings {
   hiddenTemplates: string[];
   theme: "system" | "light" | "dark";
   launchAtLogin: boolean;
+  /** v0.7: keep running with an icon in the menu bar / notification area when the window closes. */
+  showInMenuBar: boolean;
+  /** v0.7: the one-time "Nest is still running" note was shown. */
+  closeNoteShown: boolean;
   /** Archive (M5): null = off. */
   archiveFolder: string | null;
   /** Suggest archiving projects done for more than this many days; null = no suggestions. */

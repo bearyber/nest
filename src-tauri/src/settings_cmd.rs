@@ -371,6 +371,28 @@ pub fn set_launch_at_login(
     })
 }
 
+/// v0.7: "Show Nest in the menu bar" (Windows: "Keep Nest in the notification area").
+#[tauri::command(async)]
+pub fn set_show_in_menu_bar(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    on: bool,
+) -> AppResult<SettingsView> {
+    let v = edit(&app, &state, |s| {
+        s.show_in_menu_bar = on;
+        Ok(())
+    })?;
+    crate::tray::apply(&app);
+    Ok(v)
+}
+
+/// The main window says whether the New Project sheet is open (an update never installs by
+/// itself while it is; see tray.rs).
+#[tauri::command(async)]
+pub fn set_new_project_open(app: AppHandle, open: bool) {
+    crate::tray::set_sheet_open(&app, open);
+}
+
 // ── Job codes ──
 
 #[tauri::command(async)]

@@ -12,14 +12,16 @@ import {
   setDefaultSpace,
   setLaunchAtLogin,
   setPersonalRoot,
+  setShowInMenuBar,
   reusePastArchiveFolder,
 } from "../../lib/commands";
 
 const SUGGESTED_DAYS = 90;
+import { isMac } from "../../lib/platform";
 import type { TabProps } from "../Settings";
 import styles from "./settings.module.css";
 
-/** General: jobs folders, default space, launch at login. */
+/** General: jobs folders, default space, menu bar icon, open at login. */
 export default function GeneralTab({ view, run }: TabProps) {
   const s = view.settings;
   const roots = s.jobsRoots;
@@ -196,7 +198,22 @@ export default function GeneralTab({ view, run }: TabProps) {
       </section>
 
       <section className={styles.section}>
-        <h3 className={styles.sectionTitle}>Startup</h3>
+        <h3 className={styles.sectionTitle}>{isMac() ? "Menu bar and startup" : "Notification area and startup"}</h3>
+        <label className={styles.check}>
+          <input
+            type="checkbox"
+            checked={s.showInMenuBar}
+            onChange={(e) => run(setShowInMenuBar(e.target.checked))}
+          />
+          {isMac() ? "Show Nest in the menu bar" : "Keep Nest in the notification area"}
+        </label>
+        <p className={styles.hint}>
+          {s.showInMenuBar
+            ? isMac()
+              ? "Closing the window keeps Nest running in the menu bar, so you can start a project from there. Quit with ⌘Q."
+              : "Closing the window keeps Nest running by the clock, so you can start a project from there. Quit from its icon."
+            : "Closing the window quits Nest."}
+        </p>
         <label className={styles.check}>
           <input
             type="checkbox"
@@ -204,9 +221,17 @@ export default function GeneralTab({ view, run }: TabProps) {
             disabled={view.devBuild}
             onChange={(e) => run(setLaunchAtLogin(e.target.checked))}
           />
-          Open Nest when you log in
+          Open Nest when you log in to this computer
         </label>
-        {view.devBuild && <p className={styles.hint}>Only available in the installed app.</p>}
+        <p className={styles.hint}>
+          {view.devBuild
+            ? "Only available in the installed app."
+            : s.showInMenuBar
+              ? isMac()
+                ? "Off unless you turn it on. Nest then waits in the menu bar, without opening a window."
+                : "Off unless you turn it on. Nest then waits in the notification area, without opening a window."
+              : "Off unless you turn it on."}
+        </p>
       </section>
     </>
   );

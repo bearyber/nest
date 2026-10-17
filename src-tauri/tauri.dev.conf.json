@@ -10,6 +10,7 @@
         "minHeight": 560,
         "center": true,
         "transparent": true,
+        "visible": false,
         "dataDirectory": "com.intrvl.nest/dev-webview"
       }
     ]
