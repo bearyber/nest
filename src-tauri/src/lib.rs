@@ -206,6 +206,7 @@ pub fn run() {
             resolve_cmd::resolve_try_now,
             resolve_cmd::resolve_remove_waiting,
             resolve_cmd::resolve_set_library,
+            resolve_cmd::project_resolve,
         ])
         .build(context)
         .unwrap_or_else(|e| startup::fail(&StartupError::new(Step::Other, e)))

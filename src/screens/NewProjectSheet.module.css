@@ -367,3 +367,10 @@
   color: var(--text);
   font-size: var(--text-small);
 }
+
+/* Under the preview: the Resolve project Create adds ("Resolve project: Grade in Acme"). */
+.resolveLine {
+  margin: var(--space-2) 0 0;
+  font-size: var(--text-small);
+  color: var(--text-secondary);
+}

@@ -11,6 +11,9 @@ export const STATUS_LINE: Record<Exclude<ResolveStatus, "ready">, string> = {
   scriptingOff:
     "In Resolve: Preferences → System → General → External scripting: Local, then restart Resolve. If Resolve has just opened, wait a few seconds.",
   notInstalled: "DaVinci Resolve isn't installed on this computer. You can still drop a .drp file.",
+  starting: "Resolve is starting. Try again in a few seconds.",
+  noAnswer: "Resolve didn't answer. If a window is open in Resolve (Preferences, a render), close it and try again.",
+  noHelper: "Nest couldn't talk to Resolve's script runner. You can still drop a .drp file.",
 };
 
 /** `files/2/Grade.drp` → `Grade`. */

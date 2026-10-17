@@ -18,6 +18,7 @@ import {
 import { hasCommandKey, isMac } from "../lib/platform";
 import { formatBytes } from "../lib/search";
 import { alsoMakeFor } from "../lib/alsoMake";
+import { plannedLine } from "../lib/resolve";
 import { defaultsFor, todayIso } from "../lib/tree";
 import {
   canCreate,
@@ -194,7 +195,8 @@ interface Props {
    *  is made until Create, like any other project. */
   example?: boolean;
   onClose: () => void;
-  onCreated: (created: Created) => void;
+  /** `resolveName`: the Resolve project Create queued (null = none). */
+  onCreated: (created: Created, resolveName: string | null) => void;
 }
 
 /** New Project sheet (build spec §3.2). Every preview comes from Rust's Plan. */
@@ -205,6 +207,8 @@ export default function NewProjectSheet({ initialTemplate, example = false, onCl
   const [space, setSpace] = useState("");
   const [codeOverride, setCodeOverride] = useState<string | null>(null);
   const [noClientTicked, setNoClientTicked] = useState(false);
+  /** "Also make: Resolve project"; null = the template's default (`resolve.on`). */
+  const [resolveOn, setResolveOn] = useState<boolean | null>(null);
   const [plan, setPlan] = useState<Plan | null>(null);
   const [touched, setTouched] = useState<Set<string>>(new Set());
   const [creating, setCreating] = useState(false);
@@ -226,6 +230,7 @@ export default function NewProjectSheet({ initialTemplate, example = false, onCl
     setValues(t ? defaultsFor(t.fields) : {});
     setTouched(new Set());
     setCodeOverride(null);
+    setResolveOn(null);
   }, []);
 
   useEffect(() => {
@@ -288,7 +293,7 @@ export default function NewProjectSheet({ initialTemplate, example = false, onCl
     if (!templateId || !space) return;
     const id = ++planRequestId.current;
     const timer = setTimeout(() => {
-      planProject({ templateId, values, space, codeOverride, noClient })
+      planProject({ templateId, values, space, codeOverride, noClient, resolve: resolveOn })
         .then((p) => {
           if (id === planRequestId.current) setPlan(p);
         })
@@ -297,7 +302,7 @@ export default function NewProjectSheet({ initialTemplate, example = false, onCl
         });
     }, PREVIEW_DEBOUNCE_MS);
     return () => clearTimeout(timer);
-  }, [templateId, values, space, codeOverride, noClient, jobsRoot, replan]);
+  }, [templateId, values, space, codeOverride, noClient, resolveOn, jobsRoot, replan]);
 
   const ready = canCreate(plan) && !creating;
   // Create copies the kit the preview showed, or refuses if it changed meanwhile.
@@ -322,15 +327,16 @@ export default function NewProjectSheet({ initialTemplate, example = false, onCl
     if (!ready) return;
     setCreating(true);
     setError(null);
-    createProject({ templateId, values, space, codeOverride, noClient, kitFingerprint })
-      .then(onCreated)
+    const resolveName = plan?.resolve?.name ?? null;
+    createProject({ templateId, values, space, codeOverride, noClient, kitFingerprint, resolve: resolveOn })
+      .then((c) => onCreated(c, resolveName))
       .catch((e) => {
         setError(errorMessage(e));
         setCreating(false);
         // E.g. the kit changed: show what's there now.
         setReplan((n) => n + 1);
       });
-  }, [ready, templateId, values, space, codeOverride, noClient, kitFingerprint, onCreated]);
+  }, [ready, templateId, values, space, codeOverride, noClient, kitFingerprint, resolveOn, plan, onCreated]);
 
   // Cancel while creating stops the copy (Rust undoes what it made); otherwise it closes.
   const cancel = useCallback(() => {
@@ -409,6 +415,7 @@ export default function NewProjectSheet({ initialTemplate, example = false, onCl
   const kitPlaces = clientFilePlaces(template?.tree);
   const alsoMake = template ? alsoMakeFor(template.fields, template.tree) : [];
   const alsoMakeKeys = new Set(alsoMake.map((a) => a.field.key));
+  const starter = template?.resolve;
 
   const footHint = copying ? (
     `Copying ${plan?.kit?.client ? `${plan.kit.client}'s files` : "files"}… ${percent}%. Cancel undoes everything.`
@@ -520,7 +527,7 @@ export default function NewProjectSheet({ initialTemplate, example = false, onCl
                 </div>
               </section>
 
-              {alsoMake.length > 0 && (
+              {(alsoMake.length > 0 || starter) && (
                 <section className={styles.group} aria-labelledby="group-also-make">
                   <h3 id="group-also-make" className={styles.groupTitle}>
                     Also make:
@@ -536,6 +543,20 @@ export default function NewProjectSheet({ initialTemplate, example = false, onCl
                         {a.label}
                       </label>
                     ))}
+                    {starter && (
+                      <label
+                        key={`${templateId}:resolve`}
+                        className={styles.check}
+                        title="Adds a copy of the template's Resolve project to DaVinci Resolve"
+                      >
+                        <input
+                          type="checkbox"
+                          checked={resolveOn ?? starter.on}
+                          onChange={(e) => setResolveOn(e.target.checked)}
+                        />
+                        Resolve project
+                      </label>
+                    )}
                   </div>
                 </section>
               )}
@@ -625,6 +646,11 @@ export default function NewProjectSheet({ initialTemplate, example = false, onCl
               </section>
 
               {plan && <PreviewTree plan={plan} />}
+              {plan?.resolve && (
+                <p className={styles.resolveLine} title={`Library: ${plan.resolve.libraryLabel}`}>
+                  {plannedLine(plan.resolve)}
+                </p>
+              )}
             </>
           )}
 
