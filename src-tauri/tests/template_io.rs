@@ -5,8 +5,8 @@ use std::io::Write;
 use std::path::{Path, PathBuf};
 
 use nest_lib::template_io::{
-    duplicate, export, folder_count, import, info, load_installed, removal, without_built_ins,
-    Installed, Limits, Removal, LIMITS,
+    check_import_file, drop_kind, duplicate, export, folder_count, import, info, load_installed,
+    removal, without_built_ins, DropKind, Installed, Limits, Removal, LIMITS,
 };
 use zip::write::SimpleFileOptions;
 use zip::ZipWriter;
@@ -396,4 +396,60 @@ fn folder_count_includes_implied_parents_once() {
     // 01_REF, 02_FOOTAGE, A_CAM, B_CAM, 03_GFX.
     assert_eq!(folder_count(&t.loaded.template), 5);
     assert_eq!(info(t, &[]).folders, 5);
+}
+
+#[test]
+fn a_dropped_template_file_is_checked_then_installs_like_import() {
+    let s = setup();
+    let pkg = s.pkg("Acme Film.NESTTEMPLATE");
+    zip_with(
+        &pkg,
+        &[(
+            "acme-film.nest.json",
+            template_json("acme-film", 1, "Acme film").as_bytes(),
+        )],
+    );
+    assert_eq!(drop_kind(&pkg), DropKind::Template);
+    check_import_file(&pkg).unwrap();
+    let loaded = import(&pkg, &s.user, &s.installed(), LIMITS).unwrap();
+    assert_eq!(loaded.template.name, "Acme film");
+    assert!(s
+        .installed()
+        .iter()
+        .any(|t| t.loaded.template.id == "acme-film"));
+
+    // A single .json works the same way.
+    let json = s.pkg("single.json");
+    fs::write(&json, template_json("single", 1, "Single")).unwrap();
+    assert_eq!(drop_kind(&json), DropKind::Template);
+    check_import_file(&json).unwrap();
+}
+
+#[test]
+fn a_dropped_path_that_isnt_a_template_file_gets_a_plain_message() {
+    let s = setup();
+    // Wrong extension: refused before anything is opened, nothing installed.
+    let txt = s.pkg("notes.txt");
+    fs::write(&txt, "hello").unwrap();
+    assert_eq!(drop_kind(&txt), DropKind::Other);
+    let e = check_import_file(&txt).unwrap_err();
+    assert_eq!(e, "That's not a Nest template file (.nesttemplate).");
+
+    // Gone (moved or renamed after the drop).
+    let gone = s.pkg("gone.nesttemplate");
+    assert_eq!(drop_kind(&gone), DropKind::Other);
+    let e = check_import_file(&gone).unwrap_err();
+    assert!(e.starts_with("Nest couldn't find that file"), "{e}");
+
+    // A folder named like a template is a folder, never imported as a file.
+    let dir = s.pkg("odd.nesttemplate");
+    fs::create_dir(&dir).unwrap();
+    assert_eq!(drop_kind(&dir), DropKind::Folder);
+    assert!(check_import_file(&dir).is_err());
+    assert!(s.user_folders().is_empty());
+
+    // Korean folder names are folders too.
+    let ko = s.pkg("260301_광고");
+    fs::create_dir(&ko).unwrap();
+    assert_eq!(drop_kind(&ko), DropKind::Folder);
 }

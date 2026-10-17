@@ -4,10 +4,12 @@ import { getCurrentWebview } from "@tauri-apps/api/webview";
 import { Menu } from "@tauri-apps/api/menu";
 import { Button, IconButton } from "../../components/ui";
 import {
+  dropKinds,
   editorClose,
   editorOpen,
   exportTemplate,
   importTemplate,
+  importTemplateFrom,
   listTemplates,
   removeTemplate,
   restoreBuiltinTemplates,
@@ -15,7 +17,8 @@ import {
   templateFromFolder,
 } from "../../lib/commands";
 import { isMac } from "../../lib/platform";
-import type { FolderDraft, SaveMode, Skipped, SkipReason, Template, TemplateInfo } from "../../lib/types";
+import type { DropKind, FolderDraft, SaveMode, Skipped, SkipReason, Template, TemplateInfo } from "../../lib/types";
+import { errorMessage } from "../../lib/types";
 import TemplateEditor from "./TemplateEditor";
 import styles from "./Templates.module.css";
 
@@ -43,6 +46,31 @@ export function folderNote(skipped: Skipped[], fromProject: boolean): string {
   const answers = fromProject ? "This was a Nest project: its answers became questions New Project asks. " : "";
   const left = parts.length ? `Left out: ${parts.join(", ")}.` : "Everything came along.";
   return `${answers}${left} Your folder wasn't changed.`;
+}
+
+/** The last part of a dropped path, for messages. */
+const baseName = (p: string) => p.split(/[\\/]/).filter(Boolean).pop() ?? p;
+
+/** “A”, “A and B”, “A, B and C”. */
+const quotedList = (names: string[]) => {
+  const q = names.map((n) => `“${n}”`);
+  return q.length < 2 ? (q[0] ?? "") : `${q.slice(0, -1).join(", ")} and ${q[q.length - 1]}`;
+};
+
+export const NOT_A_TEMPLATE = "That's not a folder or a Nest template file.";
+
+/** What to do with a drop: every template file is installed, the first folder becomes a new
+ *  template, the rest is left out (and said so in one line). */
+export function sortDrop(paths: string[], kinds: DropKind[]) {
+  const templates = paths.filter((_, i) => kinds[i] === "template");
+  const folders = paths.filter((_, i) => kinds[i] === "folder");
+  const others = paths.filter((_, i) => kinds[i] !== "template" && kinds[i] !== "folder");
+  const extra = folders.slice(1).map(baseName);
+  const notes = [
+    extra.length ? `Used the first folder only; left out ${quotedList(extra)}.` : "",
+    others.length ? `Left out ${quotedList(others.map(baseName))}: not a folder or a Nest template file.` : "",
+  ];
+  return { templates, folder: folders[0] ?? null, leftOut: notes.filter(Boolean).join(" ") };
 }
 
 /** On Windows "&" marks a menu shortcut letter; "&&" shows one "&". */
@@ -108,11 +136,54 @@ export default function Templates({ run, onNewProject }: Props) {
     });
   };
 
-  // Drop a folder anywhere on this view to make a template from it.
-  const fromFolderRef = useRef(fromFolder);
+  /** Install one template file, the same way Import… does. */
+  const importFile = async (pick: () => Promise<TemplateInfo | null>) => {
+    const t = await run(pick());
+    if (t) void run(Promise.resolve(null), `Added “${t.name}”.`);
+  };
+
+  // Something dropped: folders make a template, `.nesttemplate` / `.json` files are installed.
+  const dropped = async (paths: string[]) => {
+    if (editing || paths.length === 0) return; // a drop while the editor is open isn't for us
+    let kinds: DropKind[];
+    try {
+      kinds = await dropKinds(paths);
+    } catch {
+      kinds = paths.map(() => "folder"); // couldn't look: try it as a folder (as before)
+    }
+    const { templates: files, folder, leftOut } = sortDrop(paths, kinds);
+    if (files.length === 0 && !folder) {
+      void run(Promise.reject(new Error(NOT_A_TEMPLATE)));
+      return;
+    }
+    if (files.length === 1 && !leftOut) {
+      await importFile(() => importTemplateFrom(files[0]));
+    } else if (files.length > 0) {
+      // Several files: install each, then one line for all of them.
+      const added: string[] = [];
+      const problems: string[] = [];
+      for (const f of files) {
+        try {
+          const t = await importTemplateFrom(f);
+          if (t) added.push(t.name);
+        } catch (e) {
+          problems.push(`${baseName(f)}: ${errorMessage(e)}`);
+        }
+      }
+      const addedText = added.length ? `Added ${quotedList(added)}.` : "";
+      const text = [addedText, ...problems, leftOut].filter(Boolean).join(" ");
+      void run(problems.length ? Promise.reject(new Error(text)) : Promise.resolve(true), text);
+    } else if (leftOut) {
+      void run(Promise.resolve(true), leftOut);
+    }
+    if (folder) await fromFolder(folder);
+  };
+
+  // Drop a folder or a template file anywhere on this view.
+  const droppedRef = useRef(dropped);
   const editingRef = useRef(false);
   useEffect(() => {
-    fromFolderRef.current = fromFolder;
+    droppedRef.current = dropped;
     editingRef.current = editing !== null;
   });
   useEffect(() => {
@@ -122,7 +193,7 @@ export default function Templates({ run, onNewProject }: Props) {
         const p = e.payload;
         if (p.type === "drop") {
           setDragging(false);
-          if (p.paths.length > 0) void fromFolderRef.current(p.paths[0]);
+          void droppedRef.current(p.paths);
         } else if (p.type === "leave") setDragging(false);
         else if (!editingRef.current) setDragging(true);
       })
@@ -220,18 +291,20 @@ export default function Templates({ run, onNewProject }: Props) {
         </Button>
         <Button
           title="Opens a .nesttemplate file made with Export… (on this or another computer)"
-          onClick={async () => {
-            const t = await run(importTemplate());
-            if (t) void run(Promise.resolve(null), `Added “${t.name}”.`);
-          }}
+          onClick={() => void importFile(importTemplate)}
         >
           Import…
         </Button>
       </div>
 
       <div className={styles.drop} data-dragging={dragging || undefined}>
-        <p className={styles.dropText}>Drop a job folder here to make a template from it</p>
-        <Button onClick={() => void fromFolder(null)}>Choose a folder…</Button>
+        <p className={styles.dropText}>Drop a job folder or a template file here</p>
+        <div className={styles.dropActions}>
+          <Button onClick={() => void fromFolder(null)}>Choose a folder…</Button>
+          <Button className={styles.link} onClick={() => void importFile(importTemplate)}>
+            or open a template file…
+          </Button>
+        </div>
       </div>
 
       <ul className={styles.list} aria-label="Templates">

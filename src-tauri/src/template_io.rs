@@ -239,6 +239,51 @@ fn load_all_in(dir: &Path) -> Vec<LoadedTemplate> {
 
 // ───────────────────────── Import ─────────────────────────
 
+/// What something dropped on the Templates screen is (read-only look, nothing opened).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub enum DropKind {
+    /// A folder: make a template from it.
+    Folder,
+    /// A `.nesttemplate` or `.json` file: install it like Import… does.
+    Template,
+    /// Anything else (another kind of file, or gone).
+    Other,
+}
+
+fn has_template_ext(path: &Path) -> bool {
+    path.extension()
+        .is_some_and(|e| e.eq_ignore_ascii_case(PACKAGE_EXT) || e.eq_ignore_ascii_case("json"))
+}
+
+/// Folder, template file or neither. Follows shortcuts/links the way Finder/Explorer would.
+pub fn drop_kind(path: &Path) -> DropKind {
+    match fs::metadata(path) {
+        Ok(m) if m.is_dir() => DropKind::Folder,
+        Ok(m) if m.is_file() && has_template_ext(path) => DropKind::Template,
+        _ => DropKind::Other,
+    }
+}
+
+/// Before importing a file given by path (a drop): it must be a regular `.nesttemplate` or
+/// `.json` file that's still there.
+pub fn check_import_file(path: &Path) -> Result<(), String> {
+    if !has_template_ext(path) {
+        return Err("That's not a Nest template file (.nesttemplate).".into());
+    }
+    match fs::metadata(path) {
+        Ok(m) if m.is_file() => Ok(()),
+        Ok(_) => Err("That's not a Nest template file (.nesttemplate).".into()),
+        Err(e) if e.kind() == io::ErrorKind::NotFound => {
+            Err("Nest couldn't find that file. It may have been moved or renamed.".into())
+        }
+        Err(e) => Err(format!(
+            "Nest couldn't open that file: {}.",
+            crate::error::io_reason(&e)
+        )),
+    }
+}
+
 /// Remove one of Nest's own temporary folders. Already gone is fine; anything else is logged
 /// (the start-up tidy removes it a day later).
 fn remove_own_tmp(tmp: &Path) {

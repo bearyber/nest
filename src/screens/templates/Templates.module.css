@@ -25,6 +25,19 @@
   background: var(--accent-soft);
 }
 
+/* Choose a folder… with "or open a template file…" under it. */
+.dropActions {
+  display: grid;
+  justify-items: start;
+  gap: var(--space-1);
+}
+
+.dropActions .link {
+  min-height: 0;
+  padding-block: 0;
+  font-size: var(--text-small);
+}
+
 .dropText {
   margin: 0;
   color: var(--text-secondary);
