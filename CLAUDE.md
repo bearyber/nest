@@ -55,6 +55,9 @@ src-tauri/
     staged.rs        files waiting to go into a template (checked again and copied on save)
     kits.rs          client kits: find a client's kit folder, list it read-only, fingerprint
     kits_cmd.rs      client kit commands, cache, Create progress + Cancel
+    resolve.rs       DaVinci Resolve: Resolve's own fuscript + bundled resolve.lua (status, libraries, projects, export, add; library switch only with nothing real open)
+    resolve_cmd.rs   Resolve commands + waiting list (tries on Create, every minute, when Resolve opens)
+    tray.rs          menu bar / notification area icon; keep running when the window closes; idle updates
     whats_new.rs     What's new (bundled src/whats-new.json; shown once after an update)
     startup.rs       the "Nest couldn't start" message box (works before the app is up)
     tidy.rs          start-up tidy of Nest's own leftovers (exact-pattern temp files, extras/)
