@@ -586,6 +586,23 @@ pub fn resolve_export_to_editor(
     ))
 }
 
+/// The template editor: a `.drp` dropped on it becomes the Resolve project. Staged like a
+/// dropped file (copied into the template on Save); returns the path for `resolve.drp`.
+#[tauri::command(async)]
+pub fn editor_add_resolve_drp(
+    state: State<'_, AppState>,
+    session_id: String,
+    path: String,
+) -> AppResult<String> {
+    let mut sessions = lock(&state.editor_sessions)?;
+    let session = sessions
+        .get_mut(&session_id)
+        .ok_or_else(|| AppError::new("The editor was closed. Open the template again."))?;
+    session
+        .add_dropped_drp(Path::new(&path))
+        .map_err(AppError::new)
+}
+
 /// The waiting list (Settings / main window).
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]

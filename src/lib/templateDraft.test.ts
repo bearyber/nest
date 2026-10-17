@@ -133,6 +133,15 @@ describe("questions", () => {
     const noName = removeQuestion(video, "name");
     expect(noName.folderName).toBe("{start|yymmdd}");
   });
+
+  it("takes a removed question out of the Resolve project's name and folder", () => {
+    const video = bundled.find((t) => t.id === "video")!;
+    const t = { ...video, resolve: { drp: "files/Grade.drp", name: "{client}_{name}", folder: "Jobs/{client}", on: true } };
+    expect(removeQuestion(t, "client").resolve).toEqual({ drp: "files/Grade.drp", name: "{name}", folder: "Jobs", on: true });
+    const none = removeQuestion({ ...t, resolve: { ...t.resolve, name: "{client}", folder: "{client}" } }, "client");
+    expect(none.resolve).toEqual({ drp: "files/Grade.drp", folder: "", on: true });
+    expect(removeQuestion(video, "client").resolve).toBeUndefined();
+  });
 });
 
 describe("retype", () => {

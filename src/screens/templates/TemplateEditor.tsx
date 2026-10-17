@@ -2,7 +2,14 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { Menu } from "@tauri-apps/api/menu";
 import { getCurrentWebview } from "@tauri-apps/api/webview";
 import { Button } from "../../components/ui";
-import { editorAddFiles, editorAddTextFile, exampleNames, previewTemplate, saveTemplate } from "../../lib/commands";
+import {
+  editorAddFiles,
+  editorAddResolveDrp,
+  editorAddTextFile,
+  exampleNames,
+  previewTemplate,
+  saveTemplate,
+} from "../../lib/commands";
 import {
   addFolder,
   formatName,
@@ -39,6 +46,7 @@ import {
   errorMessage,
   type AddedFiles,
   type Field,
+  type ResolveStarter,
   type SaveMode,
   type Saved,
   type Template,
@@ -48,6 +56,7 @@ import { EDIT_STEP_EVENT, type EditStep } from "../../lib/editMenu";
 import { usePointerDrag } from "./drag";
 import { blankLabel } from "./NameField";
 import QuestionSettings from "./QuestionSettings";
+import ResolveSection, { defaultFolder, drpName, isDrp } from "./ResolveSection";
 import Tree, { fileRow, ROOT, rowOrder, visibleNames, type RowId } from "./Tree";
 import styles from "./editor.module.css";
 
@@ -92,6 +101,9 @@ export default function TemplateEditor({ sourceKey, mode, start, note, onClose, 
   const [error, setError] = useState<string | null>(null);
   const [toast, setToast] = useState<{ text: string; undo: boolean } | null>(null);
   const [confirmClose, setConfirmClose] = useState(false);
+  /** A dropped .drp being added (its name), and whether a drag over the editor is .drp only. */
+  const [addingDrp, setAddingDrp] = useState<string | null>(null);
+  const [draggingDrp, setDraggingDrp] = useState(false);
   const dirty = useRef(false);
   const treeRef = useRef<HTMLDivElement>(null);
 
@@ -425,26 +437,86 @@ export default function TemplateEditor({ sourceKey, mode, start, note, onClose, 
     }
   };
 
+  // ── The Resolve project ──
+
+  /** Set or take away the template's Resolve project (one undoable change). */
+  const setResolve = (next: ResolveStarter | undefined) =>
+    change((d) => {
+      const draft = { ...d.draft, resolve: next };
+      if (!next) delete draft.resolve;
+      return { ...d, draft };
+    });
+
+  const removeResolve = () => {
+    setResolve(undefined);
+    say("Removed the Resolve project.", true);
+  };
+
+  /** A .drp dropped anywhere on the editor becomes the Resolve project (Rust checks and stages it). */
+  const addDrp = async (path: string, others: number) => {
+    const name = drpName(path.split(/[\\/]/).pop() ?? path);
+    setAddingDrp(name);
+    try {
+      const drp = await editorAddResolveDrp(sourceKey, path);
+      change((d) => {
+        const { resolve: was, ...rest } = d.draft;
+        return {
+          ...d,
+          draft: { ...rest, resolve: was ? { ...was, drp } : { drp, folder: defaultFolder(d.draft.fields), on: true } },
+        };
+      });
+      say(
+        others
+          ? `${name} is the Resolve project now. A template has one, so the other .drp files were left out.`
+          : `${name} is the Resolve project now. New jobs get their own copy in Resolve.`,
+        true,
+      );
+    } catch (e) {
+      say(errorMessage(e));
+    } finally {
+      setAddingDrp(null);
+    }
+  };
+
   const dropTarget = (x: number, y: number): string | null => {
     const ratio = window.devicePixelRatio || 1;
     const el = document.elementFromPoint(x / ratio, y / ratio)?.closest("[data-drop-path]");
     return el ? (el.getAttribute("data-drop-path") ?? null) : null;
   };
   const addFilesRef = useRef(addFiles);
+  const addDrpRef = useRef(addDrp);
+  const drpOnlyRef = useRef(false);
   useEffect(() => {
     addFilesRef.current = addFiles;
+    addDrpRef.current = addDrp;
   });
   useEffect(() => {
     let unlisten: (() => void) | undefined;
     getCurrentWebview()
       .onDragDropEvent((e) => {
         const ev = e.payload;
-        if (ev.type === "over") setDropPath(dropTarget(ev.position.x, ev.position.y));
-        else if (ev.type === "drop") {
+        if (ev.type === "enter") {
+          const drpOnly = ev.paths.length > 0 && ev.paths.every(isDrp);
+          drpOnlyRef.current = drpOnly;
+          setDraggingDrp(drpOnly);
+          if (!drpOnly) setDropPath(dropTarget(ev.position.x, ev.position.y));
+        } else if (ev.type === "over") {
+          // A .drp goes to the Resolve project wherever it's dropped: no folder lights up.
+          if (!drpOnlyRef.current) setDropPath(dropTarget(ev.position.x, ev.position.y));
+        } else if (ev.type === "drop") {
           const into = dropTarget(ev.position.x, ev.position.y);
           setDropPath(null);
-          if (ev.paths.length) void addFilesRef.current(into ?? "", ev.paths);
-        } else setDropPath(null);
+          setDraggingDrp(false);
+          drpOnlyRef.current = false;
+          const drps = ev.paths.filter(isDrp);
+          const rest = ev.paths.filter((p) => !isDrp(p));
+          if (drps.length) void addDrpRef.current(drps[0], drps.length - 1);
+          if (rest.length) void addFilesRef.current(into ?? "", rest);
+        } else {
+          setDropPath(null);
+          setDraggingDrp(false);
+          drpOnlyRef.current = false;
+        }
       })
       .then((u) => (unlisten = u))
       .catch(() => {});
@@ -570,6 +642,8 @@ export default function TemplateEditor({ sourceKey, mode, start, note, onClose, 
 
   const onTreeKey = (e: React.KeyboardEvent) => {
     if (isTyping(e.target) || !selected) return;
+    // The Resolve project's buttons sit under the tree; the tree's keys aren't for them.
+    if ((e.target as HTMLElement).closest?.("[data-resolve-section]")) return;
     const order = rowOrder(nodes, files);
     const i = order.indexOf(selected);
     if (e.key === "ArrowDown" || e.key === "ArrowUp") {
@@ -678,6 +752,18 @@ export default function TemplateEditor({ sourceKey, mode, start, note, onClose, 
             onMove={move}
             onChip={(row, key, index) => setBlank({ key, row, index })}
             onNewBlank={(label) => newBlank(label)}
+          />
+          <ResolveSection
+            sessionId={sourceKey}
+            value={draft.resolve}
+            fields={draft.fields}
+            folderName={draft.folderName}
+            onChange={setResolve}
+            onRemove={removeResolve}
+            onNewBlank={(label) => newBlank(label)}
+            onChip={(key) => setBlank({ key })}
+            adding={addingDrp}
+            dropping={draggingDrp}
           />
           {toast && (
             <div className={styles.note} role="status">

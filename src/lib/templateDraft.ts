@@ -334,6 +334,18 @@ export function removeQuestion(t: Template, key: string): Template {
     );
   }
   const title = t.title === undefined ? undefined : dropVar(t.title, " ");
+  // The Resolve project's name and folder lose the answer too (a folder left empty goes).
+  let resolve = t.resolve;
+  if (resolve) {
+    const name = resolve.name === undefined ? undefined : dropVar(resolve.name, "_");
+    const folder = resolve.folder
+      .split("/")
+      .map((seg) => dropVar(seg, "_"))
+      .filter((seg) => seg !== "")
+      .join("/");
+    resolve = { ...resolve, folder, name: name === "" ? undefined : name };
+    if (resolve.name === undefined) delete resolve.name;
+  }
   return {
     ...t,
     fields: t.fields.filter((f) => f.key !== key),
@@ -341,6 +353,7 @@ export function removeQuestion(t: Template, key: string): Template {
     ...(title === undefined || title === "" ? { title: undefined } : { title }),
     tree,
     files: (t.files ?? []).filter((f) => !usesVar(f.to, key)),
+    ...(resolve ? { resolve } : {}),
   };
 }
 

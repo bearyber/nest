@@ -703,3 +703,41 @@ fn a_resolve_project_is_staged_saved_and_kept() {
         .files
         .contains("files/Grade.drp"));
 }
+
+/// A `.drp` dropped on the editor: only a .drp file is taken, its name is cleaned, and a
+/// second one with the same name gets a place of its own. Nothing is written.
+#[test]
+fn a_dropped_drp_is_checked_and_staged() {
+    use nest_lib::template_edit::{dropped_drp, EditorSession};
+
+    let s = Setup::new();
+    let dir = s._tmp.path().join("drops");
+    std::fs::create_dir_all(dir.join("Folder.drp")).unwrap();
+    std::fs::write(dir.join("그레이드 Grade.DRP"), b"drp").unwrap();
+    std::fs::write(dir.join("notes.txt"), b"hi").unwrap();
+
+    let (name, on_disk) = dropped_drp(&dir.join("그레이드 Grade.DRP")).unwrap();
+    assert_eq!(name, "그레이드 Grade.drp");
+    assert_eq!(on_disk.rel, "그레이드 Grade.DRP");
+    assert_eq!(on_disk.size, 3);
+    assert!(dropped_drp(&dir.join("notes.txt")).is_err());
+    assert!(
+        dropped_drp(&dir.join("Folder.drp")).is_err(),
+        "a folder isn't a .drp"
+    );
+    assert!(dropped_drp(&dir.join("missing.drp")).is_err());
+
+    let video = s.get("video", true);
+    let mut session = EditorSession::from_template(&video);
+    let first = session
+        .add_dropped_drp(&dir.join("그레이드 Grade.DRP"))
+        .unwrap();
+    let second = session
+        .add_dropped_drp(&dir.join("그레이드 Grade.DRP"))
+        .unwrap();
+    assert_eq!(first, "files/그레이드 Grade.drp");
+    assert_eq!(second, "files/2/그레이드 Grade.drp");
+    assert!(session.add_dropped_drp(&dir.join("notes.txt")).is_err());
+    let entries: Vec<_> = std::fs::read_dir(&dir).unwrap().collect();
+    assert_eq!(entries.len(), 3, "nothing written next to the drop");
+}
