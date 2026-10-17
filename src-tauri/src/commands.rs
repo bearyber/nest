@@ -444,6 +444,7 @@ pub fn create_project(
                     log::warn!("couldn't add the new project to the index: {e}");
                 }
                 crate::devices_cmd::sync_soon(&app);
+                crate::tray::refresh(&app);
                 return Ok(Created {
                     key,
                     bumped: plan.job_code != previewed,

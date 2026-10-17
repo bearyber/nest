@@ -91,6 +91,7 @@ vi.mock("../lib/commands", () => ({
   checkForUpdates: vi.fn(async () => null),
   installUpdate: vi.fn(async () => {}),
   firstProjectTipSeen: vi.fn(async () => {}),
+  setNewProjectOpen: vi.fn(async () => {}),
   revealProject: vi.fn(async () => {}),
   openProject: vi.fn(async () => {}),
   openSettings: vi.fn(async () => {}),
