@@ -18,10 +18,12 @@ import {
 import { hasCommandKey, isMac } from "../lib/platform";
 import { formatBytes } from "../lib/search";
 import { alsoMakeFor } from "../lib/alsoMake";
-import { defaultsFor } from "../lib/tree";
+import { defaultsFor, todayIso } from "../lib/tree";
 import {
   canCreate,
   errorMessage,
+  type ClientValue,
+  type Field,
   type Created,
   type CreateProgress,
   type FieldValue,
@@ -145,7 +147,7 @@ function ClientFilesLine({ kit, places, saving, onChoose, onPut }: ClientFilesPr
 }
 
 /** "D:\Jobs\260901_X" → "D:\Jobs" (either separator). */
-function parentOf(path: string): string {
+export function parentOf(path: string): string {
   const cut = Math.max(path.lastIndexOf("/"), path.lastIndexOf("\\"));
   return cut > 0 ? path.slice(0, cut) : path;
 }
@@ -162,15 +164,41 @@ export function shortPath(path: string): string {
   return [head, "…", ...tail].join(sep);
 }
 
+/** "Try an example" (first steps): the client and name it fills in. */
+export const EXAMPLE_CLIENT = { name: "Acme", code: "ACME" };
+export const EXAMPLE_NAME = "Summer Film";
+
+/** The example's answers for a template: its defaults, plus client Acme, the project name
+ *  "Summer Film" and today's date. Nothing is saved: it's only what the form starts with. */
+export function exampleValues(fields: Field[], clients: ClientValue[] = [], today: string = todayIso()): Values {
+  const values = defaultsFor(fields);
+  // Acme already used in the jobs folder: keep its code.
+  const known = clients.find((c) => c.name.toLowerCase() === EXAMPLE_CLIENT.name.toLowerCase());
+  const texts = fields.filter((f) => f.type === "text");
+  const nameField =
+    texts.find((f) => ["name", "title", "project"].includes(f.key.toLowerCase())) ??
+    texts.find((f) => f.required) ??
+    texts[0];
+  for (const f of fields) {
+    if (f.type === "client") values[f.key] = { name: EXAMPLE_CLIENT.name, code: known?.code ?? EXAMPLE_CLIENT.code };
+    else if (f.type === "date") values[f.key] = today;
+  }
+  if (nameField) values[nameField.key] = EXAMPLE_NAME;
+  return values;
+}
+
 interface Props {
   /** Start with this template (e.g. "New project from this" in Templates). */
   initialTemplate?: string;
+  /** "Try an example": the first template, filled in with Acme / Summer Film / today. Nothing
+   *  is made until Create, like any other project. */
+  example?: boolean;
   onClose: () => void;
   onCreated: (created: Created) => void;
 }
 
 /** New Project sheet (build spec §3.2). Every preview comes from Rust's Plan. */
-export default function NewProjectSheet({ initialTemplate, onClose, onCreated }: Props) {
+export default function NewProjectSheet({ initialTemplate, example = false, onClose, onCreated }: Props) {
   const [ctx, setCtx] = useState<NewProjectContext | null>(null);
   const [templateId, setTemplateId] = useState("");
   const [values, setValues] = useState<Values>({});
@@ -207,11 +235,12 @@ export default function NewProjectSheet({ initialTemplate, onClose, onCreated }:
         setSpace(c.defaultSpace);
         const asked = c.templates.find((t) => t.id === initialTemplate);
         const last = c.templates.find((t) => t.id === c.lastTemplate);
-        const first = asked ?? last ?? c.templates[0];
+        const first = example ? c.templates[0] : (asked ?? last ?? c.templates[0]);
         if (first) chooseTemplate(first.id, c);
+        if (first && example) setValues(exampleValues(first.fields, c.clients));
       })
       .catch((e) => setError(errorMessage(e)));
-  }, [chooseTemplate, initialTemplate]);
+  }, [chooseTemplate, initialTemplate, example]);
 
   // Settings changed while the sheet is open (e.g. a new Personal folder or a client's kit):
   // reload what it shows, and plan again.
@@ -408,6 +437,11 @@ export default function NewProjectSheet({ initialTemplate, onClose, onCreated }:
         </header>
 
         <div className={styles.body}>
+          {example && (
+            <p className={styles.exampleNote}>
+              An example to try. Change anything you like. Nothing is made until you press Create.
+            </p>
+          )}
           {rootMissing && jobsRoot && (
             <div className={styles.banner} role="alert">
               {personalShown ? "Personal folder" : "Jobs folder"} not found: {jobsRoot}

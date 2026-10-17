@@ -133,6 +133,18 @@ pub fn whats_new_seen(state: State<'_, AppState>) -> AppResult<()> {
     record_running(&state)
 }
 
+/// The note after your very first project was shown: never show it again.
+#[tauri::command(async)]
+pub fn first_project_tip_seen(state: State<'_, AppState>) -> AppResult<()> {
+    if state.settings_error.is_some() {
+        return Ok(());
+    }
+    edit_settings_quietly(&state, |s| {
+        s.first_project_tip_seen = true;
+        Ok(())
+    })
+}
+
 fn record_running(state: &AppState) -> AppResult<()> {
     if state.settings_error.is_some() {
         return Ok(());

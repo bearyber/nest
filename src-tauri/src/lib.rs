@@ -165,6 +165,7 @@ pub fn run() {
             settings_cmd::settings_ready,
             whats_new::whats_new,
             whats_new::whats_new_seen,
+            whats_new::first_project_tip_seen,
             devices_cmd::devices_view,
             devices_cmd::devices_detect,
             devices_cmd::devices_pick_folder,

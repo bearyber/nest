@@ -83,6 +83,8 @@ pub struct Settings {
     /// v0.5 client kits: a kit folder chosen for one client, by client code. Wins over
     /// `kits_folder`.
     pub client_kits: std::collections::BTreeMap<String, PathBuf>,
+    /// v0.7: the "<CODE> is ready" note after your very first project was shown (once).
+    pub first_project_tip_seen: bool,
     /// Keys this version doesn't know (e.g. written by a newer Nest): kept on every save.
     #[serde(flatten)]
     pub other: serde_json::Map<String, serde_json::Value>,
@@ -132,6 +134,7 @@ impl Default for Settings {
             template_sync_meta: Default::default(),
             kits_folder: None,
             client_kits: Default::default(),
+            first_project_tip_seen: false,
             other: serde_json::Map::new(),
         }
     }
@@ -717,6 +720,25 @@ mod tests {
         let err = load(dir.path()).unwrap_err();
         assert!(err.message.contains("damaged"));
         assert_eq!(fs::read_to_string(&path).unwrap(), "{ broken");
+    }
+
+    #[test]
+    fn first_project_tip_starts_unseen_and_is_remembered() {
+        let dir = tempfile::tempdir().unwrap();
+        // A settings file from before v0.7 has no such key: not seen yet.
+        fs::write(
+            dir.path().join(SETTINGS_FILE),
+            r#"{ "jobsRoots": ["D:/Jobs"] }"#,
+        )
+        .unwrap();
+        let mut s = load(dir.path()).unwrap().unwrap();
+        assert!(!s.first_project_tip_seen);
+        s.first_project_tip_seen = true;
+        save(dir.path(), &s).unwrap();
+        let text = fs::read_to_string(dir.path().join(SETTINGS_FILE)).unwrap();
+        let v: serde_json::Value = serde_json::from_str(&text).unwrap();
+        assert_eq!(v["firstProjectTipSeen"], true);
+        assert!(load(dir.path()).unwrap().unwrap().first_project_tip_seen);
     }
 
     #[test]

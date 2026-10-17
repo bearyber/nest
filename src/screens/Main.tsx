@@ -4,6 +4,7 @@ import { listen } from "@tauri-apps/api/event";
 import { Menu } from "@tauri-apps/api/menu";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import Icon from "../components/Icon";
+import FirstSteps, { FirstProjectNote } from "../components/FirstSteps";
 import Inspector from "../components/Inspector";
 import ProjectList from "../components/ProjectList";
 import Sidebar, { type Computer } from "../components/Sidebar";
@@ -17,6 +18,7 @@ import {
   devicesRefresh,
   devicesView,
   dismissArchiveSuggestion,
+  firstProjectTipSeen,
   getSettings,
   installUpdate,
   listProjects,
@@ -59,7 +61,7 @@ import {
   type WhatsNew as WhatsNewNote,
   updateNoteLines,
 } from "../lib/types";
-import NewProjectSheet from "./NewProjectSheet";
+import NewProjectSheet, { parentOf, shortPath } from "./NewProjectSheet";
 import Templates from "./templates/Templates";
 import styles from "./Main.module.css";
 
@@ -103,6 +105,12 @@ export default function Main() {
   const [view, setView] = useState<"projects" | "templates">("projects");
   /** New Project opened from a template ("New project from this"). */
   const [sheetTemplate, setSheetTemplate] = useState<string | undefined>(undefined);
+  /** New Project opened with "Try an example" (first steps). */
+  const [sheetExample, setSheetExample] = useState(false);
+  /** The note after the very first project: shown once (Settings remembers it). Assumed seen
+   *  until the settings say otherwise, so it never shows by mistake. */
+  const [tipSeen, setTipSeen] = useState(true);
+  const [firstTip, setFirstTip] = useState<Created | null>(null);
   const [toast, setToast] = useState<ToastData | null>(null);
   const searchRef = useRef<HTMLInputElement>(null);
   const scanningRef = useRef(false);
@@ -158,6 +166,7 @@ export default function Main() {
           setSpaces(v.settings.spaces);
           setArchiveDays(v.settings.archiveAfterDays);
           setArchiveOn(v.settings.archiveFolder !== null);
+          setTipSeen(v.settings.firstProjectTipSeen === true);
         })
         .catch(() => {});
     void loadSpaces();
@@ -444,18 +453,27 @@ export default function Main() {
     [open, reveal, copy, changeStatus, archive, archiveOn, fail],
   );
 
+  // No projects at all before this one: the very first.
+  const noProjectsYet = list !== null && projects.length === 0;
   const onCreated = useCallback(
     (c: Created) => {
       setSheetOpen(false);
       // Make sure the new project is visible, then select it.
       setFilters((f) => ({ space: null, query: "", status: f.status === "done" ? "active" : f.status }));
       refresh().then(() => setSelected(c.key));
+      if (noProjectsYet && !tipSeen) {
+        // The very first project: a calm note says where it is (once, ever).
+        setFirstTip(c);
+        setTipSeen(true);
+        firstProjectTipSeen().catch(() => {});
+        return;
+      }
       setToast({
         message: c.bumped ? `Created ${c.jobCode} (the previewed code was taken)` : `Created ${c.jobCode}`,
         action: { label: "Open folder", run: () => void openProject(c.key).catch(fail) },
       });
     },
-    [refresh, fail],
+    [refresh, fail, noProjectsYet, tipSeen],
   );
 
   const moveSelection = useCallback(
@@ -561,18 +579,15 @@ export default function Main() {
   const empty = (() => {
     if (firstScan)
       return <p className={styles.emptyHint}>{scanning ? "Looking for projects in your jobs folders…" : "Loading…"}</p>;
-    if (projects.length === 0)
+    if (projects.length === 0 && !filters.query)
       return (
-        <>
-          <Icon name="folder" className={styles.emptyIcon} />
-          <p className={styles.emptyTitle}>No projects yet</p>
-          <p className={styles.emptyHint}>
-            Projects you make with Nest show up here. Click New to start one.
-          </p>
-          <Button variant="primary" onClick={() => setSheetOpen(true)}>
-            Create your first project
-          </Button>
-        </>
+        <FirstSteps
+          onStart={() => setSheetOpen(true)}
+          onExample={() => {
+            setSheetExample(true);
+            setSheetOpen(true);
+          }}
+        />
       );
     if (filters.query)
       return (
@@ -735,6 +750,16 @@ export default function Main() {
           </div>
         )}
 
+        {firstTip && (
+          <FirstProjectNote
+            code={firstTip.jobCode}
+            folder={shortPath(parentOf(firstTip.root))}
+            fullPath={firstTip.root}
+            onReveal={() => void revealProject(firstTip.key).catch(fail)}
+            onDone={() => setFirstTip(null)}
+          />
+        )}
+
         {offlineRoots.map((r) => (
           <div key={r.path} className={styles.banner} role="status">
             <Icon name="warning" />
@@ -821,12 +846,15 @@ export default function Main() {
       {sheetOpen && (
         <NewProjectSheet
           initialTemplate={sheetTemplate}
+          example={sheetExample}
           onClose={() => {
             setSheetTemplate(undefined);
+            setSheetExample(false);
             closeSheet();
           }}
           onCreated={(c) => {
             setSheetTemplate(undefined);
+            setSheetExample(false);
             setView("projects");
             onCreated(c);
           }}
