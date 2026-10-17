@@ -89,6 +89,15 @@ pub fn sync_now(app: &AppHandle) {
         dev.again.store(true, Ordering::SeqCst);
         return;
     }
+    // An update is installing (Nest is about to restart): skip this one, the next launch syncs.
+    // Checked after setting `syncing`, so the install sees a sync that got here first.
+    if crate::update::holds_back_sync(
+        crate::update::installing(app),
+        dev.quitting.load(Ordering::SeqCst),
+    ) {
+        dev.syncing.store(false, Ordering::SeqCst);
+        return;
+    }
     loop {
         dev.again.store(false, Ordering::SeqCst);
         if sync_inner(&state, dev) {

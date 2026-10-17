@@ -3,8 +3,8 @@
 //! With "Show Nest in the menu bar" on (the default), closing the main window hides it and Nest
 //! keeps running: Devices and template sync carry on, and the icon's menu offers New Project,
 //! recent projects and your other computers. On macOS the Dock icon goes away while no window
-//! is showing. ⌘Q / Quit Nest quits for real. With the setting off, closing the window quits
-//! like before.
+//! is showing. ⌘Q / Quit Nest quits for real. With the setting off (or no icon could be made,
+//! or first run isn't finished), closing the window quits like before.
 //!
 //! The decisions (keep running? install the update now? what's in the menu?) are pure functions
 //! with tests; the rest is glue.
@@ -25,13 +25,11 @@ use crate::commands::AppState;
 pub const TRAY_ID: &str = "nest-tray";
 /// Sent to the main window: open the New Project sheet. Payload: a template id, or null.
 pub const OPEN_NEW_PROJECT: &str = "open-new-project";
-/// Launch argument: start with the window hidden (open at login, relaunch after an update).
+/// Launch argument: start with the window hidden (open at login). A restart keeps the
+/// arguments, so a restart you asked for leaves a start-visible note that wins over it.
 pub const HIDDEN_ARG: &str = "--hidden";
-/// Written just before an update installs itself while Nest is hidden: the relaunched Nest
-/// starts hidden too (no window flash). Nest's own file in its config folder; read once.
-const START_HIDDEN_FILE: &str = "start-hidden";
-/// A start-hidden note older than this is ignored (the update didn't relaunch Nest).
-const START_HIDDEN_FRESH: Duration = Duration::from_secs(15 * 60);
+/// A start note older than this is ignored (the update didn't relaunch Nest).
+const START_NOTE_FRESH: Duration = Duration::from_secs(15 * 60);
 /// How long Nest must have been hidden and untouched before an update installs by itself.
 pub const IDLE_MINUTES_FOR_UPDATE: u64 = 10;
 const RECENT_COUNT: usize = 5;
@@ -59,8 +57,15 @@ pub struct Tray {
     sheet_open: AtomicBool,
     /// The menu last put on the icon, so it's only rebuilt when something changed.
     shown: Mutex<Option<Vec<TrayItem>>>,
-    /// An update is installing by itself.
-    installing: AtomicBool,
+    /// The timer is looking at the waiting update (download, maybe install): one at a time.
+    update_busy: AtomicBool,
+    /// An automatic install failed: leave it to "Restart to update" for this session.
+    silent_failed: AtomicBool,
+    /// The still-running note was shown this session (even if settings couldn't remember it).
+    close_note_said: AtomicBool,
+    /// A menu refresh is running / another was asked for meanwhile (one at a time, in order).
+    refreshing: AtomicBool,
+    refresh_again: AtomicBool,
 }
 
 impl Tray {
@@ -75,14 +80,17 @@ impl Tray {
 // ───────────────────────── Pure decisions ─────────────────────────
 
 /// Closing the main window: keep Nest running (hide the window) instead of quitting?
-pub fn keep_running(show_in_menu_bar: bool, quit_requested: bool) -> bool {
-    show_in_menu_bar && !quit_requested
+/// Only with the icon actually up (otherwise there'd be no way back), never during first run
+/// (quitting there must not save settings, or first run would be skipped next time).
+pub fn keep_running(icon_up: bool, quit_requested: bool, first_run: bool) -> bool {
+    icon_up && !quit_requested && !first_run
 }
 
 /// Everything the "install the update now?" decision looks at.
 #[derive(Debug, Clone, Default)]
 pub struct UpdateMoment {
     pub update_waiting: bool,
+    /// No Nest window shows at all (Settings counts).
     pub window_hidden: bool,
     /// Minutes since the window was hidden or the tray menu was last used.
     pub idle_minutes: u64,
@@ -94,8 +102,9 @@ pub struct UpdateMoment {
     pub scanning: bool,
 }
 
-/// An update installs by itself only when nobody can be interrupted: the window is hidden,
-/// nothing has happened for a while and no work is in progress.
+/// An update installs by itself only when nobody can be interrupted: no window shows,
+/// nothing has happened for a while and no work is in progress. Asked twice: before the
+/// download, and again after it with the gate closed (update.rs), right before installing.
 pub fn install_update_now(m: &UpdateMoment) -> bool {
     m.update_waiting
         && m.window_hidden
@@ -142,6 +151,8 @@ pub struct TrayInputs {
     pub resolve_waiting: Option<usize>,
     /// Windows menus treat `&` as a shortcut marker: double it there.
     pub escape_ampersands: bool,
+    /// First run isn't finished: no New Project yet (the main window shows setup).
+    pub first_run: bool,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -172,8 +183,11 @@ pub fn menu_model(inputs: &TrayInputs) -> Vec<TrayItem> {
         id,
         label: esc(label),
     };
-    let mut items = vec![action(ID_NEW.into(), "New Project…")];
-    if inputs.templates.len() > 1 {
+    let mut items = vec![];
+    if !inputs.first_run {
+        items.push(action(ID_NEW.into(), "New Project…"));
+    }
+    if !inputs.first_run && inputs.templates.len() > 1 {
         items.push(TrayItem::Submenu {
             label: "New from".into(),
             items: inputs
@@ -214,7 +228,9 @@ pub fn menu_model(inputs: &TrayInputs) -> Vec<TrayItem> {
         items.push(TrayItem::Separator);
         items.extend(status);
     }
-    items.push(TrayItem::Separator);
+    if !items.is_empty() {
+        items.push(TrayItem::Separator);
+    }
     items.push(action(ID_OPEN.into(), "Open Nest"));
     items.push(action(ID_QUIT.into(), "Quit Nest"));
     items
@@ -228,17 +244,18 @@ pub fn recent(projects: &[RecentProject], n: usize) -> Vec<&RecentProject> {
     list
 }
 
-/// "just now", "3 min ago", "2 h ago", "4 days ago" (same words as the Devices screen).
+/// "just now", "15 min ago", "2 h ago", "4 days ago". Coarser than the Devices screen (5-minute
+/// steps), so the menu isn't rebuilt every minute.
 pub fn ago(iso: &str, now: chrono::DateTime<chrono::Utc>) -> String {
     let Ok(t) = chrono::DateTime::parse_from_rfc3339(iso) else {
         return String::new();
     };
     let min = (now - t.with_timezone(&chrono::Utc)).num_minutes().max(0);
-    if min < 1 {
+    if min < 5 {
         return "just now".into();
     }
     if min < 60 {
-        return format!("{min} min ago");
+        return format!("{} min ago", min / 5 * 5);
     }
     let h = min / 60;
     if h < 24 {
@@ -252,14 +269,39 @@ pub fn ago(iso: &str, now: chrono::DateTime<chrono::Utc>) -> String {
     }
 }
 
-/// Should this launch start hidden? Only with the icon on, never on first run.
-pub fn start_hidden(show_in_menu_bar: bool, first_run: bool, asked: bool) -> bool {
-    show_in_menu_bar && !first_run && asked
+/// Should this launch start hidden? Only with the icon actually up, never on first run, and
+/// never after a restart you asked for (`asked_visible` wins over `--hidden`).
+pub fn start_hidden(
+    icon_up: bool,
+    first_run: bool,
+    asked_hidden: bool,
+    asked_visible: bool,
+) -> bool {
+    icon_up && !first_run && asked_hidden && !asked_visible
 }
 
-/// Read (and remove) the start-hidden note left by an update. Old notes are ignored.
-pub fn take_start_hidden_note(config_dir: &Path, now: SystemTime) -> bool {
-    let path = config_dir.join(START_HIDDEN_FILE);
+/// A one-shot note for the next launch, left just before an update restarts Nest. Nest's own
+/// file in its config folder; read once.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum StartNote {
+    /// The update installed by itself while Nest was hidden: come back hidden (no flash).
+    Hidden,
+    /// "Restart to update": come back with the window, even if opened at login (`--hidden`).
+    Visible,
+}
+
+impl StartNote {
+    fn file(self) -> &'static str {
+        match self {
+            StartNote::Hidden => "start-hidden",
+            StartNote::Visible => "start-visible",
+        }
+    }
+}
+
+/// Read (and remove) a start note. Old notes are ignored.
+pub fn take_start_note(config_dir: &Path, note: StartNote, now: SystemTime) -> bool {
+    let path = config_dir.join(note.file());
     let Ok(meta) = std::fs::metadata(&path) else {
         return false;
     };
@@ -267,16 +309,28 @@ pub fn take_start_hidden_note(config_dir: &Path, now: SystemTime) -> bool {
         .modified()
         .ok()
         .map(|m| now.duration_since(m).unwrap_or_default())
-        .is_some_and(|age| age <= START_HIDDEN_FRESH);
+        .is_some_and(|age| age <= START_NOTE_FRESH);
     if let Err(e) = std::fs::remove_file(&path) {
-        log::warn!("couldn't remove the start-hidden note: {e}");
+        log::warn!("couldn't remove the {} note: {e}", note.file());
     }
     fresh
 }
 
-fn note_path(app: &AppHandle) -> Option<PathBuf> {
+fn note_path(app: &AppHandle, note: StartNote) -> Option<PathBuf> {
     app.try_state::<AppState>()
-        .map(|s| s.config_dir.join(START_HIDDEN_FILE))
+        .map(|s| s.config_dir.join(note.file()))
+}
+
+/// Leave a start note for the relaunch. Returns its path (to remove it if the update fails).
+pub fn leave_start_note(app: &AppHandle, note: StartNote) -> Option<PathBuf> {
+    let path = note_path(app, note)?;
+    match std::fs::write(&path, b"") {
+        Ok(()) => Some(path),
+        Err(e) => {
+            log::warn!("couldn't leave the {} note: {e}", note.file());
+            None
+        }
+    }
 }
 
 // ───────────────────────── Glue ─────────────────────────
@@ -285,6 +339,16 @@ fn tray_on(app: &AppHandle) -> bool {
     app.try_state::<AppState>()
         .and_then(|s| s.settings.lock().ok().map(|s| s.show_in_menu_bar))
         .unwrap_or(false)
+}
+
+/// The icon is actually there (the setting is on and building it worked).
+fn icon_up(app: &AppHandle) -> bool {
+    app.tray_by_id(TRAY_ID).is_some()
+}
+
+fn first_run(app: &AppHandle) -> bool {
+    app.try_state::<AppState>()
+        .is_some_and(|s| s.first_run.load(Ordering::SeqCst))
 }
 
 fn tray_state(app: &AppHandle) -> Option<tauri::State<'_, Tray>> {
@@ -300,24 +364,33 @@ pub fn start(app: &AppHandle) {
     ] {
         let app2 = app.clone();
         // On its own thread: whoever sent the event may still hold a lock the menu needs.
-        tauri::Listener::listen_any(app, event, move |_| {
-            let app3 = app2.clone();
-            std::thread::spawn(move || refresh(&app3));
-        });
+        tauri::Listener::listen_any(app, event, move |_| refresh_soon(&app2));
     }
     let app = app.clone();
     std::thread::spawn(move || loop {
         std::thread::sleep(EVERY);
         refresh(&app);
-        maybe_install_update(&app);
+        let Some(t) = tray_state(&app) else {
+            continue;
+        };
+        // A download can take a while: on its own thread, one at a time.
+        if !t.update_busy.swap(true, Ordering::SeqCst) {
+            let app2 = app.clone();
+            std::thread::spawn(move || {
+                maybe_install_update(&app2);
+                if let Some(t) = tray_state(&app2) {
+                    t.update_busy.store(false, Ordering::SeqCst);
+                }
+            });
+        }
     });
 }
 
-/// Show or remove the icon to match the setting. With the icon gone, a hidden window comes
-/// back (otherwise there'd be no way to reach Nest).
+/// Show or remove the icon to match the setting. With no icon (off, or it couldn't be made), a
+/// hidden window comes back (otherwise there'd be no way to reach Nest).
 pub fn apply(app: &AppHandle) {
     if tray_on(app) {
-        if app.tray_by_id(TRAY_ID).is_none() {
+        if !icon_up(app) {
             if let Err(e) = build_icon(app) {
                 log::warn!("couldn't add the menu bar icon: {e}");
             }
@@ -332,9 +405,9 @@ pub fn apply(app: &AppHandle) {
                 *shown = None;
             }
         }
-        if main_hidden(app) {
-            show_main(app);
-        }
+    }
+    if !icon_up(app) && main_hidden(app) {
+        show_main(app);
     }
 }
 
@@ -441,11 +514,44 @@ fn inputs(app: &AppHandle) -> Option<TrayInputs> {
         others,
         resolve_waiting: None,
         escape_ampersands: cfg!(target_os = "windows"),
+        first_run: state.first_run.load(Ordering::SeqCst),
     })
 }
 
-/// Rebuild the icon's menu if anything in it changed.
+/// Refresh on another thread (from the main thread, or while the caller may hold a lock).
+pub fn refresh_soon(app: &AppHandle) {
+    let app = app.clone();
+    std::thread::spawn(move || refresh(&app));
+}
+
+/// Rebuild the icon's menu if anything in it changed. One at a time: a refresh asked for
+/// while one runs makes that one go round again (with fresh inputs), so they never land out
+/// of order. Never waits, so it's safe from any thread.
 pub fn refresh(app: &AppHandle) {
+    let Some(t) = tray_state(app) else {
+        return;
+    };
+    loop {
+        if t.refreshing.swap(true, Ordering::SeqCst) {
+            t.refresh_again.store(true, Ordering::SeqCst);
+            return;
+        }
+        loop {
+            t.refresh_again.store(false, Ordering::SeqCst);
+            refresh_once(app, &t);
+            if !t.refresh_again.load(Ordering::SeqCst) {
+                break;
+            }
+        }
+        t.refreshing.store(false, Ordering::SeqCst);
+        // Asked for between the last look and letting go: go round once more.
+        if !t.refresh_again.load(Ordering::SeqCst) {
+            return;
+        }
+    }
+}
+
+fn refresh_once(app: &AppHandle, t: &Tray) {
     let Some(icon) = app.tray_by_id(TRAY_ID) else {
         return;
     };
@@ -453,22 +559,17 @@ pub fn refresh(app: &AppHandle) {
         return;
     };
     let model = menu_model(&inputs);
-    if let Some(t) = tray_state(app) {
-        let Ok(mut shown) = t.shown.lock() else {
-            return;
-        };
-        if shown.as_ref() == Some(&model) {
-            return;
-        }
-        *shown = Some(model.clone());
+    if t.shown.lock().is_ok_and(|s| s.as_ref() == Some(&model)) {
+        return;
     }
-    match build_menu(app, &model) {
-        Ok(menu) => {
-            if let Err(e) = icon.set_menu(Some(menu)) {
-                log::warn!("couldn't update the menu bar icon's menu: {e}");
+    match build_menu(app, &model).and_then(|menu| icon.set_menu(Some(menu))) {
+        // Remembered only once it's really on the icon.
+        Ok(()) => {
+            if let Ok(mut shown) = t.shown.lock() {
+                *shown = Some(model);
             }
         }
-        Err(e) => log::warn!("couldn't build the menu bar icon's menu: {e}"),
+        Err(e) => log::warn!("couldn't update the menu bar icon's menu: {e}"),
     }
 }
 
@@ -505,26 +606,38 @@ pub fn handles(id: &str) -> bool {
     id.starts_with(PREFIX)
 }
 
-/// A click in the icon's menu.
-pub fn on_menu(app: &AppHandle, id: &str) {
+fn note_activity(app: &AppHandle) {
     if let Some(t) = tray_state(app) {
         if let Ok(mut last) = t.last_activity.lock() {
             *last = Some(Instant::now());
         }
     }
-    if id == ID_NEW {
-        new_project(app, None);
-    } else if let Some(template) = id.strip_prefix(ID_NEW_FROM) {
-        new_project(app, Some(template.to_string()));
-    } else if let Some(key) = id.strip_prefix(ID_RECENT) {
-        let state = app.state::<AppState>();
-        if let Err(e) = crate::commands::open_project(app.clone(), state, key.to_string()) {
-            app.dialog()
-                .message(e.message)
-                .title("Couldn't open the project")
-                .kind(tauri_plugin_dialog::MessageDialogKind::Warning)
-                .show(|_| {});
+}
+
+/// A click in the icon's menu.
+pub fn on_menu(app: &AppHandle, id: &str) {
+    note_activity(app);
+    if id == ID_NEW || id.starts_with(ID_NEW_FROM) {
+        // During first run the main window shows setup: just bring it up.
+        if first_run(app) {
+            show_main(app);
+        } else {
+            new_project(app, id.strip_prefix(ID_NEW_FROM).map(str::to_string));
         }
+    } else if let Some(key) = id.strip_prefix(ID_RECENT) {
+        // Off the main thread: finding the folder may touch a slow drive.
+        let app = app.clone();
+        let key = key.to_string();
+        std::thread::spawn(move || {
+            let state = app.state::<AppState>();
+            if let Err(e) = crate::commands::open_project(app.clone(), state, key) {
+                app.dialog()
+                    .message(e.message)
+                    .title("Couldn't open the project")
+                    .kind(tauri_plugin_dialog::MessageDialogKind::Warning)
+                    .show(|_| {});
+            }
+        });
     } else if id == ID_OPEN {
         show_main(app);
     } else if id == ID_QUIT {
@@ -559,10 +672,19 @@ fn main_hidden(app: &AppHandle) -> bool {
         .is_some_and(|w| !w.is_visible().unwrap_or(true))
 }
 
+/// Does any Nest window show (main, Settings, …)? `closing`: a window on its way out, not
+/// counted.
+fn any_window_visible(app: &AppHandle, closing: Option<&str>) -> bool {
+    app.webview_windows()
+        .iter()
+        .filter(|(label, _)| Some(label.as_str()) != closing)
+        .any(|(_, w)| w.is_visible().unwrap_or(false))
+}
+
 /// Show and focus the main window (tray, Dock click, a second launch).
 pub fn show_main(app: &AppHandle) {
     // An update about to relaunch Nest hidden: the window was asked for, so don't.
-    if let Some(path) = note_path(app) {
+    if let Some(path) = note_path(app, StartNote::Hidden) {
         if path.exists() {
             let _ = std::fs::remove_file(path);
         }
@@ -590,18 +712,13 @@ fn hide_main(app: &AppHandle) {
         }
     }
     update_dock(app, None);
-    refresh(app);
+    refresh_soon(app);
 }
 
-/// macOS: a Dock icon only while a window shows (and always with the menu bar icon off).
+/// macOS: a Dock icon only while a window shows (and always without the menu bar icon).
 /// `closing`: a window on its way out, not counted.
 fn update_dock(app: &AppHandle, closing: Option<&str>) {
-    let visible = app
-        .webview_windows()
-        .iter()
-        .filter(|(label, _)| Some(label.as_str()) != closing)
-        .any(|(_, w)| w.is_visible().unwrap_or(false));
-    set_dock(app, visible || !tray_on(app));
+    set_dock(app, any_window_visible(app, closing) || !icon_up(app));
 }
 
 #[allow(unused_variables)]
@@ -619,34 +736,49 @@ fn set_dock(app: &AppHandle, show: bool) {
     }
 }
 
-/// Window events (lib.rs): closing the main window hides it while the icon is on.
+/// Window events (lib.rs): closing the main window hides it while the icon is up.
 pub fn on_window_event(window: &Window, event: &WindowEvent) {
     let app = window.app_handle();
     match event {
         WindowEvent::CloseRequested { api, .. } if window.label() == "main" => {
             let quitting = tray_state(app).is_some_and(|t| t.quitting.load(Ordering::SeqCst));
-            if !keep_running(tray_on(app), quitting) {
+            if !keep_running(icon_up(app), quitting, first_run(app)) {
                 return;
             }
             api.prevent_close();
-            let note_shown = app
-                .try_state::<AppState>()
-                .and_then(|s| s.settings.lock().ok().map(|s| s.close_note_shown))
-                .unwrap_or(true);
+            let said = tray_state(app).is_some_and(|t| t.close_note_said.load(Ordering::SeqCst));
+            let note_shown = said
+                || app
+                    .try_state::<AppState>()
+                    .and_then(|s| s.settings.lock().ok().map(|s| s.close_note_shown))
+                    .unwrap_or(true);
             if note_shown {
                 hide_main(app);
             } else {
                 still_running_note(app, window);
             }
         }
-        WindowEvent::Focused(true) => set_dock(app, true),
-        WindowEvent::Destroyed => update_dock(app, Some(window.label())),
+        WindowEvent::Focused(focused) => {
+            // Using any Nest window counts as activity (an update waits for quiet).
+            note_activity(app);
+            if *focused {
+                set_dock(app, true);
+            }
+        }
+        WindowEvent::Destroyed => {
+            note_activity(app);
+            update_dock(app, Some(window.label()));
+        }
         _ => {}
     }
 }
 
 /// The first close with the icon on: say where Nest went, once.
 fn still_running_note(app: &AppHandle, window: &Window) {
+    // Remembered for this session even if the settings file can't be written (damaged).
+    if let Some(t) = tray_state(app) {
+        t.close_note_said.store(true, Ordering::SeqCst);
+    }
     if let Err(e) = crate::settings_cmd::edit_settings(app, |s| {
         s.close_note_shown = true;
         Ok(())
@@ -693,19 +825,13 @@ fn minutes_since(i: Option<Instant>) -> Option<u64> {
     i.map(|i| i.elapsed().as_secs() / 60)
 }
 
-/// The update waiting, installed now if nobody can be interrupted, then Nest relaunches hidden.
-fn maybe_install_update(app: &AppHandle) {
-    let (Some(t), Some(state)) = (tray_state(app), app.try_state::<AppState>()) else {
-        return;
-    };
-    if t.installing.load(Ordering::SeqCst) {
-        return;
-    }
+/// Everything the install decision looks at, right now.
+fn moment(app: &AppHandle, t: &Tray, state: &AppState) -> UpdateMoment {
     let hidden = minutes_since(t.hidden_since.lock().ok().and_then(|s| *s));
     let active = minutes_since(t.last_activity.lock().ok().and_then(|s| *s));
-    let moment = UpdateMoment {
+    UpdateMoment {
         update_waiting: crate::update::pending(app).is_some(),
-        window_hidden: hidden.is_some() && main_hidden(app),
+        window_hidden: hidden.is_some() && !any_window_visible(app, None),
         idle_minutes: match (hidden, active) {
             (Some(h), Some(a)) => h.min(a),
             (Some(h), None) => h,
@@ -715,20 +841,41 @@ fn maybe_install_update(app: &AppHandle) {
         creating: state.creating.load(Ordering::SeqCst),
         syncing: state.devices.syncing.load(Ordering::SeqCst),
         scanning: state.scanning.load(Ordering::SeqCst),
+    }
+}
+
+/// The update waiting, installed if nobody can be interrupted, then Nest relaunches hidden.
+/// Downloaded first (Nest keeps working); then the gate closes (Create and syncs don't start)
+/// and everything is looked at again. If something started meanwhile, the download is kept
+/// and the next quiet moment tries again.
+fn maybe_install_update(app: &AppHandle) {
+    let (Some(t), Some(state)) = (tray_state(app), app.try_state::<AppState>()) else {
+        return;
     };
-    if !install_update_now(&moment) {
+    if t.silent_failed.load(Ordering::SeqCst) || !install_update_now(&moment(app, &t, &state)) {
         return;
     }
-    t.installing.store(true, Ordering::SeqCst);
-    let note = state.config_dir.join(START_HIDDEN_FILE);
-    if let Err(e) = std::fs::write(&note, b"") {
-        log::warn!("couldn't leave the start-hidden note: {e}");
+    if let Err(e) = tauri::async_runtime::block_on(crate::update::download(app)) {
+        log::info!("the update didn't download: {}", e.message);
+        return;
     }
+    if !crate::update::begin_install(app) {
+        return; // "Restart to update" is already at it
+    }
+    if !install_update_now(&moment(app, &t, &state)) {
+        crate::update::end_install(app);
+        log::info!("update downloaded; it installs at the next quiet moment");
+        return;
+    }
+    let note = leave_start_note(app, StartNote::Hidden);
     log::info!("installing the update while Nest is hidden");
-    if let Err(e) = tauri::async_runtime::block_on(crate::update::install(app)) {
+    if let Err(e) = crate::update::install_downloaded(app) {
         log::warn!("the update didn't install by itself: {}", e.message);
-        let _ = std::fs::remove_file(&note);
-        t.installing.store(false, Ordering::SeqCst);
+        if let Some(note) = note {
+            let _ = std::fs::remove_file(note);
+        }
+        t.silent_failed.store(true, Ordering::SeqCst);
+        crate::update::end_install(app);
     }
 }
 
@@ -766,11 +913,20 @@ mod tests {
     }
 
     #[test]
-    fn closing_the_window_keeps_running_only_with_the_icon_on_and_no_quit() {
-        assert!(keep_running(true, false));
-        assert!(!keep_running(true, true), "⌘Q / Quit Nest quits");
-        assert!(!keep_running(false, false), "icon off: closing quits");
-        assert!(!keep_running(false, true));
+    fn closing_the_window_keeps_running_only_with_the_icon_up_and_no_quit() {
+        assert!(keep_running(true, false, false));
+        assert!(!keep_running(true, true, false), "⌘Q / Quit Nest quits");
+        assert!(
+            !keep_running(false, false, false),
+            "no icon (off, or it couldn't be made): closing quits"
+        );
+        assert!(!keep_running(false, true, false));
+    }
+
+    #[test]
+    fn closing_during_first_run_quits() {
+        // Hiding would save settings (the note), and first run would never show again.
+        assert!(!keep_running(true, false, true));
     }
 
     #[test]
@@ -797,6 +953,53 @@ mod tests {
         assert!(no(|m| m.creating = true), "Create / kit copy running");
         assert!(no(|m| m.syncing = true), "Devices / template sync running");
         assert!(no(|m| m.scanning = true));
+    }
+
+    #[test]
+    fn a_downloaded_update_waits_if_anything_started_during_the_download() {
+        // Before the download: a quiet moment.
+        let before = UpdateMoment {
+            update_waiting: true,
+            window_hidden: true,
+            idle_minutes: 30,
+            ..Default::default()
+        };
+        assert!(install_update_now(&before));
+        // Looked at again after it (gate closed): any of these means "not now, keep it".
+        for after in [
+            UpdateMoment {
+                window_hidden: false, // the window (or Settings) was opened
+                ..before.clone()
+            },
+            UpdateMoment {
+                idle_minutes: 0, // the tray menu was used
+                ..before.clone()
+            },
+            UpdateMoment {
+                creating: true, // a Create from the tray started
+                ..before.clone()
+            },
+            UpdateMoment {
+                syncing: true,
+                ..before.clone()
+            },
+            UpdateMoment {
+                sheet_open: true,
+                ..before.clone()
+            },
+        ] {
+            assert!(!install_update_now(&after), "{after:?}");
+        }
+    }
+
+    #[test]
+    fn during_first_run_the_menu_has_no_new_project() {
+        let inputs = TrayInputs {
+            templates: vec![template("a"), template("b")],
+            first_run: true,
+            ..Default::default()
+        };
+        assert_eq!(ids(&menu_model(&inputs)), vec!["tray:open", "tray:quit"]);
     }
 
     #[test]
@@ -906,12 +1109,18 @@ mod tests {
     }
 
     #[test]
-    fn ago_reads_like_the_devices_screen() {
+    fn ago_uses_five_minute_steps_so_the_menu_stays_put() {
         let now = chrono::DateTime::parse_from_rfc3339("2026-10-17T12:00:00Z")
             .unwrap()
             .with_timezone(&chrono::Utc);
         assert_eq!(ago("2026-10-17T11:59:40Z", now), "just now");
-        assert_eq!(ago("2026-10-17T11:57:00Z", now), "3 min ago");
+        assert_eq!(ago("2026-10-17T11:57:00Z", now), "just now", "under 5 min");
+        assert_eq!(
+            ago("2026-10-17T11:47:00Z", now),
+            "10 min ago",
+            "5-minute steps"
+        );
+        assert_eq!(ago("2026-10-17T11:01:00Z", now), "55 min ago");
         assert_eq!(ago("2026-10-17T09:00:00+00:00", now), "3 h ago");
         assert_eq!(ago("2026-10-16T11:00:00Z", now), "1 day ago");
         assert_eq!(ago("2026-10-13T12:00:00Z", now), "4 days ago");
@@ -930,24 +1139,40 @@ mod tests {
     }
 
     #[test]
-    fn hidden_start_needs_the_icon_and_never_on_first_run() {
-        assert!(start_hidden(true, false, true));
-        assert!(!start_hidden(false, false, true));
-        assert!(!start_hidden(true, true, true));
-        assert!(!start_hidden(true, false, false));
+    fn hidden_start_needs_the_icon_up_and_never_on_first_run() {
+        assert!(start_hidden(true, false, true, false));
+        assert!(
+            !start_hidden(false, false, true, false),
+            "no icon (off, or it couldn't be made): the window shows"
+        );
+        assert!(!start_hidden(true, true, true, false));
+        assert!(!start_hidden(true, false, false, false));
     }
 
     #[test]
-    fn the_start_hidden_note_is_read_once_and_only_while_fresh() {
+    fn a_restart_you_asked_for_comes_back_visible_even_with_hidden() {
+        // Opened at login (`--hidden`), then "Restart to update": the restart keeps the
+        // argument, the start-visible note wins.
+        assert!(!start_hidden(true, false, true, true));
+        // The automatic install leaves only the start-hidden note: back in the menu bar.
+        assert!(start_hidden(true, false, true, false));
+    }
+
+    #[test]
+    fn start_notes_are_read_once_and_only_while_fresh() {
         let dir = tempfile::tempdir().unwrap();
         let now = SystemTime::now();
-        assert!(!take_start_hidden_note(dir.path(), now));
-        std::fs::write(dir.path().join(START_HIDDEN_FILE), b"").unwrap();
-        assert!(take_start_hidden_note(dir.path(), now));
-        assert!(!dir.path().join(START_HIDDEN_FILE).exists(), "read once");
-        std::fs::write(dir.path().join(START_HIDDEN_FILE), b"").unwrap();
-        let later = now + START_HIDDEN_FRESH + Duration::from_secs(60);
-        assert!(!take_start_hidden_note(dir.path(), later), "stale");
-        assert!(!dir.path().join(START_HIDDEN_FILE).exists());
+        for note in [StartNote::Hidden, StartNote::Visible] {
+            let path = dir.path().join(note.file());
+            assert!(!take_start_note(dir.path(), note, now));
+            std::fs::write(&path, b"").unwrap();
+            assert!(take_start_note(dir.path(), note, now));
+            assert!(!path.exists(), "read once");
+            std::fs::write(&path, b"").unwrap();
+            let later = now + START_NOTE_FRESH + Duration::from_secs(60);
+            assert!(!take_start_note(dir.path(), note, later), "stale");
+            assert!(!path.exists());
+        }
+        assert_ne!(StartNote::Hidden.file(), StartNote::Visible.file());
     }
 }

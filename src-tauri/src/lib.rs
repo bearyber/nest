@@ -218,21 +218,20 @@ fn setup(app: &mut tauri::App, started_at: std::time::SystemTime) -> Result<(), 
         Err(e) => log::warn!("couldn't find the log folder: {e}"),
     }
     let state = init_state(app)?;
-    let (theme, menu_bar_icon, at_login) = state
+    let (theme, at_login) = state
         .settings
         .lock()
-        .map(|s| (s.theme.clone(), s.show_in_menu_bar, s.launch_at_login))
+        .map(|s| (s.theme.clone(), s.launch_at_login))
         .unwrap_or_default();
     // Opened at login (`--hidden`) or relaunched by an update while hidden: start in the menu
-    // bar / notification area, no window.
-    // (Both are read: the note is removed either way.)
-    let asked_hidden = std::env::args().any(|a| a == tray::HIDDEN_ARG)
-        | tray::take_start_hidden_note(&state.config_dir, std::time::SystemTime::now());
-    let hidden = tray::start_hidden(
-        menu_bar_icon,
-        state.first_run.load(std::sync::atomic::Ordering::SeqCst),
-        asked_hidden,
-    );
+    // bar / notification area, no window. A restart you asked for ("Restart to update") keeps
+    // the arguments but leaves a start-visible note, which wins.
+    // (Both notes are read: each is removed either way.)
+    let now = std::time::SystemTime::now();
+    let hidden_note = tray::take_start_note(&state.config_dir, tray::StartNote::Hidden, now);
+    let asked_visible = tray::take_start_note(&state.config_dir, tray::StartNote::Visible, now);
+    let asked_hidden = std::env::args().any(|a| a == tray::HIDDEN_ARG) || hidden_note;
+    let first_run = state.first_run.load(std::sync::atomic::Ordering::SeqCst);
     app.manage(state);
     let main = app
         .get_webview_window("main")
@@ -244,7 +243,9 @@ fn setup(app: &mut tauri::App, started_at: std::time::SystemTime) -> Result<(), 
     // The window starts hidden (tauri.conf.json) and shows here, unless Nest starts in the
     // menu bar.
     tray::start(app.handle());
-    if hidden {
+    // Decided by whether the icon is really there: if it couldn't be made, the window shows.
+    let icon_up = app.tray_by_id(tray::TRAY_ID).is_some();
+    if tray::start_hidden(icon_up, first_run, asked_hidden, asked_visible) {
         log::info!("started in the menu bar / notification area");
         if let Some(t) = app.try_state::<tray::Tray>() {
             t.started_hidden();

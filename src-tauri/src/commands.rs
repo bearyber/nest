@@ -371,6 +371,11 @@ pub fn create_project(
         return Err(AppError::new("A project is already being created"));
     }
     let _guard = CreatingGuard(&state.creating);
+    // An update is installing (Nest is about to restart): don't start. Checked after setting
+    // `creating`, so the install sees this Create if it got here first (update.rs).
+    if crate::update::installing(&app) {
+        return Err(AppError::new(crate::update::UPDATING));
+    }
     kits.cancel.store(false, Ordering::SeqCst);
     let settings = lock(&state.settings)?.clone();
     let root = request_root(&settings, &request)

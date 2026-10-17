@@ -15,11 +15,11 @@ import {
   setShowInMenuBar,
   reusePastArchiveFolder,
 } from "../../lib/commands";
-
-const SUGGESTED_DAYS = 90;
 import { isMac } from "../../lib/platform";
 import type { TabProps } from "../Settings";
 import styles from "./settings.module.css";
+
+const SUGGESTED_DAYS = 90;
 
 /** General: jobs folders, default space, menu bar icon, open at login. */
 export default function GeneralTab({ view, run }: TabProps) {

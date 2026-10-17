@@ -1371,6 +1371,8 @@ pub fn complete_first_run(
             let _ = app.emit("notice", ());
         }
     }
+    // The icon's menu gets New Project now (first run hid it).
+    crate::tray::refresh(&app);
     Ok(SettingsView {
         first_run: false,
         ..v
