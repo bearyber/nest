@@ -21,7 +21,7 @@ In:
 - Rescan / rebuild index
 - Packaging for both OSes + auto-update
 
-Out (later milestones): drop-to-rename, export naming, Resolve/Premiere/AE projects, ops app connection, delivery check, licensing.
+Out (later milestones): drop-to-rename, export naming, Premiere/AE projects (Resolve moved into v1 2026-10-17), ops app connection, delivery check, licensing.
 
 ---
 
@@ -471,7 +471,7 @@ Bernard's own template is named "Project". The year is never part of the job cod
 
 ## 12. Out of scope for v1 (do not build)
 
-- Resolve/Premiere/AE project creation (a project file you put in a template is copied untouched, §12a #23; filling blanks inside it is v2)
+- Premiere/AE project creation (a project file you put in a template is copied untouched, §12a #23; filling blanks inside it is v2). *Resolve starter projects moved into v1 (Bernard, 2026-10-17): a template's `.drp` imported into Resolve under the job's name; details when built.*
 - Drop-to-rename, export naming, watch folders
 - ops app or any connection to other services (in v1: on-demand transfer of a project between your own computers, not syncing; Bernard, 2026-10-12)
 - Delivery check, checksums (archive moved to §12a #21 on 2026-10-04)

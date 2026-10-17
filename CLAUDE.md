@@ -21,7 +21,7 @@ Private notes (how we work, releasing, TODO, SHIPLOG, plans) live in `private/`,
 7. **Native feel.** System fonts, system accent, native menus/context menus/dialogs, no web-looking widgets, no component libraries, no Tailwind. Tokens in `src/styles/tokens.css`.
 8. **Sanitise every generated name** through the one sanitiser in `src-tauri/src/names.rs`. Never build a path from raw user input anywhere else.
 9. **Standalone.** No network calls except the updater. No accounts, telemetry or connections in v1. *Unlocked (Bernard, 2026-10-12): on-demand transfer of a project between your own paired computers is in v1 (not syncing; no accounts, no sign-in). Nothing else.*
-10. **Scope is v1 only.** Anything in build spec section 12 is out. If a task drifts there, stop and ask.
+10. **Scope is v1 only.** Anything in build spec section 12 is out. If a task drifts there, stop and ask. *Unlocked (Bernard, 2026-10-17): Resolve starter projects are in v1 (a template carries a `.drp`; Nest asks a running Resolve, through its own local script runner, to import it under the job's name). Local only, optional per job. Other app projects stay "a file in your template".*
 
 ## Layout
 
