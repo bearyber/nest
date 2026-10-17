@@ -46,6 +46,35 @@ pub struct Template {
     pub tree: Vec<TreeEntry>,
     #[serde(default)]
     pub files: Vec<FileEntry>,
+    /// Resolve starter project: a `.drp` in the template, added to DaVinci Resolve on Create.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub resolve: Option<ResolveStarter>,
+}
+
+/// A Resolve starter project (`resolve` in a template): Create adds a copy of `drp` to
+/// DaVinci Resolve, named `name`, in the project folder `folder`. Nothing goes in the job folder.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct ResolveStarter {
+    /// The `.drp` file, relative to the template folder (e.g. `files/Grade.drp`).
+    pub drp: String,
+    /// The project's name in Resolve, with blanks. None = the same as the folder name.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub name: Option<String>,
+    /// Resolve's project folder, with blanks; `/` makes folders inside folders. "" = none.
+    #[serde(default = "default_resolve_folder")]
+    pub folder: String,
+    /// Ticked in New Project by default.
+    #[serde(default = "yes")]
+    pub on: bool,
+}
+
+fn default_resolve_folder() -> String {
+    "{client}".into()
+}
+
+fn yes() -> bool {
+    true
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -324,10 +353,51 @@ impl Template {
             }
         }
 
+        if let Some(r) = &self.resolve {
+            self.check_path("the Resolve project", &r.drp, false, p);
+            if r.drp.contains(['{', '}']) {
+                p.push(format!(
+                    "the Resolve project \"{}\" can't use variables",
+                    r.drp
+                ));
+            }
+            let is_drp = r
+                .drp
+                .rsplit_once('.')
+                .is_some_and(|(_, ext)| ext.eq_ignore_ascii_case("drp"));
+            if !is_drp || r.drp.ends_with('/') {
+                p.push(format!(
+                    "the Resolve project \"{}\" must be a .drp file (exported from Resolve)",
+                    r.drp
+                ));
+            }
+            if let Some(name) = &r.name {
+                if name.trim().is_empty() {
+                    p.push("the Resolve project's name is empty".to_string());
+                }
+                self.check_pattern(name, false, p);
+            }
+            if r.folder.contains('\\') {
+                p.push(format!("\"{}\" uses \\; Resolve folders use /", r.folder));
+            }
+            self.check_pattern(&r.folder, false, p);
+        }
+
         if problems.is_empty() {
             Ok(())
         } else {
             Err(TemplateError { problems })
+        }
+    }
+
+    /// Problems only the template's folder can show: the Resolve `.drp` must be there.
+    pub fn check_files(&self, files: &BTreeSet<String>) -> Result<(), TemplateError> {
+        match &self.resolve {
+            Some(r) if !files.contains(&r.drp) => Err(TemplateError::one(format!(
+                "its Resolve project \"{}\" is missing from the template",
+                r.drp
+            ))),
+            _ => Ok(()),
         }
     }
 
@@ -477,6 +547,7 @@ pub fn load_dir(dir: &Path) -> Result<LoadedTemplate, TemplateError> {
 
     let mut files = BTreeSet::new();
     collect_files(dir, dir, &json, &mut files).map_err(read_err)?;
+    template.check_files(&files)?;
     Ok(LoadedTemplate {
         template,
         dir: dir.to_path_buf(),
@@ -704,5 +775,55 @@ mod tests {
         );
         assert!(parse_pattern("a}b").is_err());
         assert!(parse_pattern("{}").is_err());
+    }
+
+    #[test]
+    fn resolve_project_rules() {
+        let with = |r: serde_json::Value| problems_with(move |v| v["resolve"] = r);
+        assert!(with(serde_json::json!({ "drp": "files/Grade.drp" })).is_empty());
+        let t = {
+            let mut v: serde_json::Value = serde_json::from_str(VALID).unwrap();
+            v["resolve"] = serde_json::json!({ "drp": "files/Grade.drp" });
+            Template::from_json(&v.to_string()).unwrap()
+        };
+        let r = t.resolve.as_ref().unwrap();
+        assert_eq!(
+            (r.folder.as_str(), r.on, r.name.as_deref()),
+            ("{client}", true, None)
+        );
+        // Not a .drp, outside the template, variables in the path, unknown blanks.
+        assert_refused(
+            with(serde_json::json!({ "drp": "files/Grade.txt" })),
+            "must be a .drp file",
+        );
+        assert_refused(
+            with(serde_json::json!({ "drp": "../Grade.drp" })),
+            "uses ..",
+        );
+        assert_refused(
+            with(serde_json::json!({ "drp": "files/{artist}.drp" })),
+            "can't use variables",
+        );
+        assert_refused(
+            with(serde_json::json!({ "drp": "a.drp", "name": "{nope}" })),
+            "unknown variable {nope}",
+        );
+        assert_refused(
+            with(serde_json::json!({ "drp": "a.drp", "folder": "{client}\\x" })),
+            "Resolve folders use /",
+        );
+        assert_refused(
+            with(serde_json::json!({ "drp": "a.drp", "colour": 1 })),
+            "unknown field `colour`",
+        );
+        // Must be in the template's folder.
+        let files: BTreeSet<String> = ["files/Grade.drp".to_string()].into();
+        assert!(t.check_files(&files).is_ok());
+        let err = t.check_files(&BTreeSet::new()).unwrap_err();
+        assert!(err.problems[0].contains("is missing from the template"));
+        // Templates without one don't mention it.
+        assert!(!serde_json::to_string(&Template::from_json(VALID).unwrap())
+            .unwrap()
+            .contains("resolve"));
     }
 }

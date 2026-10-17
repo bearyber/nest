@@ -147,7 +147,7 @@ pub struct TrayInputs {
     pub projects: Vec<RecentProject>,
     /// Empty when Devices isn't in use.
     pub others: Vec<OtherComputer>,
-    /// Hook for later: "Resolve: N waiting" (Resolve starter projects). Always None for now.
+    /// "Resolve: N waiting" (Resolve starter projects); None = nothing waits.
     pub resolve_waiting: Option<usize>,
     /// Windows menus treat `&` as a shortcut marker: double it there.
     pub escape_ampersands: bool,
@@ -512,7 +512,7 @@ fn inputs(app: &AppHandle) -> Option<TrayInputs> {
         templates,
         projects,
         others,
-        resolve_waiting: None,
+        resolve_waiting: crate::resolve_cmd::waiting_count(app),
         escape_ampersands: cfg!(target_os = "windows"),
         first_run: state.first_run.load(Ordering::SeqCst),
     })
@@ -839,7 +839,8 @@ fn moment(app: &AppHandle, t: &Tray, state: &AppState) -> UpdateMoment {
         },
         sheet_open: t.sheet_open.load(Ordering::SeqCst),
         creating: state.creating.load(Ordering::SeqCst),
-        syncing: state.devices.syncing.load(Ordering::SeqCst),
+        // Adding a project to Resolve counts as syncing.
+        syncing: state.devices.syncing.load(Ordering::SeqCst) || crate::resolve_cmd::busy(app),
         scanning: state.scanning.load(Ordering::SeqCst),
     }
 }

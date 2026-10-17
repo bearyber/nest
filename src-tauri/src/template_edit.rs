@@ -213,6 +213,7 @@ fn sample_ctx(ex: &Example) -> PlanContext {
         code_override: None,
         own_code: None,
         kit: None,
+        resolve: Default::default(),
     }
 }
 
@@ -303,6 +304,22 @@ impl EditorSession {
             self.staged.insert(name, on_disk);
         }
         (folders.iter().map(|f| inside(f)).collect(), entries)
+    }
+
+    /// Stage a Resolve starter project (`file_name` ends with `.drp`) under a name of its own
+    /// in the template's folder (`files/…`), like a dropped file, but without a file entry:
+    /// it never goes into the project folder. Returns the template path for `resolve.drp`.
+    pub fn add_resolve_drp(&mut self, file_name: &str, on_disk: OnDisk) -> String {
+        let taken = self.file_names();
+        let name = (1..)
+            .map(|n| match n {
+                1 => format!("files/{file_name}"),
+                n => format!("files/{n}/{file_name}"),
+            })
+            .find(|n| !taken.contains(n))
+            .unwrap_or_default();
+        self.staged.insert(name.clone(), on_disk);
+        name
     }
 
     /// `draft` with every file it can use, for the planner (preview and the check on save).

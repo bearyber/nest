@@ -453,3 +453,64 @@ fn a_dropped_path_that_isnt_a_template_file_gets_a_plain_message() {
     fs::create_dir(&ko).unwrap();
     assert_eq!(drop_kind(&ko), DropKind::Folder);
 }
+
+fn with_resolve(id: &str, drp: &str) -> String {
+    let mut t: serde_json::Value = serde_json::from_str(&template_json(id, 1, "Grade")).unwrap();
+    t["resolve"] = serde_json::json!({ "drp": drp, "name": "{name}", "folder": "{client}/2026" });
+    t.to_string()
+}
+
+#[test]
+fn a_resolve_project_travels_with_export_import_and_duplicate() {
+    let s = setup();
+    let dir = s.user.join("grade");
+    fs::create_dir_all(dir.join("starter")).unwrap();
+    fs::create_dir_all(dir.join("files")).unwrap();
+    fs::write(dir.join("starter/README.txt"), "hello").unwrap();
+    fs::write(dir.join("files/Grade.drp"), b"drp bytes").unwrap();
+    fs::write(
+        dir.join("grade.nest.json"),
+        with_resolve("grade", "files/Grade.drp"),
+    )
+    .unwrap();
+    let mine = s.installed().remove(0);
+    let r = mine.loaded.template.resolve.clone().unwrap();
+    assert_eq!(r.drp, "files/Grade.drp");
+    assert!(r.on, "ticked by default");
+
+    let pkg = s.pkg("grade.nesttemplate");
+    export(&mine.loaded, &pkg).unwrap();
+    let other = setup();
+    let back = import(&pkg, &other.user, &other.installed(), LIMITS).unwrap();
+    assert_eq!(back.template, mine.loaded.template);
+    assert_eq!(
+        fs::read(back.dir.join("files/Grade.drp")).unwrap(),
+        b"drp bytes"
+    );
+
+    let copy = duplicate(&mine.loaded, &s.user, &s.installed()).unwrap();
+    assert_eq!(copy.template.resolve, mine.loaded.template.resolve);
+    assert!(copy.files.contains("files/Grade.drp"));
+}
+
+#[test]
+fn a_package_whose_resolve_project_is_missing_is_refused() {
+    let s = setup();
+    let pkg = s.pkg("broken.nesttemplate");
+    zip_with(
+        &pkg,
+        &[
+            (
+                "grade/grade.nest.json",
+                with_resolve("grade", "files/Grade.drp").as_bytes(),
+            ),
+            ("grade/starter/README.txt", b"x"),
+        ],
+    );
+    let err = import(&pkg, &s.user, &s.installed(), LIMITS).unwrap_err();
+    assert!(
+        err.contains("Resolve project \"files/Grade.drp\" is missing"),
+        "{err}"
+    );
+    assert!(s.user_folders().is_empty(), "nothing installed");
+}

@@ -78,6 +78,17 @@ impl Staged {
                 ));
             }
         }
+        // The Resolve starter project comes along like any other template file.
+        if let Some(r) = &draft.resolve {
+            if self.files.contains_key(&r.drp) {
+                used.insert(r.drp.as_str());
+            } else if !others.contains(&r.drp) {
+                return Err(format!(
+                    "The Resolve project \"{}\" isn't one of this template's files. Add it again.",
+                    r.drp
+                ));
+            }
+        }
         let mut total = 0u64;
         for name in used {
             let file = &self.files[name];

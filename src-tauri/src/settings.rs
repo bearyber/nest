@@ -90,9 +90,21 @@ pub struct Settings {
     pub client_kits: std::collections::BTreeMap<String, PathBuf>,
     /// v0.7: the "<CODE> is ready" note after your very first project was shown (once).
     pub first_project_tip_seen: bool,
+    /// Resolve starter projects: the library (database) Nest adds them to on this computer.
+    /// None = whichever library is open in Resolve.
+    pub resolve_library: Option<ResolveLibrary>,
     /// Keys this version doesn't know (e.g. written by a newer Nest): kept on every save.
     #[serde(flatten)]
     pub other: serde_json::Map<String, serde_json::Value>,
+}
+
+/// A DaVinci Resolve project library (Resolve calls it a database): its type ("Disk",
+/// "PostgreSQL"…) and name, exactly as Resolve reports them.
+#[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ResolveLibrary {
+    pub db_type: String,
+    pub db_name: String,
 }
 
 /// Template sync bookkeeping for one template id (kept in settings, never in the template).
@@ -142,6 +154,7 @@ impl Default for Settings {
             kits_folder: None,
             client_kits: Default::default(),
             first_project_tip_seen: false,
+            resolve_library: None,
             other: serde_json::Map::new(),
         }
     }

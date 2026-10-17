@@ -572,3 +572,37 @@ fn a_template_with_a_client_kit_folder_syncs_whole() {
         serde_json::json!({ "name": "02_BRAND", "kit": true })
     );
 }
+
+#[test]
+fn a_template_with_a_resolve_project_syncs_with_its_drp() {
+    let w = World::new();
+    let mut pc = w.computer(PC);
+    let mut mac = w.computer(MAC);
+    pc.save("grade", 1, "Grade", "resolve", T1);
+    // A Resolve starter project, like the editor would save it.
+    let dir = pc.user.join("grade-v1");
+    fs::create_dir_all(dir.join("files")).unwrap();
+    fs::write(dir.join("files/Grade.drp"), b"drp bytes").unwrap();
+    let json = dir.join("grade.nest.json");
+    let mut t: serde_json::Value =
+        serde_json::from_str(&fs::read_to_string(&json).unwrap()).unwrap();
+    t["resolve"] = serde_json::json!({ "drp": "files/Grade.drp", "folder": "{client}" });
+    fs::write(&json, t.to_string()).unwrap();
+
+    assert!(pc.sync(&w, true).problem.is_none());
+    let r = mac.sync(&w, true);
+    assert_eq!(r.got.len(), 1);
+    let got = mac
+        .mine()
+        .into_iter()
+        .find(|t| t.loaded.template.id == "grade")
+        .unwrap();
+    assert_eq!(
+        got.loaded.template.resolve.as_ref().map(|r| r.drp.as_str()),
+        Some("files/Grade.drp")
+    );
+    assert_eq!(
+        fs::read(got.loaded.dir.join("files/Grade.drp")).unwrap(),
+        b"drp bytes"
+    );
+}

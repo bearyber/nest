@@ -439,6 +439,8 @@ pub fn start(app: &AppHandle) {
     let app = app.clone();
     thread::spawn(move || loop {
         sync_now(&app);
+        // Resolve starter projects waiting: try again while Resolve runs.
+        crate::resolve_cmd::tick(&app);
         thread::sleep(EVERY);
     });
 }

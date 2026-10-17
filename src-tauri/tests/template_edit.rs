@@ -625,3 +625,81 @@ fn example_names_match_the_preview() {
     assert_eq!(out[4], "Acme");
     assert_eq!(out[5], "{nope}");
 }
+
+/// Resolve starter project: a `.drp` exported into the editor is staged like a dropped file,
+/// saved into the template (never as a file in the project), and kept by the next save.
+#[test]
+fn a_resolve_project_is_staged_saved_and_kept() {
+    use nest_lib::staged::OnDisk;
+    use nest_lib::template::ResolveStarter;
+    use nest_lib::template_edit::{save_session, EditorSession};
+
+    let s = Setup::new();
+    let video = s.get("video", true);
+    let export_dir = s._tmp.path().join("extras/abc");
+    std::fs::create_dir_all(&export_dir).unwrap();
+    std::fs::write(export_dir.join("Grade.drp"), b"drp bytes").unwrap();
+
+    let mut session = EditorSession::from_template(&video);
+    let drp = session.add_resolve_drp(
+        "Grade.drp",
+        OnDisk {
+            base: export_dir.clone(),
+            rel: "Grade.drp".into(),
+            size: 9,
+        },
+    );
+    assert_eq!(drp, "files/Grade.drp");
+    let mut draft = video.loaded.template.clone();
+    let files_before = draft.files.clone();
+
+    // Missing from the template: the preview says so and Save refuses.
+    draft.resolve = Some(ResolveStarter {
+        drp: "files/Other.drp".into(),
+        name: None,
+        folder: "{client}".into(),
+        on: true,
+    });
+    let p = preview(&draft, &session.loaded(draft.clone()), &Example::new(TODAY));
+    assert!(
+        p.problems.iter().any(|m| m.contains("files/Other.drp")),
+        "{:?}",
+        p.problems
+    );
+
+    draft.resolve.as_mut().unwrap().drp = drp.clone();
+    let p = preview(&draft, &session.loaded(draft.clone()), &Example::new(TODAY));
+    assert!(p.problems.is_empty(), "{:?}", p.problems);
+    assert!(
+        !p.files.iter().any(|f| f.ends_with(".drp")),
+        "never a file in the project"
+    );
+    let saved = save_session(
+        &draft,
+        SaveMode::Customize,
+        &session,
+        &s.installed(),
+        &s.user,
+        BUILT_IN_IDS,
+        &Example::new(TODAY),
+    )
+    .unwrap();
+    assert_eq!(saved.template.files, files_before);
+    assert_eq!(saved.template.resolve, draft.resolve);
+    assert_eq!(
+        std::fs::read(saved.dir.join("files/Grade.drp")).unwrap(),
+        b"drp bytes"
+    );
+
+    // Edited again (a new name): the .drp comes along from the saved template.
+    let mine = s.get("video", false);
+    let mut again = mine.loaded.template.clone();
+    again.resolve.as_mut().unwrap().name = Some("{jobCode}".into());
+    let next = s.save(&again, SaveMode::Edit, &mine).unwrap();
+    assert_eq!(next.resolve.unwrap().name.as_deref(), Some("{jobCode}"));
+    assert!(s
+        .get("video", false)
+        .loaded
+        .files
+        .contains("files/Grade.drp"));
+}

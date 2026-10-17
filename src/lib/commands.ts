@@ -10,6 +10,11 @@ import type {
   Plan,
   PlanRequest,
   ProjectList,
+  ResolveLibraries,
+  ResolveLibrary,
+  ResolveProject,
+  ResolveStatus,
+  ResolveWaitingView,
   RescanSummary,
   UpdateInfo,
   WhatsNew,
@@ -199,6 +204,27 @@ export const completeFirstRun = (
 export const firstRunPickTemplateFolder = () => s<string | null>("first_run_pick_template_folder");
 export const settingsReady = () => invoke<void>("settings_ready");
 export const requestStatus = (key: string, status: "active" | "done") => invoke<void>("request_status", { key, status });
+
+// ── Resolve starter projects ──
+/** Is Resolve installed, open, and letting Nest in? */
+export const resolveStatus = () => invoke<ResolveStatus>("resolve_status");
+/** Resolve's libraries and the open one (rejects with plain words if Resolve can't answer). */
+export const resolveLibraries = () => invoke<ResolveLibraries>("resolve_libraries");
+/** The projects in Resolve's open library ("Choose from Resolve…"). */
+export const resolveProjects = () => invoke<ResolveProject[]>("resolve_projects");
+/** Export a project from Resolve into the open editor; resolves to the template path for
+ *  `template.resolve.drp`. `folder` as in `ResolveProject` ("" = the top level). */
+export const resolveExportToEditor = (sessionId: string, projectName: string, folder: string) =>
+  invoke<string>("resolve_export_to_editor", { sessionId, projectName, folder });
+export const resolveWaitingList = () => invoke<ResolveWaitingView>("resolve_waiting_list");
+/** Try the waiting projects now (can take a while if Resolve is slow). */
+export const resolveTryNow = () => invoke<ResolveWaitingView>("resolve_try_now");
+/** Take one project off the waiting list (by its id). */
+export const resolveRemoveWaiting = (id: string) =>
+  invoke<ResolveWaitingView>("resolve_remove_waiting", { id });
+/** Settings: the library to add to (null = the one open in Resolve). */
+export const resolveSetLibrary = (library: ResolveLibrary | null) =>
+  invoke<SettingsView>("resolve_set_library", { library });
 
 // ── What's new ──
 /** The note to show after an update, or null. */

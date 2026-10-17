@@ -278,6 +278,7 @@ pub fn read_folder(
                 fill: fills(&f.name, f.size),
             })
             .collect(),
+        resolve: None,
     };
     let mut staged = Staged::default();
     for f in walk.files {
@@ -938,6 +939,7 @@ mod tests {
             folder_name: "{start|yymmdd}_{name|caps}".into(),
             tree: vec![],
             files: vec![],
+            resolve: None,
         }
     }
 

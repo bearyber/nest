@@ -103,6 +103,7 @@ fn ctx(s: &Setup, kit: Option<KitInput>) -> PlanContext {
         code_override: None,
         own_code: None,
         kit,
+        resolve: Default::default(),
     }
 }
 

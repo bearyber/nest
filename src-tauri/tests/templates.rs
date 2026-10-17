@@ -38,6 +38,7 @@ fn ctx() -> PlanContext {
         code_override: None,
         own_code: None,
         kit: None,
+        resolve: Default::default(),
     }
 }
 

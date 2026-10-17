@@ -13,6 +13,8 @@ use unicode_normalization::UnicodeNormalization;
 use crate::kits::KitListing;
 use crate::template_from_folder::SkipReason;
 
+use crate::settings::ResolveLibrary;
+
 use crate::names::{
     next_code, normalize_client_code, sanitize_segment, CodePattern, NameError, Transform,
     DEFAULT_CODE_PATTERN,
@@ -77,7 +79,38 @@ pub struct PlanContext {
     pub own_code: Option<String>,
     /// v0.5: the client's kit as the command found it. None = no client chosen.
     pub kit: Option<KitInput>,
+    /// Resolve starter project: New Project's box and this computer's library.
+    pub resolve: ResolveChoice,
 }
+
+/// New Project's "Add to Resolve" box and the library from Settings.
+#[derive(Debug, Clone, Default)]
+pub struct ResolveChoice {
+    /// The box in New Project. None = the template's default (`resolve.on`).
+    pub on: Option<bool>,
+    /// The library Nest adds to. None = whichever library is open in Resolve.
+    pub library: Option<ResolveLibrary>,
+}
+
+/// The Resolve project Create will add (nothing is a file in the job folder).
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PlannedResolve {
+    /// The `.drp` in the template, relative to the template folder.
+    pub drp: String,
+    /// The project's name in Resolve (cleaned like a folder name).
+    pub name: String,
+    /// Resolve's project folder, `/` between folders inside folders. "" = the top level.
+    pub folder: String,
+    /// The library chosen in Settings; None = the one open in Resolve.
+    #[serde(default)]
+    pub library: Option<ResolveLibrary>,
+    /// For the preview: the library's name, or "the library open in Resolve".
+    pub library_label: String,
+}
+
+/// What the preview says when no library is chosen in Settings.
+pub const OPEN_LIBRARY_LABEL: &str = "the library open in Resolve";
 
 /// The chosen client and what Nest found for their kit (read before planning, cached).
 #[derive(Debug, Clone)]
@@ -176,6 +209,9 @@ pub struct Plan {
     /// v0.5 client kits. None = no client chosen, or no kit and no kit folder.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub kit: Option<PlanKit>,
+    /// The Resolve project Create adds. None = the template has none, or the box is off.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub resolve: Option<PlannedResolve>,
 }
 
 impl Plan {
@@ -384,7 +420,8 @@ pub fn plan_project(loaded: &LoadedTemplate, input: &Values, ctx: &PlanContext) 
     check_path_lengths(&root, &folders.list, &files, kit.as_ref(), &mut issues);
 
     let title = project_title(t, &values, &vars, &job_code);
-    let manifest = manifest(
+    let resolve = plan_resolve(loaded, &vars, &folder_name, ctx, &mut issues);
+    let mut manifest = manifest(
         t,
         &values,
         ctx,
@@ -393,6 +430,15 @@ pub fn plan_project(loaded: &LoadedTemplate, input: &Values, ctx: &PlanContext) 
         &job_code,
         &title,
     );
+    if let Some(r) = &resolve {
+        manifest["resolve"] = json!({
+            "name": r.name,
+            "folder": r.folder,
+            "library": r.library.as_ref().map(|l| l.db_name.as_str()),
+            "status": "waiting",
+            "at": ctx.created_at,
+        });
+    }
     let fill = t
         .fields
         .iter()
@@ -412,7 +458,66 @@ pub fn plan_project(loaded: &LoadedTemplate, input: &Values, ctx: &PlanContext) 
         fill,
         issues: issues.0,
         kit,
+        resolve,
     }
+}
+
+/// The template's Resolve starter project, if it has one and the box is on: its name and
+/// folder rendered like folder names (same blanks, transforms and sanitiser; `/` in the
+/// folder pattern makes folders inside folders, never `/` in an answer).
+fn plan_resolve(
+    loaded: &LoadedTemplate,
+    vars: &Vars,
+    folder_name: &str,
+    ctx: &PlanContext,
+    issues: &mut Issues,
+) -> Option<PlannedResolve> {
+    let r = loaded.template.resolve.as_ref()?;
+    if !ctx.resolve.on.unwrap_or(r.on) {
+        return None;
+    }
+    if !loaded.files.contains(&r.drp) {
+        issues.error(
+            None,
+            format!(
+                "The Resolve project \"{}\" is missing from the template. Add it again in the template editor.",
+                r.drp
+            ),
+        );
+        return None;
+    }
+    let name = match &r.name {
+        Some(pattern) => {
+            let pieces = parse_pattern(pattern).unwrap_or_default();
+            match sanitize_segment(&vars.render(&pieces, Mode::Name)) {
+                Ok(name) => name,
+                Err(e) => {
+                    issues.error(None, format!("Resolve project name: {e}"));
+                    return None;
+                }
+            }
+        }
+        // The folder name is already cleaned (and an error if it couldn't be).
+        None if folder_name.is_empty() => return None,
+        None => folder_name.to_string(),
+    };
+    let folder = match render_path(&r.folder, vars) {
+        Ok(segments) => segments.join("/"),
+        Err(e) => {
+            issues.error(None, format!("Resolve folder: {e}"));
+            return None;
+        }
+    };
+    Some(PlannedResolve {
+        drp: r.drp.clone(),
+        name,
+        folder,
+        library: ctx.resolve.library.clone(),
+        library_label: match &ctx.resolve.library {
+            Some(l) => l.db_name.clone(),
+            None => OPEN_LIBRARY_LABEL.to_string(),
+        },
+    })
 }
 
 /// The kit's files under the template's kit folder (`base`). Names are cleaned like every other
@@ -1353,6 +1458,7 @@ mod tests {
             code_override: None,
             own_code: None,
             kit: None,
+            resolve: Default::default(),
         }
     }
 
@@ -1999,5 +2105,109 @@ mod tests {
         let a = plan_project(&mv(), &values("KIRA", "Song"), &ctx());
         let b = plan_project(&mv(), &values("KIRA", "Song"), &ctx());
         assert_eq!(a, b);
+    }
+
+    fn with_resolve(r: serde_json::Value) -> LoadedTemplate {
+        let mut v: serde_json::Value = serde_json::from_str(GRADING_MV).unwrap();
+        v["resolve"] = r;
+        loaded(&v.to_string(), &["starter/NOTES.md", "files/Grade.drp"])
+    }
+
+    #[test]
+    fn resolve_project_is_planned_like_a_folder_name() {
+        let t = with_resolve(serde_json::json!({ "drp": "files/Grade.drp" }));
+        let plan = plan_project(&t, &values("KIRA", "Summer Nights"), &ctx());
+        assert!(plan.can_create(), "{:?}", plan.issues);
+        let r = plan.resolve.clone().unwrap();
+        // No name: the folder name. Default folder: the client, as names have it.
+        assert_eq!(r.name, plan.folder_name);
+        assert_eq!(r.folder, "VertexStudio");
+        assert_eq!(r.library, None);
+        assert_eq!(r.library_label, OPEN_LIBRARY_LABEL);
+        assert_eq!(
+            plan.manifest["resolve"],
+            json!({
+                "name": plan.folder_name, "folder": "VertexStudio", "library": null,
+                "status": "waiting", "at": "2026-09-28T10:00:00+08:00"
+            })
+        );
+        // Nothing for Resolve becomes a file or folder in the project.
+        assert!(!plan.files.iter().any(|f| f.from.ends_with(".drp")));
+
+        // Blanks and transforms; `/` in the pattern nests, `/` in an answer never does; the
+        // characters Resolve refuses are cleaned out.
+        let t = with_resolve(json!({
+            "drp": "files/Grade.drp",
+            "name": "{jobCode} {song|upper}: <Final>?",
+            "folder": "{client|upper}/{year}"
+        }));
+        let mut c = ctx();
+        c.resolve.library = Some(ResolveLibrary {
+            db_type: "Disk".into(),
+            db_name: "Work 2026".into(),
+        });
+        let plan = plan_project(&t, &values("A/B", "Hey \"You\" | *"), &c);
+        let r = plan.resolve.clone().unwrap();
+        assert_eq!(r.name, "VX-L01 HEY YOU Final");
+        assert_eq!(r.folder, "VERTEX STUDIO/2026");
+        assert_eq!(r.library_label, "Work 2026");
+        assert_eq!(plan.manifest["resolve"]["library"], "Work 2026");
+        for bad in ['/', '\\', ':', '*', '?', '"', '<', '>', '|'] {
+            assert!(!r.name.contains(bad), "{bad} in {}", r.name);
+        }
+
+        // Korean and Chinese answers come out NFC.
+        let t = with_resolve(json!({ "drp": "files/Grade.drp", "name": "{artist} {song}" }));
+        let decomposed: String = "꿈의 노래".nfd().collect();
+        let plan = plan_project(&t, &values(&decomposed, "夏天"), &ctx());
+        let r = plan.resolve.unwrap();
+        assert_eq!(r.name, "꿈의노래 夏天");
+        assert!(r.name.chars().eq(r.name.nfc()));
+    }
+
+    #[test]
+    fn resolve_box_and_missing_drp() {
+        let t = with_resolve(json!({ "drp": "files/Grade.drp", "on": false }));
+        let v = values("KIRA", "Song");
+        assert!(
+            plan_project(&t, &v, &ctx()).resolve.is_none(),
+            "off by default"
+        );
+        let mut c = ctx();
+        c.resolve.on = Some(true);
+        assert!(
+            plan_project(&t, &v, &c).resolve.is_some(),
+            "ticked in New Project"
+        );
+        let t = with_resolve(json!({ "drp": "files/Grade.drp" }));
+        c.resolve.on = Some(false);
+        let plan = plan_project(&t, &v, &c);
+        assert!(plan.resolve.is_none() && plan.manifest.get("resolve").is_none());
+
+        // No folder: "" stays at the top level; an empty answer drops its folder.
+        let t = with_resolve(json!({ "drp": "files/Grade.drp", "folder": "" }));
+        assert_eq!(plan_project(&t, &v, &ctx()).resolve.unwrap().folder, "");
+        let mut c = ctx();
+        c.own_code = Some("OWN".into());
+        let t = with_resolve(json!({ "drp": "files/Grade.drp" }));
+        assert_eq!(plan_project(&t, &v, &c).resolve.unwrap().folder, "");
+
+        // The .drp isn't in the template: Create is blocked with plain words.
+        let mut v2: serde_json::Value = serde_json::from_str(GRADING_MV).unwrap();
+        v2["resolve"] = json!({ "drp": "files/Gone.drp" });
+        let t = loaded(&v2.to_string(), &["starter/NOTES.md"]);
+        let plan = plan_project(&t, &v, &ctx());
+        assert!(errors(&plan)
+            .iter()
+            .any(|e| e.contains("\"files/Gone.drp\" is missing")));
+
+        // A name that comes out empty is an error, not a nameless project.
+        let t = with_resolve(json!({ "drp": "files/Grade.drp", "name": "{artist}" }));
+        let mut c = ctx();
+        c.own_code = Some("OWN".into());
+        let plan = plan_project(&t, &Values::new(), &c);
+        assert!(errors(&plan)
+            .iter()
+            .any(|e| e.starts_with("Resolve project name")));
     }
 }

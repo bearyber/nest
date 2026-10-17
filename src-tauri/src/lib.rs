@@ -11,6 +11,8 @@ pub mod manifest;
 mod menu;
 pub mod names;
 pub mod plan;
+pub mod resolve;
+mod resolve_cmd;
 pub mod settings;
 mod settings_cmd;
 pub mod sizes;
@@ -92,6 +94,7 @@ pub fn run() {
         .manage(update::Pending::default())
         .manage(kits_cmd::Kits::default())
         .manage(tray::Tray::default())
+        .manage(resolve_cmd::ResolveState::default())
         .on_window_event(tray::on_window_event)
         .setup(move |app| {
             if let Err(e) = setup(app, started_at) {
@@ -194,6 +197,14 @@ pub fn run() {
             kits_cmd::clear_client_kit,
             kits_cmd::set_template_kit_folder,
             kits_cmd::cancel_create,
+            resolve_cmd::resolve_status,
+            resolve_cmd::resolve_libraries,
+            resolve_cmd::resolve_projects,
+            resolve_cmd::resolve_export_to_editor,
+            resolve_cmd::resolve_waiting_list,
+            resolve_cmd::resolve_try_now,
+            resolve_cmd::resolve_remove_waiting,
+            resolve_cmd::resolve_set_library,
         ])
         .build(context)
         .unwrap_or_else(|e| startup::fail(&StartupError::new(Step::Other, e)))
@@ -269,6 +280,7 @@ fn setup(app: &mut tauri::App, started_at: std::time::SystemTime) -> Result<(), 
     }
     update::start(app.handle());
     devices_cmd::start(app.handle());
+    resolve_cmd::start(app.handle());
     settings_cmd::tidy_template_copies_once(app.handle());
     tidy::start(app.handle(), started_at);
     // macOS gets the native menu bar (spec §8). Windows 11 apps don't have one;

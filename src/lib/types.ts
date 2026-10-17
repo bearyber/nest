@@ -34,6 +34,86 @@ export interface Template {
   folderName: string;
   tree?: TreeEntry[];
   files?: FileEntry[];
+  /** Resolve starter project (Rust `ResolveStarter`); absent = none. */
+  resolve?: ResolveStarter;
+}
+
+/** A Resolve starter project in a template: Create adds a copy of `drp` to DaVinci Resolve. */
+export interface ResolveStarter {
+  /** The `.drp` in the template folder, e.g. `files/Grade.drp`. */
+  drp: string;
+  /** The project's name in Resolve, with blanks; absent = the same as the folder name. */
+  name?: string;
+  /** Resolve's project folder, with blanks; `/` = folders inside folders; "" = none.
+   *  Rust fills in "{client}" when absent. */
+  folder: string;
+  /** Ticked in New Project by default (Rust fills in true when absent). */
+  on: boolean;
+}
+
+/** A Resolve project library (Resolve calls it a database), exactly as Resolve names it. */
+export interface ResolveLibrary {
+  dbType: string;
+  dbName: string;
+}
+
+/** The Resolve project Create will add (Rust `PlannedResolve`). Preview line:
+ *  "Resolve project: <name> in <folder>". */
+export interface PlannedResolve {
+  drp: string;
+  name: string;
+  /** `/` between folders inside folders; "" = the top level. */
+  folder: string;
+  /** The library from Settings; null = the one open in Resolve. */
+  library: ResolveLibrary | null;
+  /** The library's name, or "the library open in Resolve". */
+  libraryLabel: string;
+}
+
+/** ready · scriptingOff (Resolve runs but External scripting isn't Local) · notRunning · notInstalled. */
+export type ResolveStatus = "ready" | "scriptingOff" | "notRunning" | "notInstalled";
+
+/** Resolve's libraries (Rust `resolve::Libraries`). */
+export interface ResolveLibraries {
+  /** The library open in Resolve now. */
+  current: ResolveLibrary | null;
+  libraries: ResolveLibrary[];
+}
+
+/** A project in Resolve's open library ("Choose from Resolve…"). */
+export interface ResolveProject {
+  /** `/` between folders inside folders; "" = the top level. */
+  folder: string;
+  name: string;
+}
+
+/** A project waiting to go into Resolve (Rust `resolve::WaitingEntry`). */
+export interface ResolveWaitingEntry {
+  /** The project's manifest id (= its key in the list). */
+  id: string;
+  jobCode: string;
+  projectDir: string;
+  /** Nest's own copy of the .drp. */
+  drp: string;
+  name: string;
+  folder: string;
+  library: ResolveLibrary | null;
+  createdAt: string;
+  /** Failed tries (not counting "Resolve isn't open"). */
+  tries: number;
+  /** added · exists · busy · noFolder · noLibrary · missing · scriptingOff · notInstalled ·
+   *  notRunning · failed */
+  lastOutcome: string | null;
+  lastTry: string | null;
+}
+
+/** The Resolve waiting list (Rust `WaitingView`). */
+export interface ResolveWaitingView {
+  entries: ResolveWaitingEntry[];
+  /** What the last try found; null = not tried yet. */
+  lastStatus: ResolveStatus | null;
+  /** Plain words for `lastStatus` (null when ready or unknown), e.g. the scripting hint. */
+  hint: string | null;
 }
 
 export interface ClientValue {
@@ -68,6 +148,8 @@ export interface Plan {
   issues: Issue[];
   /** v0.5 client kits; absent = no client, or no kit and no kit folder. */
   kit?: PlanKit;
+  /** The Resolve project Create adds; absent = none, or the box is off. */
+  resolve?: PlannedResolve;
 }
 
 /** ready: copied on Create · missing: the template has a kit folder, the client no kit here ·
@@ -118,6 +200,8 @@ export interface PlanRequest {
   noClient?: boolean;
   /** Create only: the preview's `plan.kit.fingerprint` (null = no kit in the preview). */
   kitFingerprint?: string | null;
+  /** "Add to Resolve" box; null/absent = the template's default. */
+  resolve?: boolean | null;
 }
 
 /** Progress while Create copies a client kit (event `create-progress`). */
@@ -293,6 +377,8 @@ export interface Settings {
   clientKits: Record<string, string>;
   /** v0.7: the note after your very first project was shown (once). */
   firstProjectTipSeen: boolean;
+  /** Resolve starter projects: the library Nest adds to here; null = the one open in Resolve. */
+  resolveLibrary: ResolveLibrary | null;
 }
 
 export interface SettingsView {

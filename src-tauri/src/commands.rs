@@ -216,6 +216,9 @@ pub struct PlanRequest {
     /// refuses if the kit changed since (None = the preview had no kit).
     #[serde(default)]
     pub kit_fingerprint: Option<String>,
+    /// New Project's "Add to Resolve" box. None = the template's default.
+    #[serde(default)]
+    pub resolve: Option<bool>,
 }
 
 /// Live preview for the sheet. Uses the cached scan and kit listing, so it's cheap to call
@@ -311,6 +314,10 @@ fn build_plan(
         own_code: (request.no_client || settings.no_client_spaces.contains(&request.space))
             .then(|| settings.own_code.clone()),
         kit,
+        resolve: plan::ResolveChoice {
+            on: request.resolve,
+            library: settings.resolve_library.clone(),
+        },
     };
     let mut plan = plan::plan_project(loaded, &request.values, &ctx);
     if index_problem {
@@ -447,6 +454,10 @@ pub fn create_project(
                 };
                 if let Err(e) = lock(&state.index)?.record(&[found], now_ms()) {
                     log::warn!("couldn't add the new project to the index: {e}");
+                }
+                // Resolve starter project: queued, then tried at once in the background.
+                if let Some(r) = &plan.resolve {
+                    crate::resolve_cmd::queue_after_create(&app, &state, &plan, r, &loaded.dir);
                 }
                 crate::devices_cmd::sync_soon(&app);
                 crate::tray::refresh(&app);
@@ -1181,6 +1192,7 @@ mod tests {
             code_override: None,
             no_client,
             kit_fingerprint: None,
+            resolve: None,
         };
         // Not chosen: everything goes to the first jobs folder.
         assert_eq!(
