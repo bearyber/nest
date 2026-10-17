@@ -336,6 +336,10 @@ fn install_into(
         template_root(tmp)?
     };
     let loaded = load_dir(&root).map_err(|e| e.to_string())?;
+    loaded
+        .template
+        .check_files(&loaded.files)
+        .map_err(|e| e.to_string())?;
     let (id, version, name) = (
         loaded.template.id.clone(),
         loaded.template.version,

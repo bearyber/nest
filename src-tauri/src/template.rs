@@ -547,7 +547,8 @@ pub fn load_dir(dir: &Path) -> Result<LoadedTemplate, TemplateError> {
 
     let mut files = BTreeSet::new();
     collect_files(dir, dir, &json, &mut files).map_err(read_err)?;
-    template.check_files(&files)?;
+    // A missing Resolve `.drp` doesn't hide the template (nor make template sync think it's
+    // gone): Create, the editor's save and Import check it (`check_files`).
     Ok(LoadedTemplate {
         template,
         dir: dir.to_path_buf(),

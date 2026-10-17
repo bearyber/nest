@@ -2145,6 +2145,7 @@ mod tests {
         c.resolve.library = Some(ResolveLibrary {
             db_type: "Disk".into(),
             db_name: "Work 2026".into(),
+            ip_address: None,
         });
         let plan = plan_project(&t, &values("A/B", "Hey \"You\" | *"), &c);
         let r = plan.resolve.clone().unwrap();

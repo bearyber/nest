@@ -3,7 +3,7 @@
 //! After Create, the project waits in `<config>/resolve-waiting.json` (with Nest's own copy of
 //! the template's `.drp`, so later template edits don't matter) and is tried at once. Then it's
 //! tried again every minute while Resolve runs, and soon after Resolve opens. One try at a time,
-//! never while an update installs.
+//! never while an update installs, always on a thread of its own (Devices never waits on it).
 
 use std::fs;
 use std::path::Path;
@@ -18,8 +18,9 @@ use crate::commands::{lock, AppState};
 use crate::error::{AppError, AppResult};
 use crate::plan::{Plan, PlannedResolve, MANIFEST_NAME};
 use crate::resolve::{
-    self, after, load_waiting, save_waiting, Libraries, Link, Next, Outcome, ResolveProject,
-    ResolveStatus, WaitingEntry, WaitingList, TIMEOUT,
+    self, after, due, load_waiting, recover, remove_copy, save_waiting, Back, Libraries, Link,
+    Next, Outcome, Recover, ResolveProject, ResolveStatus, RunError, Switched, WaitingEntry,
+    WaitingList, SWITCH_TIMEOUT, UNREADABLE,
 };
 use crate::settings::ResolveLibrary;
 use crate::settings_cmd::SettingsView;
@@ -37,12 +38,25 @@ pub struct ResolveState {
     pub busy: AtomicBool,
     /// A try was asked for while one ran: go round once more.
     again: AtomicBool,
+    /// "Try now": the next pass tries every entry (no backing off).
+    force: AtomicBool,
     /// One change to the waiting list file at a time.
     file: Mutex<()>,
     /// How many wait (for the menu bar icon and the watcher).
     count: AtomicUsize,
+    /// Nest may have left Resolve in another library (the list's `switched`).
+    switched: AtomicBool,
     /// What the last try found (Settings shows the scripting hint from this).
     last: Mutex<Option<ResolveStatus>>,
+}
+
+/// Clears `busy` however the pass ends (even by a panic).
+struct BusyGuard<'a>(&'a AtomicBool);
+
+impl Drop for BusyGuard<'_> {
+    fn drop(&mut self) {
+        self.0.store(false, Ordering::SeqCst);
+    }
 }
 
 /// Is a Resolve try running? (An update doesn't install by itself meanwhile.)
@@ -60,19 +74,35 @@ pub fn waiting_count(app: &AppHandle) -> Option<usize> {
     (n > 0).then_some(n)
 }
 
+/// Anything for the worker to do: projects waiting, or a library to switch Resolve back from.
+fn has_work(app: &AppHandle) -> bool {
+    waiting_count(app).is_some()
+        || app
+            .try_state::<ResolveState>()
+            .is_some_and(|r| r.switched.load(Ordering::SeqCst))
+}
+
 fn now() -> chrono::DateTime<chrono::FixedOffset> {
     chrono::Local::now().fixed_offset()
 }
 
 /// Real fuscript, or `NotInstalled`.
-fn with_link<T>(f: impl FnOnce(&Link) -> T) -> Result<T, ResolveStatus> {
+fn with_link<T>(config_dir: &Path, f: impl FnOnce(&Link) -> T) -> Result<T, ResolveStatus> {
     let fuscript = resolve::find_fuscript().ok_or(ResolveStatus::NotInstalled)?;
-    let run = |args: &[String]| resolve::run(&fuscript, args, TIMEOUT);
-    let running = resolve::is_running;
+    let dir = resolve::script_dir_here(config_dir);
+    let run = |args: &[String], limit: Duration| -> Result<String, RunError> {
+        resolve::run(&fuscript, &dir, args, limit)
+    };
+    let running = resolve::running_for;
     Ok(f(&Link {
         run: &run,
         running: &running,
     }))
+}
+
+fn remember(rs: &ResolveState, list: &WaitingList) {
+    rs.count.store(list.entries.len(), Ordering::SeqCst);
+    rs.switched.store(list.switched.is_some(), Ordering::SeqCst);
 }
 
 /// Change the waiting list under its lock; returns the new list. A damaged file is left alone.
@@ -86,26 +116,28 @@ fn change_list(
         .map_err(|e| format!("the Resolve waiting list can't be read ({e})"))?;
     change(&mut list);
     save_waiting(&state.config_dir, &list).map_err(|e| e.to_string())?;
-    rs.count.store(list.entries.len(), Ordering::SeqCst);
+    remember(rs, &list);
     Ok(list)
 }
 
-fn read_list(state: &AppState, rs: &ResolveState) -> WaitingList {
+/// The waiting list, or why it can't be read (never replaced by an empty one).
+fn read_list(state: &AppState, rs: &ResolveState) -> Result<WaitingList, String> {
     let _one = rs.file.lock().unwrap_or_else(|e| e.into_inner());
     match load_waiting(&state.config_dir) {
         Ok(list) => {
-            rs.count.store(list.entries.len(), Ordering::SeqCst);
-            list
+            remember(rs, &list);
+            Ok(list)
         }
         Err(e) => {
             log::warn!("the Resolve waiting list can't be read: {e}");
-            WaitingList::default()
+            Err(e)
         }
     }
 }
 
 /// Create made a project with a Resolve project: keep a copy of the `.drp`, put it on the
-/// waiting list, and try at once in the background. Problems here never fail the Create.
+/// waiting list, and try at once in the background. Problems here never fail the Create: the
+/// copy is removed again, and the project's file says the Resolve project failed, and why.
 pub fn queue_after_create(
     app: &AppHandle,
     state: &AppState,
@@ -127,11 +159,14 @@ pub fn queue_after_create(
             template_dir,
             &now().to_rfc3339(),
         )?;
-        change_list(state, &rs, |list| {
+        let queued = change_list(state, &rs, |list| {
             list.entries.retain(|e| e.id != id);
             list.entries.push(entry);
-        })?;
-        Ok(())
+        });
+        if queued.is_err() {
+            remove_copy(&state.config_dir, &id);
+        }
+        queued.map(|_| ())
     })();
     match result {
         Ok(()) => {
@@ -143,13 +178,17 @@ pub fn queue_after_create(
                 "couldn't queue the Resolve project for {}: {e}",
                 plan.job_code
             );
-            notice(
-                app,
-                format!(
-                    "{} was made, but Nest couldn't keep its Resolve project: {e}",
-                    plan.job_code
-                ),
-            );
+            let note = format!("Nest couldn't keep its Resolve project: {e}");
+            let file = plan.root.join(MANIFEST_NAME);
+            if let Err(e) =
+                resolve::update_manifest(&file, &id, "failed", &now().to_rfc3339(), Some(&note))
+            {
+                log::warn!(
+                    "couldn't note the Resolve status in {}: {e}",
+                    file.display()
+                );
+            }
+            notice(app, format!("{} was made, but {note}", plan.job_code));
         }
     }
 }
@@ -163,6 +202,7 @@ fn notice(app: &AppHandle, text: String) {
     let _ = app.emit("notice", ());
 }
 
+/// A pass on a thread of its own.
 pub fn try_soon(app: &AppHandle) {
     let app = app.clone();
     std::thread::spawn(move || try_all(&app));
@@ -175,60 +215,108 @@ pub fn try_all(app: &AppHandle) {
     else {
         return;
     };
-    if rs.busy.swap(true, Ordering::SeqCst) {
-        rs.again.store(true, Ordering::SeqCst);
-        return;
-    }
-    // Checked after setting `busy`, so an update install sees a try that got here first.
-    if crate::update::installing(app) {
-        rs.busy.store(false, Ordering::SeqCst);
-        return;
-    }
     loop {
-        rs.again.store(false, Ordering::SeqCst);
-        if try_once(app, &state, &rs) {
-            let _ = app.emit(CHANGED_EVENT, ());
-            crate::tray::refresh_soon(app);
+        if rs.busy.swap(true, Ordering::SeqCst) {
+            rs.again.store(true, Ordering::SeqCst);
+            return;
         }
-        if !rs.again.load(Ordering::SeqCst) || crate::update::installing(app) {
-            break;
+        {
+            let _busy = BusyGuard(&rs.busy);
+            // Checked after setting `busy`, so an update install sees a try that got here first.
+            if crate::update::installing(app) {
+                return;
+            }
+            loop {
+                rs.again.store(false, Ordering::SeqCst);
+                if try_once(app, &state, &rs) {
+                    let _ = app.emit(CHANGED_EVENT, ());
+                    crate::tray::refresh_soon(app);
+                }
+                if !rs.again.load(Ordering::SeqCst) || crate::update::installing(app) {
+                    break;
+                }
+            }
+        }
+        // A "try now" that came in just before `busy` cleared would otherwise be lost.
+        if !rs.again.swap(false, Ordering::SeqCst) || crate::update::installing(app) {
+            return;
         }
     }
-    rs.busy.store(false, Ordering::SeqCst);
 }
 
 /// One pass. True if anything changed.
 fn try_once(app: &AppHandle, state: &AppState, rs: &ResolveState) -> bool {
-    let list = read_list(state, rs);
-    if list.entries.is_empty() {
+    let force = rs.force.swap(false, Ordering::SeqCst);
+    // A damaged list: nothing is tried (and it's never written over).
+    let Ok(list) = read_list(state, rs) else {
+        return false;
+    };
+    if list.entries.is_empty() && list.switched.is_none() {
         return false;
     }
     let Some(fuscript) = resolve::find_fuscript() else {
         set_last(rs, ResolveStatus::NotInstalled);
         return false;
     };
-    if !resolve::is_running() {
+    if resolve::running_for().is_none() {
         set_last(rs, ResolveStatus::NotRunning);
         return false;
     }
-    let run = |args: &[String]| resolve::run(&fuscript, args, TIMEOUT);
-    let running = resolve::is_running;
+    let dir = resolve::script_dir_here(&state.config_dir);
+    let run = |args: &[String], limit: Duration| -> Result<String, RunError> {
+        resolve::run(&fuscript, &dir, args, limit)
+    };
+    let running = resolve::running_for;
     let link = Link {
         run: &run,
         running: &running,
     };
     let mut changed = false;
+
+    // Nest left Resolve in another library last time: put it back first, and add nothing
+    // until that's settled.
+    if let Some(rec) = &list.switched {
+        changed = true;
+        if !switch_back(app, state, rs, &link, rec) {
+            return changed;
+        }
+    }
+
+    let now_ = now();
     for mut entry in list.entries {
         if crate::update::installing(app) {
             break;
         }
-        let outcome = link.add(
+        if !force && !due(&entry, now_) {
+            continue;
+        }
+        let target = entry.library.clone();
+        let mut before_switch = |from: &ResolveLibrary| {
+            // Written before the switch: a run that never comes back is undone next time.
+            let rec = Switched {
+                from: from.clone(),
+                to: target.clone().unwrap_or_default(),
+                at: now().to_rfc3339(),
+                back_failed: false,
+            };
+            if let Err(e) = change_list(state, rs, |list| list.switched = Some(rec)) {
+                log::warn!("{e}");
+            }
+        };
+        let report = link.add(
             &entry.drp,
             &entry.name,
             &entry.folder,
             entry.library.as_ref(),
+            &mut before_switch,
         );
-        log::info!("Resolve project for {}: {}", entry.job_code, outcome.key());
+        let outcome = report.outcome.clone();
+        log::info!(
+            "Resolve project for {}: {} (switch back: {:?})",
+            entry.job_code,
+            outcome.key(),
+            report.back
+        );
         set_last(
             rs,
             match outcome {
@@ -238,12 +326,103 @@ fn try_once(app: &AppHandle, state: &AppState, rs: &ResolveState) -> bool {
         );
         let next = after(&mut entry, &outcome, now());
         changed |= settle(app, state, rs, entry, next);
-        // Resolve went away or won't let Nest in: the rest wait too.
-        if matches!(outcome, Outcome::Unreachable(_)) {
+        // After `settle`, so this notice is the one that shows.
+        after_switch(app, state, rs, &report);
+        // Resolve went away, won't let Nest in, or is left elsewhere: the rest wait too.
+        if resolve::stops_pass(&report) {
             break;
         }
     }
     changed
+}
+
+/// Write down how the switch back after an add went.
+fn after_switch(app: &AppHandle, state: &AppState, rs: &ResolveState, report: &resolve::AddReport) {
+    match report.back {
+        Back::Done | Back::NoSwitch => {
+            if rs.switched.load(Ordering::SeqCst) {
+                if let Err(e) = change_list(state, rs, |list| list.switched = None) {
+                    log::warn!("{e}");
+                }
+            }
+        }
+        Back::Failed => {
+            if let Err(e) = change_list(state, rs, |list| {
+                if let Some(rec) = &mut list.switched {
+                    rec.back_failed = true;
+                }
+            }) {
+                log::warn!("{e}");
+            }
+            if let Some(from) = &report.from {
+                notice(app, resolve::switch_back_message(from));
+            }
+        }
+        // Stopped mid-run: the record stays, and the next pass looks.
+        Back::Unknown => {}
+    }
+}
+
+/// Put Resolve back in the library Nest switched from, if it's still sitting in Nest's library
+/// with nothing real open. True = settled (the pass may go on).
+fn switch_back(
+    app: &AppHandle,
+    state: &AppState,
+    rs: &ResolveState,
+    link: &Link,
+    rec: &Switched,
+) -> bool {
+    let open = match link.state() {
+        Ok(open) => open,
+        Err(resolve::Problem::Status(s)) => {
+            set_last(rs, s);
+            return false;
+        }
+        Err(e) => {
+            log::info!("Resolve state: {}", e.message());
+            return false;
+        }
+    };
+    let forget = |state: &AppState| {
+        if let Err(e) = change_list(state, rs, |list| list.switched = None) {
+            log::warn!("{e}");
+        }
+    };
+    match recover(rec, &open.current, open.contents) {
+        Recover::Forget => {
+            forget(state);
+            true
+        }
+        Recover::SwitchBack => match link.switch_to(&rec.from) {
+            Ok(true) => {
+                log::info!("switched Resolve back to {}", rec.from.db_name);
+                forget(state);
+                if rec.back_failed {
+                    notice(
+                        app,
+                        format!("Nest switched Resolve back to {}.", rec.from.db_name),
+                    );
+                }
+                true
+            }
+            other => {
+                if let Err(e) = &other {
+                    log::info!("switching Resolve back: {}", e.message());
+                }
+                if !rec.back_failed {
+                    if let Err(e) = change_list(state, rs, |list| {
+                        if let Some(r) = &mut list.switched {
+                            r.back_failed = true;
+                        }
+                    }) {
+                        log::warn!("{e}");
+                    }
+                    notice(app, rec.message());
+                }
+                false
+            }
+        },
+    }
 }
 
 fn set_last(rs: &ResolveState, s: ResolveStatus) {
@@ -276,8 +455,9 @@ fn settle(
         Next::Done { status, notice } => (*status, notice.clone()),
         Next::GiveUp { note } => ("failed", note.clone()),
     };
+    let note = matches!(next, Next::GiveUp { .. }).then_some(message.as_str());
     let file = entry.project_dir.join(MANIFEST_NAME);
-    if let Err(e) = resolve::update_manifest(&file, &id, status, &now().to_rfc3339()) {
+    if let Err(e) = resolve::update_manifest(&file, &id, status, &now().to_rfc3339(), note) {
         // The project's folder may be offline or moved: Resolve has the project either way.
         log::warn!(
             "couldn't note the Resolve status in {}: {e}",
@@ -287,25 +467,23 @@ fn settle(
     if let Err(e) = change_list(state, rs, |list| list.entries.retain(|e| e.id != id)) {
         log::warn!("{e}");
     }
-    remove_copy(&entry.drp);
+    remove_copy(&state.config_dir, &id);
     notice(app, message);
     true
 }
 
-/// Nest's own copy of a `.drp` (never anything else).
-fn remove_copy(path: &Path) {
-    if let Err(e) = fs::remove_file(path) {
-        if e.kind() != std::io::ErrorKind::NotFound {
-            log::warn!("couldn't remove {}: {e}", path.display());
-        }
-    }
-}
-
-/// Every minute (Devices' timer): try if something waits and Resolve runs.
+/// Every minute (Devices' timer): try if something waits and Resolve runs. On a thread of its
+/// own, so Devices never waits on Resolve.
 pub fn tick(app: &AppHandle) {
-    if waiting_count(app).is_some() && resolve::is_running() {
-        try_all(app);
+    if !has_work(app) {
+        return;
     }
+    let app = app.clone();
+    std::thread::spawn(move || {
+        if resolve::running_for().is_some() {
+            try_all(&app);
+        }
+    });
 }
 
 /// Launch: read the waiting list, then watch for Resolve opening while anything waits.
@@ -315,12 +493,12 @@ pub fn start(app: &AppHandle) {
         if let (Some(state), Some(rs)) =
             (app.try_state::<AppState>(), app.try_state::<ResolveState>())
         {
-            read_list(&state, &rs);
+            let _ = read_list(&state, &rs);
         }
         let mut was_running = false;
         loop {
-            if waiting_count(&app).is_some() {
-                let running = resolve::is_running();
+            if has_work(&app) {
+                let running = resolve::running_for().is_some();
                 if running && !was_running {
                     std::thread::sleep(ANSWERS_AFTER);
                     try_all(&app);
@@ -342,22 +520,22 @@ fn problem(e: resolve::Problem) -> AppError {
 
 /// Is Resolve there, open, and letting Nest in?
 #[tauri::command(async)]
-pub fn resolve_status() -> ResolveStatus {
-    with_link(|l| l.status()).unwrap_or_else(|s| s)
+pub fn resolve_status(state: State<'_, AppState>) -> ResolveStatus {
+    with_link(&state.config_dir, |l| l.status()).unwrap_or_else(|s| s)
 }
 
 /// Resolve's libraries and the one open now (Settings).
 #[tauri::command(async)]
-pub fn resolve_libraries() -> AppResult<Libraries> {
-    with_link(|l| l.libraries())
+pub fn resolve_libraries(state: State<'_, AppState>) -> AppResult<Libraries> {
+    with_link(&state.config_dir, |l| l.libraries())
         .map_err(|s| AppError::new(s.message()))?
         .map_err(problem)
 }
 
 /// The projects in Resolve's open library ("Choose from Resolve…").
 #[tauri::command(async)]
-pub fn resolve_projects() -> AppResult<Vec<ResolveProject>> {
-    with_link(|l| l.projects())
+pub fn resolve_projects(state: State<'_, AppState>) -> AppResult<Vec<ResolveProject>> {
+    with_link(&state.config_dir, |l| l.projects())
         .map_err(|s| AppError::new(s.message()))?
         .map_err(problem)
 }
@@ -388,9 +566,11 @@ pub fn resolve_export_to_editor(
     fs::create_dir_all(&dir)
         .map_err(|e| AppError::new(format!("Couldn't make room for the export: {e}")))?;
     let dest = dir.join(&file_name);
-    with_link(|l| l.export(&project_name, &folder, &dest))
-        .map_err(|s| AppError::new(s.message()))?
-        .map_err(problem)?;
+    with_link(&state.config_dir, |l| {
+        l.export(&project_name, &folder, &dest)
+    })
+    .map_err(|s| AppError::new(s.message()))?
+    .map_err(problem)?;
     let size = fs::metadata(&dest)
         .map(|m| m.len())
         .map_err(|e| AppError::new(format!("The export can't be read: {e}")))?;
@@ -415,16 +595,43 @@ pub struct WaitingView {
     pub last_status: Option<ResolveStatus>,
     /// Plain words for `last_status` (None when ready or unknown).
     pub hint: Option<String>,
+    /// The waiting list file is damaged: "The waiting list can't be read." (`entries` is then
+    /// empty because nothing could be read, not because nothing waits).
+    pub problem: Option<String>,
+    /// Nest couldn't switch Resolve back to the library it was in: plain words saying which,
+    /// and what to do.
+    pub switch_back: Option<String>,
 }
 
 fn waiting_view(state: &AppState, rs: &ResolveState) -> WaitingView {
     let last = rs.last.lock().ok().and_then(|l| *l);
-    WaitingView {
-        entries: read_list(state, rs).entries,
-        last_status: last,
-        hint: last
-            .filter(|s| *s != ResolveStatus::Ready)
-            .map(|s| s.message().to_string()),
+    view_of(read_list(state, rs), last)
+}
+
+/// The view of a waiting list as read (or not) and the last status.
+fn view_of(list: Result<WaitingList, String>, last: Option<ResolveStatus>) -> WaitingView {
+    let hint = last
+        .filter(|s| *s != ResolveStatus::Ready)
+        .map(|s| s.message().to_string());
+    match list {
+        Ok(list) => WaitingView {
+            switch_back: list
+                .switched
+                .as_ref()
+                .filter(|s| s.back_failed)
+                .map(|s| s.message()),
+            entries: list.entries,
+            last_status: last,
+            hint,
+            problem: None,
+        },
+        Err(_) => WaitingView {
+            entries: vec![],
+            last_status: last,
+            hint,
+            problem: Some(UNREADABLE.to_string()),
+            switch_back: None,
+        },
     }
 }
 
@@ -447,14 +654,15 @@ pub fn resolve_try_now(
         return Err(AppError::new(crate::update::UPDATING));
     }
     // A pass may be running: wait for it (it runs again for us), then make sure one ran.
+    rs.force.store(true, Ordering::SeqCst);
     try_all(&app);
-    for _ in 0..(TIMEOUT.as_secs() * 10 * 4) {
+    for _ in 0..(SWITCH_TIMEOUT.as_secs() * 10 * 5) {
         if !rs.busy.load(Ordering::SeqCst) {
             break;
         }
         std::thread::sleep(Duration::from_millis(100));
     }
-    if waiting_count(&app).is_some() && !resolve::is_running() {
+    if has_work(&app) && resolve::running_for().is_none() {
         set_last(
             &rs,
             if resolve::find_fuscript().is_some() {
@@ -483,9 +691,10 @@ pub fn resolve_remove_waiting(
     })
     .map_err(AppError::new)?;
     let entry = removed.ok_or_else(|| AppError::new("That project isn't waiting any more."))?;
-    remove_copy(&entry.drp);
+    remove_copy(&state.config_dir, &entry.id);
     let file = entry.project_dir.join(MANIFEST_NAME);
-    if let Err(e) = resolve::update_manifest(&file, &entry.id, "skipped", &now().to_rfc3339()) {
+    if let Err(e) = resolve::update_manifest(&file, &entry.id, "skipped", &now().to_rfc3339(), None)
+    {
         log::info!(
             "couldn't note the skipped Resolve project in {}: {e}",
             file.display()
@@ -508,4 +717,60 @@ pub fn resolve_set_library(
         s.resolve_library = library;
         Ok(())
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_damaged_waiting_list_says_so_instead_of_looking_empty() {
+        let v = view_of(Err("bad json".into()), Some(ResolveStatus::Ready));
+        assert_eq!(
+            v.problem.as_deref(),
+            Some("The waiting list can't be read.")
+        );
+        assert!(v.entries.is_empty());
+        let v = view_of(Ok(WaitingList::default()), None);
+        assert_eq!(v.problem, None);
+        assert_eq!(v.switch_back, None);
+    }
+
+    #[test]
+    fn a_failed_switch_back_shows_in_the_waiting_view() {
+        let lib = |n: &str| ResolveLibrary {
+            db_type: "Disk".into(),
+            db_name: n.into(),
+            ip_address: None,
+        };
+        let mut list = WaitingList {
+            switched: Some(Switched {
+                from: lib("Home"),
+                to: lib("Work"),
+                at: "t".into(),
+                back_failed: false,
+            }),
+            ..Default::default()
+        };
+        // Not tried yet (a run in progress or stopped): nothing to say.
+        assert_eq!(view_of(Ok(list.clone()), None).switch_back, None);
+        list.switched.as_mut().unwrap().back_failed = true;
+        assert_eq!(
+            view_of(Ok(list), Some(ResolveStatus::ScriptingOff))
+                .switch_back
+                .as_deref(),
+            Some("Nest couldn't switch Resolve back to Home. Choose it in Resolve's Project Libraries.")
+        );
+    }
+
+    #[test]
+    fn the_busy_flag_clears_however_a_pass_ends() {
+        let busy = AtomicBool::new(true);
+        let caught = std::panic::catch_unwind(|| {
+            let _g = BusyGuard(&busy);
+            panic!("boom");
+        });
+        assert!(caught.is_err());
+        assert!(!busy.load(Ordering::SeqCst));
+    }
 }

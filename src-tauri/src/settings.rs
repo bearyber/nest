@@ -105,6 +105,17 @@ pub struct Settings {
 pub struct ResolveLibrary {
     pub db_type: String,
     pub db_name: String,
+    /// The server's address for a network (PostgreSQL) library, as Resolve reports it; kept so
+    /// switching back gives Resolve exactly the library it had.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub ip_address: Option<String>,
+}
+
+impl ResolveLibrary {
+    /// The same library (type and name; the address may be missing on one side).
+    pub fn same(&self, other: &ResolveLibrary) -> bool {
+        self.db_type == other.db_type && self.db_name == other.db_name
+    }
 }
 
 /// Template sync bookkeeping for one template id (kept in settings, never in the template).

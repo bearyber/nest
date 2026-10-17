@@ -55,6 +55,9 @@ export interface ResolveStarter {
 export interface ResolveLibrary {
   dbType: string;
   dbName: string;
+  /** A network (PostgreSQL) library's server address, as Resolve reports it; keep it when
+   *  passing a library back (absent for disk libraries and older settings). */
+  ipAddress?: string | null;
 }
 
 /** The Resolve project Create will add (Rust `PlannedResolve`). Preview line:
@@ -70,8 +73,17 @@ export interface PlannedResolve {
   libraryLabel: string;
 }
 
-/** ready · scriptingOff (Resolve runs but External scripting isn't Local) · notRunning · notInstalled. */
-export type ResolveStatus = "ready" | "scriptingOff" | "notRunning" | "notInstalled";
+/** ready · starting (Resolve opened moments ago) · scriptingOff (Resolve runs but External
+ *  scripting isn't Local) · noAnswer (didn't answer in time, may be busy) · noHelper (Nest
+ *  couldn't run Resolve's script runner) · notRunning · notInstalled. */
+export type ResolveStatus =
+  | "ready"
+  | "starting"
+  | "scriptingOff"
+  | "noAnswer"
+  | "noHelper"
+  | "notRunning"
+  | "notInstalled";
 
 /** Resolve's libraries (Rust `resolve::Libraries`). */
 export interface ResolveLibraries {
@@ -101,8 +113,8 @@ export interface ResolveWaitingEntry {
   createdAt: string;
   /** Failed tries (not counting "Resolve isn't open"). */
   tries: number;
-  /** added · exists · busy · noFolder · noLibrary · missing · scriptingOff · notInstalled ·
-   *  notRunning · failed */
+  /** added · exists · busy · noFolder · noLibrary · missing · starting · scriptingOff ·
+   *  noAnswer · noHelper · notInstalled · notRunning · failed */
   lastOutcome: string | null;
   lastTry: string | null;
 }
@@ -114,6 +126,12 @@ export interface ResolveWaitingView {
   lastStatus: ResolveStatus | null;
   /** Plain words for `lastStatus` (null when ready or unknown), e.g. the scripting hint. */
   hint: string | null;
+  /** "The waiting list can't be read." when its file is damaged (then `entries` is empty
+   *  because nothing could be read, not because nothing waits); null otherwise. */
+  problem?: string | null;
+  /** Nest couldn't switch Resolve back to the library it was in: plain words saying which
+   *  and what to do; null otherwise. */
+  switchBack?: string | null;
 }
 
 export interface ClientValue {

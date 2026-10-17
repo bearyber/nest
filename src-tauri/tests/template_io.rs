@@ -514,3 +514,22 @@ fn a_package_whose_resolve_project_is_missing_is_refused() {
     );
     assert!(s.user_folders().is_empty(), "nothing installed");
 }
+
+/// A template whose Resolve `.drp` went missing still loads (and so stays listed and synced);
+/// Create is what refuses it.
+#[test]
+fn a_template_whose_resolve_project_is_missing_still_loads() {
+    let s = setup();
+    let dir = s.user.join("grade");
+    fs::create_dir_all(dir.join("starter")).unwrap();
+    fs::write(dir.join("starter/README.txt"), "hello").unwrap();
+    fs::write(
+        dir.join("grade.nest.json"),
+        with_resolve("grade", "files/Grade.drp"),
+    )
+    .unwrap();
+    let loaded = nest_lib::template::load_dir(&dir).unwrap();
+    assert_eq!(loaded.template.resolve.unwrap().drp, "files/Grade.drp");
+    assert!(!loaded.files.contains("files/Grade.drp"));
+    assert_eq!(s.installed().len(), 1, "still listed");
+}
