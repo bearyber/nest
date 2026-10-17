@@ -1,0 +1,7 @@
+{
+  "bundle": {
+    "macOS": {
+      "signingIdentity": "Developer ID Application: Bernard Law (Y248YY8R3G)"
+    }
+  }
+}
