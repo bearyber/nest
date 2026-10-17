@@ -287,6 +287,8 @@ export interface Settings {
   kitsFolder: string | null;
   /** v0.5 client kits: a kit folder chosen for one client, by client code (wins over kitsFolder). */
   clientKits: Record<string, string>;
+  /** v0.7: the note after your very first project was shown (once). */
+  firstProjectTipSeen: boolean;
 }
 
 export interface SettingsView {

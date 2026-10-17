@@ -1,0 +1,97 @@
+/* First steps (v0.7): the empty main window before the first project, and the one-off note
+   after it. Tokens only. */
+
+.guide {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--space-2);
+  max-width: 560px;
+  text-align: center;
+}
+
+.title {
+  margin: 0;
+  font-size: var(--text-title);
+  font-weight: 600;
+  color: var(--text);
+}
+
+.subtitle {
+  margin: 0;
+  font-size: var(--text-small);
+  color: var(--text-secondary);
+}
+
+.steps {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: var(--space-2);
+  width: 100%;
+  margin: var(--space-3) 0 var(--space-2);
+  padding: 0;
+  list-style: none;
+}
+
+.step {
+  display: grid;
+  align-content: start;
+  gap: 2px;
+  padding: var(--space-3);
+  border: var(--hairline) solid var(--separator);
+  border-radius: 8px;
+  background: var(--card-bg);
+  text-align: left;
+}
+
+.stepTitle {
+  font-weight: 600;
+  color: var(--text);
+}
+
+.stepHint {
+  font-size: var(--text-small);
+  color: var(--text-secondary);
+}
+
+.buttons {
+  display: flex;
+  gap: var(--space-2);
+}
+
+/* "<CODE> is ready": sits above the list like the update bar. */
+.note {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  margin: 0 var(--space-3) var(--space-2);
+  padding: var(--space-2) var(--space-2) var(--space-2) var(--space-3);
+  border: var(--hairline) solid var(--separator);
+  border-radius: 8px;
+  background: var(--card-bg);
+}
+
+.noteText {
+  display: grid;
+  flex: 1;
+  min-width: 0;
+  gap: 2px;
+}
+
+.noteText b {
+  font-weight: 600;
+  color: var(--text);
+}
+
+.noteText span {
+  overflow: hidden;
+  font-size: var(--text-small);
+  color: var(--text-secondary);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.note button {
+  flex: none;
+  white-space: nowrap;
+}

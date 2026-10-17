@@ -112,6 +112,25 @@ afterEach(() => {
 });
 
 describe("NewProjectSheet", () => {
+  it("example: fills in Acme and the first text field, says nothing is made yet, creates nothing", async () => {
+    render(<NewProjectSheet example onClose={() => {}} onCreated={() => {}} />);
+    expect(await screen.findByText(/Nothing is made until you press Create/)).toBeTruthy();
+    await waitFor(() => expect((screen.getByPlaceholderText("Name") as HTMLInputElement).value).toBe("Acme"));
+    expect((screen.getByLabelText("Client code") as HTMLInputElement).value).toBe("ACME");
+    // No "name" field in this template: the first required text field gets the example name.
+    expect((screen.getByLabelText(/^Artist/) as HTMLInputElement).value).toBe("Summer Film");
+    // Template defaults stay (16x9 on).
+    expect(screen.getByRole("button", { name: "16x9" }).getAttribute("aria-pressed")).toBe("true");
+    await waitFor(() => expect(shown()).toContain("VX-L01_Summer Film"));
+    expect(commands.createProject).not.toHaveBeenCalled();
+  });
+
+  it("no example note normally", async () => {
+    render(<NewProjectSheet onClose={() => {}} onCreated={() => {}} />);
+    expect(await screen.findByLabelText(/^Artist/)).toBeTruthy();
+    expect(screen.queryByText(/Nothing is made until you press Create/)).toBeNull();
+  });
+
   it("renders fields from the template", async () => {
     render(<NewProjectSheet onClose={() => {}} onCreated={() => {}} />);
     // lastTemplate names a removed template, so the first one is picked and its fields show.

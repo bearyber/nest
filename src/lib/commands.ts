@@ -197,3 +197,6 @@ export const whatsNew = () => invoke<WhatsNew | null>("whats_new");
 
 /** OK pressed on the note: remember this version has been seen. */
 export const whatsNewSeen = () => invoke<void>("whats_new_seen");
+
+/** The note after your very first project was shown: never show it again. */
+export const firstProjectTipSeen = () => invoke<void>("first_project_tip_seen");
