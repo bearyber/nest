@@ -228,6 +228,38 @@ pub enum SaveMode {
     New,
 }
 
+/// A `.drp` file you dropped on the editor (the Resolve project): its name in the template
+/// (cleaned for both OSes, NFC) and where it is. A file, not a folder; up to the 200 MB a
+/// template may hold. Only reads its size.
+pub fn dropped_drp(path: &Path) -> Result<(String, OnDisk), String> {
+    let not_drp = || "That isn't a DaVinci Resolve project file (.drp).".to_string();
+    let raw = path
+        .file_name()
+        .and_then(|n| n.to_str())
+        .ok_or_else(not_drp)?;
+    let stem = match raw.rsplit_once('.') {
+        Some((stem, ext)) if ext.eq_ignore_ascii_case("drp") && !stem.is_empty() => stem,
+        _ => return Err(not_drp()),
+    };
+    let meta = fs::metadata(path).map_err(|e| format!("{raw} can't be read: {e}"))?;
+    if !meta.is_file() {
+        return Err(not_drp());
+    }
+    if meta.len() > crate::template_io::LIMITS.max_bytes {
+        return Err(format!("{raw} is over 200 MB, too big for a template."));
+    }
+    let base = path.parent().ok_or_else(not_drp)?.to_path_buf();
+    let name = crate::names::sanitize_segment(stem).map_err(|e| e.to_string())?;
+    Ok((
+        format!("{name}.drp"),
+        OnDisk {
+            base,
+            rel: raw.to_string(),
+            size: meta.len(),
+        },
+    ))
+}
+
 /// What an open editor works on: the template it started from (none for a draft read from a
 /// project folder) and the files waiting to come along (from that folder, or added in the
 /// editor). Kept by Rust; the UI only has its key.
@@ -320,6 +352,12 @@ impl EditorSession {
             .unwrap_or_default();
         self.staged.insert(name.clone(), on_disk);
         name
+    }
+
+    /// A `.drp` dropped on the editor: checked, then staged like `add_resolve_drp`. Read only.
+    pub fn add_dropped_drp(&mut self, path: &Path) -> Result<String, String> {
+        let (file_name, on_disk) = dropped_drp(path)?;
+        Ok(self.add_resolve_drp(&file_name, on_disk))
     }
 
     /// `draft` with every file it can use, for the planner (preview and the check on save).

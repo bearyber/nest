@@ -119,12 +119,29 @@ interface Props {
   onChip?: (key: string, index: number) => void;
   /** What the field is (read out by screen readers). */
   label: string;
+  /** `/` may be typed (folders inside folders, e.g. Resolve's project folder). */
+  allowSlash?: boolean;
+  /** Shown while the name is empty. */
+  placeholder?: string;
 }
 
 /** Edit a name: type text; click one of New Project's answers under it (or type `{`) to put it
  *  in; select some text and click "Use New Project's answer" to swap it for one. Backspace next
  *  to a chip removes it. */
-export default function NameField({ value, fields, selectAll, onCommit, onCancel, onEnter, onTab, onNewBlank, onChip, label }: Props) {
+export default function NameField({
+  value,
+  fields,
+  selectAll,
+  onCommit,
+  onCancel,
+  onEnter,
+  onTab,
+  onNewBlank,
+  onChip,
+  label,
+  allowSlash,
+  placeholder,
+}: Props) {
   const [pieces, setPieces] = useState<NamePiece[]>(() => normalize(parseName(value)));
   const [picker, setPicker] = useState<Picker | null>(null);
   const [active, setActive] = useState(0);
@@ -249,12 +266,13 @@ export default function NameField({ value, fields, selectAll, onCommit, onCancel
                 inputs.current[i] = el;
               }}
               className={styles.piece}
-              style={{ width: `${Math.max(1, p.text.length) + 0.5}ch` }}
+              style={{ width: `${Math.max(1, p.text.length || (pieces.length === 1 ? (placeholder?.length ?? 0) : 0)) + 0.5}ch` }}
+              placeholder={pieces.length === 1 ? placeholder : undefined}
               value={p.text}
               aria-label={i === 0 ? label : `${label}, more`}
               spellCheck={false}
               onChange={(e) => {
-                const raw = e.target.value.replace(/[/\\}]/g, "");
+                const raw = e.target.value.replace(allowSlash ? /[\\}]/g : /[/\\}]/g, "");
                 const brace = raw.indexOf("{");
                 const text = brace >= 0 ? raw.slice(0, brace) + raw.slice(brace + 1) : raw;
                 const caret = brace >= 0 ? brace : Math.min(e.target.selectionStart ?? text.length, text.length);

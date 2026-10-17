@@ -216,6 +216,10 @@ export const resolveProjects = () => invoke<ResolveProject[]>("resolve_projects"
  *  `template.resolve.drp`. `folder` as in `ResolveProject` ("" = the top level). */
 export const resolveExportToEditor = (sessionId: string, projectName: string, folder: string) =>
   invoke<string>("resolve_export_to_editor", { sessionId, projectName, folder });
+/** A `.drp` dropped on the template editor becomes its Resolve project; resolves to the
+ *  template path for `template.resolve.drp`. */
+export const editorAddResolveDrp = (sessionId: string, path: string) =>
+  invoke<string>("editor_add_resolve_drp", { sessionId, path });
 export const resolveWaitingList = () => invoke<ResolveWaitingView>("resolve_waiting_list");
 /** Try the waiting projects now (can take a while if Resolve is slow). */
 export const resolveTryNow = () => invoke<ResolveWaitingView>("resolve_try_now");
