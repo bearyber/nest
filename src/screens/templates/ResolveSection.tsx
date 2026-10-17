@@ -173,12 +173,14 @@ export default function ResolveSection({
   const [active, setActive] = useState(0);
   const listRef = useRef<HTMLDivElement>(null);
   const live = useRef(true);
-  useEffect(
-    () => () => {
+  // Set on every mount too: React's development double mount runs the cleanup once, and a
+  // flag only ever cleared would ignore every answer from Resolve ("Asking Resolve…" forever).
+  useEffect(() => {
+    live.current = true;
+    return () => {
       live.current = false;
-    },
-    [],
-  );
+    };
+  }, []);
 
   const rows = useMemo(() => (step.kind === "pick" ? pickRows(step.projects, filter) : []), [step, filter]);
   const choices = rows.filter((r): r is Extract<PickRow, { kind: "project" }> => r.kind === "project");
