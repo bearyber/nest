@@ -16,6 +16,7 @@ use tauri::{AppHandle, Emitter, Manager, State};
 
 use crate::commands::{lock, AppState};
 use crate::error::{AppError, AppResult};
+use crate::manifest::read_json_object;
 use crate::plan::{Plan, PlannedResolve, MANIFEST_NAME};
 use crate::resolve::{
     self, after, load_waiting, save_waiting, Libraries, Link, Next, Outcome, ResolveProject,
@@ -404,6 +405,24 @@ pub fn resolve_export_to_editor(
             size,
         },
     ))
+}
+
+/// The details panel: the project's Resolve project, from its `.project.json` (None = none,
+/// or the project is on another computer / offline / its file can't be read). Read-only.
+#[tauri::command(async)]
+pub fn project_resolve(
+    state: State<'_, AppState>,
+    key: String,
+) -> AppResult<Option<resolve::ProjectResolve>> {
+    if key.starts_with("remote:") {
+        return Ok(None);
+    }
+    let Ok((dir, _)) = crate::commands::project_folder(&state, &key, false) else {
+        return Ok(None);
+    };
+    Ok(read_json_object(&dir.join(MANIFEST_NAME))
+        .ok()
+        .and_then(|m| resolve::project_resolve(&m)))
 }
 
 /// The waiting list (Settings / main window).

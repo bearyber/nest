@@ -396,6 +396,7 @@ fn folder_count_includes_implied_parents_once() {
     // 01_REF, 02_FOOTAGE, A_CAM, B_CAM, 03_GFX.
     assert_eq!(folder_count(&t.loaded.template), 5);
     assert_eq!(info(t, &[]).folders, 5);
+    assert!(!info(t, &[]).resolve, "no Resolve project");
 }
 
 #[test]
@@ -477,6 +478,8 @@ fn a_resolve_project_travels_with_export_import_and_duplicate() {
     let r = mine.loaded.template.resolve.clone().unwrap();
     assert_eq!(r.drp, "files/Grade.drp");
     assert!(r.on, "ticked by default");
+    // Settings → DaVinci Resolve shows its controls only when a template has one.
+    assert!(info(&mine, &[]).resolve);
 
     let pkg = s.pkg("grade.nesttemplate");
     export(&mine.loaded, &pkg).unwrap();

@@ -776,6 +776,46 @@ pub fn update_manifest(
         .map_err(|e| format!("Couldn't save the project file: {e}"))
 }
 
+/// A project's Resolve project, as its `.project.json` says (the details panel).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ProjectResolve {
+    pub name: String,
+    /// `/` between folders inside folders; "" = the top level.
+    pub folder: String,
+    /// The library's name; None = the one open in Resolve.
+    pub library: Option<String>,
+    /// waiting · added · exists · skipped · failed (or a word from a newer Nest).
+    pub status: String,
+    /// RFC 3339 of the last change; "" when unknown.
+    pub at: String,
+}
+
+/// The `resolve` part of a manifest, if it has one with a name. Read-only.
+pub fn project_resolve(manifest: &serde_json::Value) -> Option<ProjectResolve> {
+    let r = manifest.get("resolve")?.as_object()?;
+    let text = |k: &str| {
+        r.get(k)
+            .and_then(|v| v.as_str())
+            .unwrap_or_default()
+            .to_string()
+    };
+    let name = text("name");
+    if name.is_empty() {
+        return None;
+    }
+    Some(ProjectResolve {
+        name,
+        folder: text("folder"),
+        library: r
+            .get("library")
+            .and_then(|v| v.as_str())
+            .map(str::to_string),
+        status: text("status"),
+        at: text("at"),
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1148,6 +1188,40 @@ mod tests {
         // A damaged file is an error, never an empty list.
         fs::write(dir.path().join(WAITING_FILE), "{ nope").unwrap();
         assert!(load_waiting(dir.path()).is_err());
+    }
+
+    #[test]
+    fn project_resolve_reads_the_manifest() {
+        let m = serde_json::json!({
+            "id": "p1",
+            "resolve": { "name": "Grade", "folder": "Acme/2026", "library": "Work",
+                         "status": "added", "at": "2026-10-17T10:00:00+02:00", "later": 1 }
+        });
+        assert_eq!(
+            project_resolve(&m),
+            Some(ProjectResolve {
+                name: "Grade".into(),
+                folder: "Acme/2026".into(),
+                library: Some("Work".into()),
+                status: "added".into(),
+                at: "2026-10-17T10:00:00+02:00".into(),
+            })
+        );
+        let open = serde_json::json!({ "resolve": { "name": "한국 프로젝트", "library": null } });
+        let r = project_resolve(&open).unwrap();
+        assert_eq!(r.library, None);
+        assert_eq!(r.status, "");
+        assert_eq!(r.folder, "");
+        // None, not a guess: no resolve part, a damaged one, or no name.
+        assert_eq!(project_resolve(&serde_json::json!({ "id": "p1" })), None);
+        assert_eq!(
+            project_resolve(&serde_json::json!({ "resolve": "x" })),
+            None
+        );
+        assert_eq!(
+            project_resolve(&serde_json::json!({ "resolve": { "status": "added" } })),
+            None
+        );
     }
 
     #[test]

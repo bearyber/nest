@@ -10,6 +10,7 @@ import type {
   Plan,
   PlanRequest,
   ProjectList,
+  ProjectResolve,
   ResolveLibraries,
   ResolveLibrary,
   ResolveProject,
@@ -216,6 +217,8 @@ export const resolveProjects = () => invoke<ResolveProject[]>("resolve_projects"
  *  `template.resolve.drp`. `folder` as in `ResolveProject` ("" = the top level). */
 export const resolveExportToEditor = (sessionId: string, projectName: string, folder: string) =>
   invoke<string>("resolve_export_to_editor", { sessionId, projectName, folder });
+/** The details panel: a project's Resolve project (null = none, or it can't be read here). */
+export const projectResolve = (key: string) => invoke<ProjectResolve | null>("project_resolve", { key });
 export const resolveWaitingList = () => invoke<ResolveWaitingView>("resolve_waiting_list");
 /** Try the waiting projects now (can take a while if Resolve is slow). */
 export const resolveTryNow = () => invoke<ResolveWaitingView>("resolve_try_now");

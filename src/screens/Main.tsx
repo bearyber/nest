@@ -26,6 +26,7 @@ import {
   measureProject,
   measureProjectFolder,
   openSettings,
+  projectResolve,
   projectSizes,
   pendingUpdate,
   whatsNew,
@@ -39,6 +40,7 @@ import {
   takeNotice,
 } from "../lib/commands";
 import { hasCommandKey, isMac } from "../lib/platform";
+import { createdMessage, toastForNotice } from "../lib/resolve";
 import {
   computerMatches,
   filterProjects,
@@ -55,6 +57,7 @@ import {
   errorMessage,
   type Created,
   type DevicesView,
+  type ProjectResolve,
   type ProjectList as List,
   type ProjectRow,
   type Sizes,
@@ -113,6 +116,9 @@ export default function Main() {
   const [tipSeen, setTipSeen] = useState(true);
   const [firstTip, setFirstTip] = useState<Created | null>(null);
   const [toast, setToast] = useState<ToastData | null>(null);
+  /** The success line of a Create that queued a Resolve project: the "Added to Resolve" notice
+   *  changes that line while it shows (instead of a second toast). */
+  const pendingResolve = useRef<{ toast: ToastData; name: string; added: ToastData } | null>(null);
   const searchRef = useRef<HTMLInputElement>(null);
   const scanningRef = useRef(false);
   const scannedAtRef = useRef<number | null>(null);
@@ -193,7 +199,7 @@ export default function Main() {
     // now, and again if it arrives later.
     const showNotice = () =>
       takeNotice()
-        .then((n) => n && setToast({ message: n }))
+        .then((n) => n && setToast((cur) => toastForNotice(cur, pendingResolve.current, n)))
         .catch(() => {});
     void showNotice();
     let unlistenNotice: (() => void) | undefined;
@@ -304,6 +310,28 @@ export default function Main() {
       live = false;
     };
   }, [selectedKey, measurable, measure]);
+  // The project's Resolve project (from its .project.json), read again when Resolve's
+  // waiting list changes.
+  const [resolveInfo, setResolveInfo] = useState<{ key: string; r: ProjectResolve | null } | null>(null);
+  const [resolveTick, setResolveTick] = useState(0);
+  useEffect(() => {
+    let unlisten: (() => void) | undefined;
+    listen("resolve-changed", () => setResolveTick((n) => n + 1))
+      .then((u) => (unlisten = u))
+      .catch(() => {});
+    return () => unlisten?.();
+  }, []);
+  const readable = !!selectedRow && !selectedRow.device && !selectedRow.error;
+  useEffect(() => {
+    if (!selectedKey || !readable) return;
+    let live = true;
+    projectResolve(selectedKey)
+      .then((r) => live && setResolveInfo({ key: selectedKey, r }))
+      .catch(() => live && setResolveInfo({ key: selectedKey, r: null }));
+    return () => {
+      live = false;
+    };
+  }, [selectedKey, readable, resolveTick]);
   const offlineRoots = list?.roots.filter((r) => !r.online) ?? [];
 
   const counts = useMemo(() => {
@@ -457,7 +485,7 @@ export default function Main() {
   // No projects at all before this one: the very first.
   const noProjectsYet = list !== null && projects.length === 0;
   const onCreated = useCallback(
-    (c: Created) => {
+    (c: Created, resolveName: string | null) => {
       setSheetOpen(false);
       // Make sure the new project is visible, then select it.
       setFilters((f) => ({ space: null, query: "", status: f.status === "done" ? "active" : f.status }));
@@ -469,10 +497,12 @@ export default function Main() {
         firstProjectTipSeen().catch(() => {});
         return;
       }
-      setToast({
-        message: c.bumped ? `Created ${c.jobCode} (the previewed code was taken)` : `Created ${c.jobCode}`,
-        action: { label: "Open folder", run: () => void openProject(c.key).catch(fail) },
-      });
+      const action = { label: "Open folder", run: () => void openProject(c.key).catch(fail) };
+      const toast = { message: createdMessage(c.jobCode, c.bumped, resolveName ? "waiting" : null), action };
+      pendingResolve.current = resolveName
+        ? { toast, name: resolveName, added: { message: createdMessage(c.jobCode, c.bumped, "added"), action } }
+        : null;
+      setToast(toast);
     },
     [refresh, fail, noProjectsYet, tipSeen],
   );
@@ -850,6 +880,7 @@ export default function Main() {
               .then(() => refresh())
               .catch(fail)
           }
+          resolve={readable && resolveInfo?.key === selectedKey ? resolveInfo.r : null}
           sizes={selectedRow && sizeInfo?.key === selectedRow.key ? sizeInfo.sizes : null}
           measuring={!!selectedRow && sizeInfo?.key === selectedRow.key && sizeInfo.measuring}
           onMeasure={() => selectedRow && measure(selectedRow.key)}
@@ -869,11 +900,11 @@ export default function Main() {
             setSheetExample(false);
             closeSheet();
           }}
-          onCreated={(c) => {
+          onCreated={(c, resolveName) => {
             setSheetTemplate(undefined);
             setSheetExample(false);
             setView("projects");
-            onCreated(c);
+            onCreated(c, resolveName);
           }}
         />
       )}

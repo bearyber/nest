@@ -96,6 +96,7 @@ vi.mock("../lib/commands", () => ({
   openProject: vi.fn(async () => {}),
   openSettings: vi.fn(async () => {}),
   projectSizes: vi.fn(async () => null),
+  projectResolve: vi.fn(async () => null),
   measureProject: vi.fn(async () => null),
   measureProjectFolder: vi.fn(async () => null),
   openProjectSubfolder: vi.fn(async () => {}),
@@ -299,5 +300,42 @@ describe("Main: first steps", () => {
     fireEvent.click(createButton());
     expect(await screen.findByText("Created ACME-L01")).toBeTruthy();
     expect(screen.queryByText("ACME-L01 is ready")).toBeNull();
+  });
+});
+
+describe("Main: Create with a Resolve project", () => {
+  it("says Ready when Resolve opens; the Added notice turns that line into Added to Resolve", async () => {
+    tipSeen = true;
+    const { listen } = await import("@tauri-apps/api/event");
+    const handlers: Record<string, () => void> = {};
+    vi.mocked(listen).mockImplementation(async (name, handler) => {
+      handlers[name] = handler as unknown as () => void;
+      return () => {};
+    });
+    const plan = vi.mocked(commands.planProject);
+    const base = plan.getMockImplementation()!;
+    plan.mockImplementation(async (req) => ({
+      ...(await base(req)),
+      resolve: { drp: "files/G.drp", name: "SUMMER FILM", folder: "Acme", library: null, libraryLabel: "x" },
+    }));
+    render(<Main />);
+    fireEvent.click(await screen.findByRole("button", { name: "Try an example" }));
+    await screen.findByText("Resolve project: SUMMER FILM in Acme");
+    await waitFor(() => expect(createButton().disabled).toBe(false));
+    fireEvent.click(createButton());
+    expect(await screen.findByText("Created ACME-L01 · Ready when Resolve opens")).toBeTruthy();
+
+    vi.mocked(commands.takeNotice).mockResolvedValueOnce("Added to Resolve: SUMMER FILM");
+    await act(async () => handlers.notice());
+    expect(await screen.findByText("Created ACME-L01 · Added to Resolve")).toBeTruthy();
+    // Still the same line, with its Open folder button.
+    expect(screen.getByRole("button", { name: "Open folder" })).toBeTruthy();
+
+    // Any other notice shows by itself.
+    vi.mocked(commands.takeNotice).mockResolvedValueOnce("Added to Resolve: Other");
+    await act(async () => handlers.notice());
+    expect(await screen.findByText("Added to Resolve: Other")).toBeTruthy();
+    plan.mockImplementation(base);
+    vi.mocked(listen).mockImplementation(async () => () => {});
   });
 });

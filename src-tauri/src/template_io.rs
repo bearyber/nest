@@ -77,6 +77,8 @@ pub struct TemplateInfo {
     pub folder: PathBuf,
     /// How many folders a new project gets (the Templates list shows it).
     pub folders: usize,
+    /// It has a Resolve starter project (Settings → DaVinci Resolve shows only then).
+    pub resolve: bool,
 }
 
 pub fn info(t: &Installed, hidden: &[String]) -> TemplateInfo {
@@ -93,6 +95,7 @@ pub fn info(t: &Installed, hidden: &[String]) -> TemplateInfo {
         hidden: hidden.contains(&tpl.id),
         folder: t.loaded.dir.clone(),
         folders: folder_count(tpl),
+        resolve: tpl.resolve.is_some(),
     }
 }
 

@@ -328,6 +328,87 @@ async function openWith(fields: Field[], tree: TreeEntry[]) {
 
 const bool = (key: string, label: string, def = false): Field => ({ key, label, type: "bool", default: def });
 
+/** Opens the sheet with the first template carrying a Resolve project; plans include it while
+ *  the box is on (as Rust does). */
+async function openWithResolve(on: boolean) {
+  const base = await vi.mocked(commands.newProjectContext)();
+  const tpl = {
+    ...base.templates[0],
+    resolve: { drp: "files/Grade.drp", name: "{artist}", folder: "{client}/2026", on },
+  };
+  vi.mocked(commands.newProjectContext).mockResolvedValueOnce({ ...base, templates: [tpl] });
+  const plan = vi.mocked(commands.planProject);
+  const basePlan = plan.getMockImplementation()!;
+  plan.mockImplementation(async (req) => {
+    const p = await basePlan(req);
+    const wanted = req.resolve ?? on;
+    return wanted
+      ? {
+          ...p,
+          resolve: {
+            drp: "files/Grade.drp",
+            name: p.title || "Artist",
+            folder: "Vertex Studio/2026",
+            library: null,
+            libraryLabel: "the library open in Resolve",
+          },
+        }
+      : p;
+  });
+  const onCreated = vi.fn();
+  render(<NewProjectSheet onClose={() => {}} onCreated={onCreated} />);
+  await screen.findByLabelText(/^Artist/);
+  return { onCreated, restore: () => plan.mockImplementation(basePlan) };
+}
+
+describe("Resolve project", () => {
+  it("is a box in Also make:, ticked like the template, with the preview line; Create sends it", async () => {
+    const { onCreated, restore } = await openWithResolve(true);
+    expect(screen.getByText("Also make:")).toBeTruthy();
+    const box = screen.getByLabelText("Resolve project") as HTMLInputElement;
+    expect(box.checked).toBe(true);
+    expect(await screen.findByText("Resolve project: Artist in Vertex Studio / 2026")).toBeTruthy();
+
+    fireEvent.change(screen.getByLabelText(/^Artist/), { target: { value: "KIRA" } });
+    expect(await screen.findByText("Resolve project: KIRA in Vertex Studio / 2026")).toBeTruthy();
+    const create = vi.mocked(commands.createProject);
+    create.mockResolvedValue({ key: "k", jobCode: "VX-L01", title: "KIRA", root: "D:/NestDev/x", bumped: false });
+    const button = screen.getByRole("button", { name: /^Create/ }) as HTMLButtonElement;
+    await waitFor(() => expect(button.disabled).toBe(false));
+    fireEvent.click(button);
+    await waitFor(() => expect(onCreated).toHaveBeenCalled());
+    // null = the template's default; the success line learns the project's name.
+    expect(create).toHaveBeenCalledWith(expect.objectContaining({ resolve: null }));
+    expect(onCreated.mock.lastCall![1]).toBe("KIRA");
+    restore();
+  });
+
+  it("unticking sends resolve: false and the preview line goes", async () => {
+    const { restore } = await openWithResolve(true);
+    await screen.findByText(/^Resolve project: /);
+    fireEvent.click(screen.getByLabelText("Resolve project"));
+    await waitFor(() => expect(vi.mocked(commands.planProject).mock.lastCall![0].resolve).toBe(false));
+    await waitFor(() => expect(screen.queryByText(/^Resolve project: /)).toBeNull());
+    restore();
+  });
+
+  it("starts unticked when the template says so", async () => {
+    const { restore } = await openWithResolve(false);
+    expect((screen.getByLabelText("Resolve project") as HTMLInputElement).checked).toBe(false);
+    expect(screen.queryByText(/^Resolve project: /)).toBeNull();
+    fireEvent.click(screen.getByLabelText("Resolve project"));
+    expect(await screen.findByText(/^Resolve project: Artist in/)).toBeTruthy();
+    restore();
+  });
+
+  it("shows nothing for a template without one", async () => {
+    render(<NewProjectSheet onClose={() => {}} onCreated={() => {}} />);
+    await screen.findAllByText("VX-L01_Artist");
+    expect(screen.queryByLabelText("Resolve project")).toBeNull();
+    expect(shown()).not.toContain("Resolve");
+  });
+});
+
 describe("Also make:", () => {
   it("shows a yes/no that makes a folder, labelled after the folder, unticked, with the path as tooltip", async () => {
     await openWith([bool("print", "Includes print")], ["01_BRIEF", { name: "05_EXPORTS/PRINT", when: "print" }]);

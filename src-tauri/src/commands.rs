@@ -618,7 +618,7 @@ pub fn rescan_projects(
 
 /// The folder to act on for a project, looked up in the index by key (never a path from the
 /// UI) and re-checked against the jobs folders, since `index.sqlite` could be hand-edited.
-fn project_folder(
+pub(crate) fn project_folder(
     state: &AppState,
     key: &str,
     single: bool,

@@ -107,6 +107,19 @@ export interface ResolveWaitingEntry {
   lastTry: string | null;
 }
 
+/** A project's Resolve project from its `.project.json` (Rust `resolve::ProjectResolve`). */
+export interface ProjectResolve {
+  name: string;
+  /** `/` between folders inside folders; "" = the top level. */
+  folder: string;
+  /** The library's name; null = the one open in Resolve. */
+  library: string | null;
+  /** waiting · added · exists · skipped · failed. */
+  status: string;
+  /** RFC 3339 of the last change; "" when unknown. */
+  at: string;
+}
+
 /** The Resolve waiting list (Rust `WaitingView`). */
 export interface ResolveWaitingView {
   entries: ResolveWaitingEntry[];
@@ -407,6 +420,8 @@ export interface TemplateInfo {
   folder: string;
   /** How many folders a new project gets (Templates list). */
   folders: number;
+  /** It has a Resolve starter project (Settings → DaVinci Resolve). */
+  resolve?: boolean;
 }
 
 export interface FolderInfo {

@@ -1,7 +1,8 @@
 import { useState } from "react";
 import { isMac } from "../lib/platform";
 import { ago, formatBytes, formatDate, isDone } from "../lib/search";
-import type { FolderSize, ProjectRow, Sizes } from "../lib/types";
+import { projectLine } from "../lib/resolve";
+import type { FolderSize, ProjectResolve, ProjectRow, Sizes } from "../lib/types";
 import Icon from "./Icon";
 import { Button, IconButton, PathText, Segmented } from "./ui";
 import styles from "./Inspector.module.css";
@@ -16,6 +17,8 @@ interface Props {
   onArchive: () => void;
   /** Archive: "Not this one" on a project that's ready to archive. */
   onDismissArchive: () => void;
+  /** Its Resolve project, from its .project.json (null = none, or not known here). */
+  resolve?: ProjectResolve | null;
   /** Folder sizes: the last measurement (null = none yet), and whether one is running. */
   sizes: Sizes | null;
   measuring: boolean;
@@ -203,6 +206,7 @@ export default function Inspector({
   archiveOn,
   onArchive,
   onDismissArchive,
+  resolve = null,
   sizes,
   measuring,
   onMeasure,
@@ -365,6 +369,16 @@ export default function Inspector({
           </div>
         ))}
       </dl>
+      {resolve && (
+        <p
+          className={styles.note}
+          title={[resolve.folder && `Folder in Resolve: ${resolve.folder}`, resolve.library && `Library: ${resolve.library}`]
+            .filter(Boolean)
+            .join("\n") || undefined}
+        >
+          {projectLine(resolve)}
+        </p>
+      )}
 
       {!p.device && !p.error && (
         <div className={styles.section}>
