@@ -348,6 +348,9 @@ export interface TemplatePreview {
 export type SaveMode = "edit" | "customize" | "new";
 
 /** Why something in a folder didn't come along into a template (Rust `SkipReason`). */
+/** Mirrors `template_io::DropKind`: what something dropped on the Templates screen is. */
+export type DropKind = "folder" | "template" | "other";
+
 export type SkipReason = "clutter" | "cache" | "tooBig" | "link" | "unreadable" | "badName";
 
 export interface Skipped {

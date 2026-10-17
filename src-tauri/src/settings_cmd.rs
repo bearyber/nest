@@ -516,25 +516,57 @@ pub fn import_template(
         return Ok(None);
     };
     let file = file.into_path().map_err(|e| AppError::new(e.to_string()))?;
+    install_template_file(&app, &state, &file)
+}
+
+/// Install a `.nesttemplate` or `.json` given by path (dropped on the Templates screen):
+/// the same checks and messages as Import…, after making sure it's a template file.
+#[tauri::command(async)]
+pub fn import_template_from(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    path: String,
+) -> AppResult<Option<TemplateInfo>> {
+    let file = PathBuf::from(path);
+    template_io::check_import_file(&file).map_err(AppError::new)?;
+    let _one = lock(&state.templates_lock)?; // one change to your templates at a time
+    install_template_file(&app, &state, &file)
+}
+
+/// What each dropped path is: a folder, a template file, or neither (read-only).
+#[tauri::command(async)]
+pub fn drop_kinds(paths: Vec<String>) -> Vec<template_io::DropKind> {
+    paths
+        .iter()
+        .map(|p| template_io::drop_kind(Path::new(p)))
+        .collect()
+}
+
+/// The shared part of Import… and a dropped template file. The caller holds `templates_lock`.
+fn install_template_file(
+    app: &AppHandle,
+    state: &AppState,
+    file: &Path,
+) -> AppResult<Option<TemplateInfo>> {
     let installed = lock(&state.templates)?.clone();
-    let loaded = template_io::import(&file, &state.user_templates, &installed, LIMITS)
+    let loaded = template_io::import(file, &state.user_templates, &installed, LIMITS)
         .map_err(AppError::new)?;
     crate::template_sync_cmd::note_saved(
-        &state,
+        state,
         &loaded.template.id,
         loaded.template.version,
         false,
     );
-    templates_changed(&app, &state)?;
+    templates_changed(app, state)?;
     // Decision T-A: a newer version of one of yours replaces it; the older copy goes to the bin.
     let installed = lock(&state.templates)?.clone();
     let bin = |t: &template_io::Installed| template_io::delete(t, &state.user_templates);
     match template_edit::retire_older_copies(&loaded.template.id, &loaded.dir, &installed, &bin) {
         Ok(0) => {}
-        Ok(_) => templates_changed(&app, &state)?,
+        Ok(_) => templates_changed(app, state)?,
         // Added fine, but the older copy stayed: say so (the list already shows the new one).
         Err(e) => {
-            templates_changed(&app, &state)?;
+            templates_changed(app, state)?;
             return Err(AppError::new(format!(
                 "Added \"{}\". {}",
                 loaded.template.name,

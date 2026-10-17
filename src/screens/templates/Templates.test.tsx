@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
-import type { Saved, TemplateInfo } from "../../lib/types";
+import type { DropKind, Saved, TemplateInfo } from "../../lib/types";
 
 const info = (over: Partial<TemplateInfo>): TemplateInfo => ({
   key: "builtin:video",
@@ -26,12 +26,22 @@ const editorOpen = vi.fn(async (key: string) => ({
 const removeTemplate = vi.fn<(key: string) => Promise<boolean>>(async () => true);
 const restoreBuiltinTemplates = vi.fn(async () => ({}));
 const templateFromFolder = vi.fn<(path: string | null) => Promise<null>>(async () => null);
+const importTemplate = vi.fn<() => Promise<TemplateInfo | null>>(async () => null);
+const importTemplateFrom = vi.fn<(path: string) => Promise<TemplateInfo | null>>(async (path) =>
+  info({ key: `user:${path}`, name: path.split("/").pop()!.replace(/\.\w+$/, ""), builtIn: false }),
+);
+/** By name, like the Rust side would see on disk: folders have no dot, templates end in .nesttemplate/.json. */
+const dropKinds = vi.fn(async (paths: string[]): Promise<DropKind[]> =>
+  paths.map((p) => (/\.(nesttemplate|json)$/i.test(p) ? "template" : /\.\w+$/.test(p) ? "other" : "folder")),
+);
 vi.mock("../../lib/commands", () => ({
+  dropKinds: (paths: string[]) => dropKinds(paths),
+  importTemplateFrom: (path: string) => importTemplateFrom(path),
   listTemplates: vi.fn(async () => templates),
   editorOpen: (key: string) => editorOpen(key),
   editorClose: vi.fn(async () => {}),
   exportTemplate: vi.fn(async () => true),
-  importTemplate: vi.fn(async () => null),
+  importTemplate: () => importTemplate(),
   removeTemplate: (key: string) => removeTemplate(key),
   restoreBuiltinTemplates: () => restoreBuiltinTemplates(),
   setTemplateHidden: vi.fn(async () => ({})),
@@ -180,5 +190,59 @@ describe("Templates", () => {
     await act(async () => menuItems[0].action?.());
     expect(editorOpen).toHaveBeenCalledWith("builtin:blank");
     expect((await screen.findByTestId("editor")).dataset.mode).toBe("new");
+  });
+
+  it("a dropped template file is installed like Import…, with the same notice", async () => {
+    templates = [NEST];
+    render(<Templates run={run} />);
+    await screen.findByText("Video");
+    await waitFor(() => expect(onDrop).not.toBeNull());
+    await act(async () => onDrop?.({ payload: { type: "drop", paths: ["/Downloads/Acme film.nesttemplate"] } }));
+    expect(importTemplateFrom).toHaveBeenCalledWith("/Downloads/Acme film.nesttemplate");
+    expect(templateFromFolder).not.toHaveBeenCalled();
+    await waitFor(() => expect(runMock).toHaveBeenCalledWith(expect.anything(), "Added “Acme film”."));
+  });
+
+  it("a mixed drop installs every template file and uses only the first folder", async () => {
+    templates = [NEST];
+    render(<Templates run={run} />);
+    await screen.findByText("Video");
+    await waitFor(() => expect(onDrop).not.toBeNull());
+    await act(async () =>
+      onDrop?.({
+        payload: {
+          type: "drop",
+          paths: ["/Jobs/260301_ACME", "/Downloads/A.nesttemplate", "/Jobs/260302_OTHER", "/Downloads/B.json"],
+        },
+      }),
+    );
+    expect(importTemplateFrom.mock.calls.map((c) => c[0])).toEqual(["/Downloads/A.nesttemplate", "/Downloads/B.json"]);
+    expect(templateFromFolder).toHaveBeenCalledTimes(1);
+    expect(templateFromFolder).toHaveBeenCalledWith("/Jobs/260301_ACME");
+    expect(runMock).toHaveBeenCalledWith(
+      expect.anything(),
+      "Added “A” and “B”. Used the first folder only; left out “260302_OTHER”.",
+    );
+  });
+
+  it("a file that's neither a folder nor a template says so and does nothing", async () => {
+    templates = [NEST];
+    render(<Templates run={run} />);
+    await screen.findByText("Video");
+    await waitFor(() => expect(onDrop).not.toBeNull());
+    await act(async () => onDrop?.({ payload: { type: "drop", paths: ["/Desktop/notes.txt"] } }));
+    expect(importTemplateFrom).not.toHaveBeenCalled();
+    expect(templateFromFolder).not.toHaveBeenCalled();
+    const shown = runMock.mock.calls[runMock.mock.calls.length - 1][0] as Promise<unknown>;
+    await expect(shown).rejects.toThrow("That's not a folder or a Nest template file.");
+  });
+
+  it("“or open a template file…” opens the same picker as Import…", async () => {
+    templates = [NEST];
+    render(<Templates run={run} />);
+    fireEvent.click(await screen.findByRole("button", { name: "or open a template file…" }));
+    await waitFor(() => expect(importTemplate).toHaveBeenCalledTimes(1));
+    expect(screen.getByText("Drop a job folder or a template file here")).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Import…" })).toBeTruthy();
   });
 });

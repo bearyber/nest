@@ -136,6 +136,8 @@ pub fn run() {
             settings_cmd::set_theme,
             settings_cmd::list_templates,
             settings_cmd::import_template,
+            settings_cmd::import_template_from,
+            settings_cmd::drop_kinds,
             settings_cmd::export_template,
             settings_cmd::duplicate_template,
             settings_cmd::delete_template,

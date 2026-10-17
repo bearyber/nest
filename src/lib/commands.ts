@@ -3,6 +3,7 @@
 import { invoke } from "@tauri-apps/api/core";
 import type {
   AddedFiles,
+  DropKind,
   Created,
   KitsView,
   NewProjectContext,
@@ -131,6 +132,10 @@ export const spacesInUse = () => s<string[]>("spaces_in_use");
 export const setTheme = (theme: Settings["theme"]) => s<SettingsView>("set_theme", { theme });
 export const listTemplates = () => s<TemplateInfo[]>("list_templates");
 export const importTemplate = () => s<TemplateInfo | null>("import_template");
+/** Install a dropped `.nesttemplate` / `.json` (same checks and messages as Import…). */
+export const importTemplateFrom = (path: string) => s<TemplateInfo | null>("import_template_from", { path });
+/** What each dropped path is: a folder, a template file, or neither. */
+export const dropKinds = (paths: string[]) => s<DropKind[]>("drop_kinds", { paths });
 export const exportTemplate = (key: string) => s<boolean>("export_template", { key });
 export const duplicateTemplate = (key: string) => s<void>("duplicate_template", { key });
 export const deleteTemplate = (key: string) => s<boolean>("delete_template", { key });
