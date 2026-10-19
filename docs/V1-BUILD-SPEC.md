@@ -468,6 +468,12 @@ Bernard's own template is named "Project". The year is never part of the job cod
     - **Editor:** Edit → Undo / Redo in the Mac menu work in the template editor; drag questions on the bottom line to reorder them (Client stays first).
     - **New Project:** a yes/no question that only makes folders shows as "Also make: ☐ PRINT folder" (the template's default kept); one tied to no folder, or to "made when not ticked", stays a question.
     - **Update bar:** one quiet line, "What's new" folds out; the What's new sheet's OK has no double focus ring.
+29. **0.7.0 (Bernard 2026-10-17/19).**
+    - **Menu bar / notification area icon:** closing the window keeps Nest running (setting on by default; first run still quits); no Dock icon while hidden; menu: New Project…, New from ›, Recent (opens the folder), other computers' "seen", Resolve waiting, Open, Quit. One-time note on first close. Open at login stays opt-in and starts hidden. Updates install by themselves only when hidden, idle 10 min and nothing busy; Create and syncs wait while one installs.
+    - **First steps:** an empty list shows "Make your first project" (three steps) and "Try an example" (fills New Project with Acme; nothing made until Create); a one-time note after the first project.
+    - **Templates drop area** takes job folders and `.nesttemplate` files.
+    - **Resolve starter projects (moved into v1, CLAUDE.md #10):** a template's Resolve section holds the starter `.drp` (Choose from Resolve… with From: library, or a dropped file), Name in Resolve and Goes into: library › folder (blanks), and whether New Project ticks it. Nest asks Resolve through Resolve's own `fuscript` (local only) to import it under the job's name, now or when Resolve next opens (waiting list; Try now / Don't add in project details). It never writes Resolve's library files, switches library only when the open project holds nothing, always switches back, and never makes a duplicate. External scripting must be Local (Studio).
+    - **Mac app signed (Developer ID) and notarised.**
 
 ## 12. Out of scope for v1 (do not build)
 

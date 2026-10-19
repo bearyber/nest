@@ -1,4 +1,11 @@
 {
+  "0.7.0": [
+    "Nest lives in the menu bar (Windows: by the clock): close the window and it keeps running, with New Project and your recent jobs one click away",
+    "DaVinci Resolve: give a template a Resolve starter project, and each new job gets its own copy in Resolve, named and filed for you",
+    "New to Nest? A short guide and a \"Try an example\" button show what happens before you make anything",
+    "Templates: drop a template file to add it, the same place you drop a job folder",
+    "The Mac app is now signed and checked by Apple, so it opens without a warning"
+  ],
   "0.6.1": [
     "New Project: a yes/no that only adds a folder now reads \"Also make: PRINT folder\"",
     "Template editor: drag the questions to change their order, and Edit → Undo works on Mac",
