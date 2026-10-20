@@ -3,6 +3,7 @@
     "Resolve: a project with no client goes into a folder named after its space (e.g. Personal), never loose at the top",
     "Mac: Open at login now shows as Nest under Login Items, and Nest offers to move itself to Applications if you opened it from the download",
     "Mac: folder access is explained, and no permission box pops up while Nest is hidden at login",
+    "Shortcuts: ⌘N and friends always go to the main window (Find is now ⌘F), Esc never throws away template changes, and on Windows F5 or Ctrl+R can't reload the window",
     "Easier to read and to use with the keyboard: clearer grey text and buttons, Enter does what the focused button says, dialogs keep the cursor inside",
     "Smaller fixes: the preview's fold button opens again, no \"control Finder\" request, a calmer sidebar, quiet updates on Windows"
   ],
