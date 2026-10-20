@@ -1,11 +1,15 @@
-import { useEffect } from "react";
+import { useEffect, useRef } from "react";
+import { useDialogFocus } from "../lib/useDialogFocus";
 import { Button } from "./ui";
 import type { WhatsNew as WhatsNewNote } from "../lib/types";
 import styles from "./WhatsNew.module.css";
 
 /** The small "What's new" sheet shown once after an update. Lines are plain text. */
 export default function WhatsNew({ note, onOk }: { note: WhatsNewNote; onOk: () => void }) {
-  // Return or Escape closes it, like a native sheet's default button (no focus ring needed).
+  const sheetRef = useRef<HTMLDivElement>(null);
+  // Focus starts on OK (the default button), stays in the sheet, and goes back when it closes.
+  useDialogFocus(sheetRef);
+  // Return or Escape closes it, like a native sheet's default button.
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (e.key === "Enter" || e.key === "Escape") {
@@ -19,6 +23,8 @@ export default function WhatsNew({ note, onOk }: { note: WhatsNewNote; onOk: () 
   return (
     <div className={styles.backdrop}>
       <div
+        ref={sheetRef}
+        tabIndex={-1}
         className={styles.sheet}
         role="dialog"
         aria-modal="true"
@@ -33,7 +39,7 @@ export default function WhatsNew({ note, onOk }: { note: WhatsNewNote; onOk: () 
           ))}
         </ul>
         <div className={styles.foot}>
-          <Button variant="primary" onClick={onOk}>
+          <Button variant="primary" data-autofocus onClick={onOk}>
             OK
           </Button>
         </div>

@@ -42,6 +42,7 @@ import {
   takeNotice,
 } from "../lib/commands";
 import { hasCommandKey, isMac } from "../lib/platform";
+import { isListKey } from "../lib/listKeys";
 import { createdMessage, toastForNotice } from "../lib/resolve";
 import {
   computerMatches,
@@ -603,6 +604,9 @@ export default function Main() {
       }
       // The list's keys don't apply while Templates is showing.
       if (typing || view === "templates") return;
+      // Search keeps its shortcuts (arrows / Enter act on the list, Escape clears). Anywhere else,
+      // a focused button, link, menu, dialog… keeps its own Enter / Space / arrows.
+      if (!inSearch && !isListKey(e)) return;
       if (e.key === "Escape" && inSearch) {
         setFilters((f) => ({ ...f, query: "" }));
         searchRef.current?.blur();

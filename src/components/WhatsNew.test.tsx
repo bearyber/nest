@@ -15,6 +15,23 @@ describe("WhatsNew", () => {
     fireEvent.click(screen.getByRole("button", { name: "OK" }));
     expect(ok).toHaveBeenCalledTimes(1);
   });
+
+  it("starts on a focusable OK, keeps Tab inside, and Return still closes it", () => {
+    const ok = vi.fn();
+    render(
+      <>
+        <button>Behind</button>
+        <WhatsNew note={{ version: "0.5.0", lines: ["One"] }} onOk={ok} />
+      </>,
+    );
+    const button = screen.getByRole("button", { name: "OK" });
+    expect(document.activeElement).toBe(button);
+    expect(screen.getByText("Behind").hasAttribute("inert")).toBe(true);
+    fireEvent.keyDown(button, { key: "Tab" });
+    expect(document.activeElement).toBe(button);
+    fireEvent.keyDown(button, { key: "Enter" });
+    expect(ok).toHaveBeenCalledTimes(1);
+  });
 });
 
 describe("updateNoteLines", () => {

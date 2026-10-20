@@ -18,6 +18,7 @@ import {
 import { hasCommandKey, isMac } from "../lib/platform";
 import { formatBytes } from "../lib/search";
 import { alsoMakeFor } from "../lib/alsoMake";
+import { useDialogFocus } from "../lib/useDialogFocus";
 import { plannedLine } from "../lib/resolve";
 import { defaultsFor, todayIso } from "../lib/tree";
 import {
@@ -201,6 +202,9 @@ interface Props {
 
 /** New Project sheet (build spec §3.2). Every preview comes from Rust's Plan. */
 export default function NewProjectSheet({ initialTemplate, example = false, onClose, onCreated }: Props) {
+  const sheetRef = useRef<HTMLDivElement>(null);
+  // Focus goes to the first field (once the template has loaded), stays in the sheet, and goes back.
+  useDialogFocus(sheetRef);
   const [ctx, setCtx] = useState<NewProjectContext | null>(null);
   const [templateId, setTemplateId] = useState("");
   const [values, setValues] = useState<Values>({});
@@ -429,7 +433,14 @@ export default function NewProjectSheet({ initialTemplate, example = false, onCl
 
   return (
     <div className={styles.backdrop} onMouseDown={(e) => e.target === e.currentTarget && !creating && onClose()}>
-      <div className={styles.sheet} role="dialog" aria-modal="true" aria-labelledby="new-project-title">
+      <div
+        ref={sheetRef}
+        tabIndex={-1}
+        className={styles.sheet}
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="new-project-title"
+      >
         <header className={styles.head}>
           <h2 id="new-project-title" className={styles.title}>
             New Project

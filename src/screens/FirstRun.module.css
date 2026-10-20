@@ -95,7 +95,7 @@
   padding: 1px 8px;
   border-radius: 10px;
   background: var(--accent-soft);
-  color: var(--accent);
+  color: var(--accent-text);
   font-size: 11px;
   font-weight: 600;
 }
@@ -165,7 +165,7 @@
 .welcome {
   font-size: var(--text-small);
   font-weight: 600;
-  color: var(--accent) !important;
+  color: var(--accent-text) !important;
 }
 
 .drop {
@@ -194,7 +194,7 @@
   padding: 0;
   border: 0;
   background: none;
-  color: var(--accent);
+  color: var(--accent-text);
   font: inherit;
   cursor: default;
 }

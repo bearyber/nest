@@ -244,7 +244,7 @@
 }
 
 .addLink:hover {
-  color: var(--accent);
+  color: var(--accent-text);
 }
 
 /* "or drop files here": only in an empty folder, and only under the pointer. */
@@ -285,7 +285,7 @@
   border: none;
   border-radius: 5px;
   background: var(--accent-soft);
-  color: var(--accent);
+  color: var(--accent-text);
   font-family: inherit;
   font-size: 12px;
   line-height: 20px;
@@ -342,7 +342,7 @@
   padding: 0;
   border: none;
   background: transparent;
-  color: var(--accent);
+  color: var(--accent-text);
   font: inherit;
   cursor: pointer;
 }
@@ -411,12 +411,12 @@
 }
 
 .pickActive {
-  background: var(--accent);
+  background: var(--accent-fill);
   color: #fff;
 }
 
 .pickActive small {
-  color: rgba(255, 255, 255, 0.8);
+  color: rgba(255, 255, 255, 0.85);
 }
 
 /* ── Bottom: a question's settings, and what New Project asks ── */
@@ -427,6 +427,11 @@
   padding: var(--space-3) var(--space-4);
   border-top: var(--hairline) solid var(--separator);
   background: var(--card-bg);
+}
+
+/* Focus lands on the panel when it opens; it isn't a control, so no ring. */
+.settings:focus-visible {
+  outline: none;
 }
 
 .settingsRow {
@@ -469,7 +474,7 @@
 .optionOn {
   border-color: var(--accent);
   background: var(--accent-soft);
-  color: var(--accent);
+  color: var(--accent-text);
 }
 
 .x {

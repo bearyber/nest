@@ -35,7 +35,7 @@
   font-family: var(--font-mono);
   font-size: 13px;
   font-weight: 600;
-  color: var(--accent);
+  color: var(--accent-text);
   user-select: text;
   -webkit-user-select: text;
 }
@@ -141,7 +141,7 @@
 
 .folderLink:hover:not(:disabled),
 .folderLink:focus-visible {
-  color: var(--accent);
+  color: var(--accent-text);
   text-decoration: underline;
 }
 

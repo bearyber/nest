@@ -58,6 +58,11 @@ option {
   outline-offset: 1px;
 }
 
+/* A dialog takes focus itself when it opens (useDialogFocus): no ring around the whole sheet. */
+[role="dialog"][tabindex="-1"]:focus-visible {
+  outline: none;
+}
+
 .selectable {
   user-select: text;
   -webkit-user-select: text;

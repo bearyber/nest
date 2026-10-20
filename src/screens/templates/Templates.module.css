@@ -100,7 +100,7 @@
   border-color: transparent;
   background: transparent;
   box-shadow: none;
-  color: var(--accent);
+  color: var(--accent-text);
 }
 
 @media (prefers-reduced-motion: reduce) {
