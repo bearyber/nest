@@ -1,6 +1,8 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { listen } from "@tauri-apps/api/event";
+import { getCurrentWindow } from "@tauri-apps/api/window";
 import { getSettings, settingsReady } from "../lib/commands";
+import { closesSettings } from "../lib/shortcuts";
 import { applyTheme } from "../lib/theme";
 import { errorMessage, type SettingsView } from "../lib/types";
 import AboutTab from "./settings/AboutTab";
@@ -64,6 +66,20 @@ export default function Settings() {
       .catch(() => {});
     return () => unlisten?.();
   }, [refresh]);
+
+  // Windows: Escape (when you're not typing) and Ctrl+W close the window, like other Windows
+  // settings windows. macOS has ⌘W in the menu bar; Escape doesn't close a Mac settings window.
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (!closesSettings(e)) return;
+      e.preventDefault();
+      void getCurrentWindow()
+        .close()
+        .catch(() => {});
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, []);
 
   const run = useCallback(async <T,>(p: Promise<T>, ok?: string) => {
     try {

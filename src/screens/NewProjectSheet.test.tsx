@@ -74,6 +74,7 @@ vi.mock("@tauri-apps/api/event", () => ({ listen: vi.fn(async () => () => {}) })
 import * as commands from "../lib/commands";
 import type { Field, Issue, PlanKit, TreeEntry } from "../lib/types";
 import NewProjectSheet, { clientFilePlaces, shortPath } from "./NewProjectSheet";
+import WhatsNew from "../components/WhatsNew";
 
 /** Plans like the stand-in above, plus these changes. Returns a way to go back. */
 function planWith(extra: Partial<Plan>) {
@@ -123,6 +124,18 @@ describe("NewProjectSheet", () => {
     expect(screen.getByRole("button", { name: "16x9" }).getAttribute("aria-pressed")).toBe("true");
     await waitFor(() => expect(shown()).toContain("VX-L01_Summer Film"));
     expect(commands.createProject).not.toHaveBeenCalled();
+  });
+
+  it("Escape cancels it, but only when it's the top dialog", async () => {
+    const close = vi.fn();
+    render(<NewProjectSheet onClose={close} onCreated={() => {}} />);
+    expect(await screen.findByLabelText(/^Artist/)).toBeTruthy();
+    const over = render(<WhatsNew note={{ version: "9.9.9", lines: ["A line"] }} onOk={() => {}} />);
+    fireEvent.keyDown(window, { key: "Escape" });
+    expect(close).not.toHaveBeenCalled();
+    over.unmount();
+    fireEvent.keyDown(window, { key: "Escape" });
+    expect(close).toHaveBeenCalledTimes(1);
   });
 
   it("no example note normally", async () => {

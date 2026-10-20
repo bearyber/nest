@@ -53,6 +53,8 @@ import {
   type TemplatePreview,
 } from "../../lib/types";
 import { EDIT_STEP_EVENT, type EditStep } from "../../lib/editMenu";
+import { isTopDialog } from "../../lib/dialogStack";
+import { findShortcut } from "../../lib/shortcuts";
 import { useDialogFocus } from "../../lib/useDialogFocus";
 import { usePointerDrag } from "./drag";
 import { blankLabel } from "./NameField";
@@ -624,19 +626,28 @@ export default function TemplateEditor({ sourceKey, mode, start, note, onClose, 
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
-      const mod = isMac() ? e.metaKey : e.ctrlKey;
-      // On macOS the menu bar's Undo / Redo own Cmd+Z and Shift+Cmd+Z (see above).
-      const menuOwned = isMac() && (e.key === "z" || e.key === "Z");
-      if (mod && !menuOwned && !isTyping(e.target) && (e.key === "z" || e.key === "Z" || e.key === "y")) {
+      // A dialog over the editor (New Project) has the keys.
+      if (!isTopDialog(sheetRef.current)) return;
+      const platform = isMac() ? "mac" : "win";
+      const step = findShortcut(e, ["undo", "redo"], platform);
+      if (step) {
+        // On macOS the menu bar's Undo / Redo own these keys (see above).
+        if (platform === "mac" && step.combo.menu) return;
+        if (isTyping(e.target)) return;
         e.preventDefault();
         setRenaming(null);
-        if (e.key === "y" || e.shiftKey) setHist((h) => redo(h));
-        else setHist((h) => undo(h));
+        setHist((h) => (step.shortcut.id === "redo" ? redo(h) : undo(h)));
         return;
       }
-      if (e.key === "Escape" && !isTyping(e.target)) {
+      if (e.key === "Escape") {
+        // Something inside handled it (a name being edited, a picker, Resolve's list closing).
+        if (e.defaultPrevented || isTyping(e.target)) return;
+        e.preventDefault();
+        // Escape never throws your changes away: it closes the open popover, else cancels the
+        // "Close without saving?" question, else asks it. Only its button closes unsaved.
         if (blank) setBlank(null);
-        else if (dirty.current && !confirmClose) setConfirmClose(true);
+        else if (confirmClose) setConfirmClose(false);
+        else if (dirty.current) setConfirmClose(true);
         else onClose();
       }
     };

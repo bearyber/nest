@@ -42,6 +42,7 @@ vi.mock("@tauri-apps/api/webview", () => ({
 
 import { runEditStep } from "../../lib/editMenu";
 import TemplateEditor from "./TemplateEditor";
+import WhatsNew from "../../components/WhatsNew";
 
 const VIDEO: Template = {
   schema: 1,
@@ -248,11 +249,14 @@ describe("TemplateEditor (one screen)", () => {
     expect(screen.getByRole("status").textContent).toContain("Deleted 02_FOOTAGE");
     fireEvent.click(screen.getByRole("button", { name: "Undo" }));
     expect(screen.getByText("A_CAM")).toBeTruthy();
-    // And with the keyboard: Ctrl/Cmd+Z.
+    // And with the keyboard: Ctrl+Z (Windows; on a Mac the menu bar's Undo).
     fireEvent.click(row("01_BRIEF"));
     fireEvent.keyDown(treeBox, { key: "Delete" });
     expect(screen.queryByText("01_BRIEF")).toBeNull();
-    fireEvent.keyDown(window, { key: "z", ctrlKey: true, metaKey: true });
+    // Extra modifiers aren't Undo.
+    fireEvent.keyDown(window, { key: "z", ctrlKey: true, altKey: true });
+    expect(screen.queryByText("01_BRIEF")).toBeNull();
+    fireEvent.keyDown(window, { key: "z", ctrlKey: true });
     expect(screen.getByText("01_BRIEF")).toBeTruthy();
   });
 
@@ -284,6 +288,73 @@ describe("TemplateEditor (one screen)", () => {
     fireEvent.click(screen.getByRole("button", { name: "Close without saving" }));
     expect(close).toHaveBeenCalled();
   });
+  describe("Escape never throws changes away", () => {
+    const esc = (target: Element | Window = window) => fireEvent.keyDown(target, { key: "Escape" });
+
+    it("closes straight away with nothing changed", () => {
+      const close = vi.fn();
+      open(vi.fn(), close);
+      esc();
+      expect(close).toHaveBeenCalledTimes(1);
+    });
+
+    it("with changes it asks; Escape again cancels the question and stays open", () => {
+      const close = vi.fn();
+      open(vi.fn(), close);
+      fireEvent.change(screen.getByLabelText("Template name"), { target: { value: "X" } });
+      esc();
+      expect(screen.getByText(/Close without saving\?/)).toBeTruthy();
+      esc();
+      expect(screen.queryByText(/Close without saving\?/)).toBeNull();
+      esc();
+      esc();
+      esc();
+      // Even with a button focused (Escape there isn't a click).
+      const button = screen.getByRole("button", { name: "Close without saving" });
+      button.focus();
+      esc(button);
+      expect(close).not.toHaveBeenCalled();
+      expect(screen.queryByText(/Close without saving\?/)).toBeNull();
+      expect(screen.getByRole("dialog", { name: /Customize/ })).toBeTruthy();
+      // Only the button closes without saving.
+      fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
+      fireEvent.click(screen.getByRole("button", { name: "Close without saving" }));
+      expect(close).toHaveBeenCalledTimes(1);
+    });
+
+    it("closes an open question's settings first, and only that", () => {
+      const close = vi.fn();
+      open(vi.fn(), close);
+      fireEvent.click(screen.getByRole("button", { name: "Has graphics" }));
+      expect(screen.getByLabelText("Question: Has graphics")).toBeTruthy();
+      esc();
+      expect(screen.queryByLabelText("Question: Has graphics")).toBeNull();
+      expect(close).not.toHaveBeenCalled();
+    });
+
+    it("leaves an Escape alone that something inside already used (a picker closing)", () => {
+      const close = vi.fn();
+      open(vi.fn(), close);
+      const e = new KeyboardEvent("keydown", { key: "Escape", cancelable: true });
+      e.preventDefault();
+      act(() => void window.dispatchEvent(e));
+      expect(close).not.toHaveBeenCalled();
+    });
+
+    it("with a dialog over the editor (What's new, New Project), Escape closes only that one", () => {
+      const close = vi.fn();
+      const ok = vi.fn();
+      open(vi.fn(), close);
+      const { unmount } = render(<WhatsNew note={{ version: "9.9.9", lines: ["A line"] }} onOk={ok} />);
+      esc();
+      expect(ok).toHaveBeenCalledTimes(1);
+      expect(close).not.toHaveBeenCalled();
+      unmount();
+      esc();
+      expect(close).toHaveBeenCalledTimes(1);
+    });
+  });
+
   it("adds a file from the Add a file menu: Project info with the template's answers", async () => {
     open();
     const links = screen.getAllByRole("button", { name: "+ Add a file" });
@@ -387,9 +458,9 @@ describe("TemplateEditor (one screen)", () => {
       drag("Has graphics", "Project name", "left");
       drag("Start date", "Client", "right");
       expect(asked()).toBe("Client,Start date,Has graphics,Project name");
-      fireEvent.keyDown(window, { key: "z", ctrlKey: true, metaKey: true });
+      fireEvent.keyDown(window, { key: "z", ctrlKey: true });
       expect(asked()).toBe("Client,Has graphics,Project name,Start date");
-      fireEvent.keyDown(window, { key: "z", ctrlKey: true, metaKey: true });
+      fireEvent.keyDown(window, { key: "z", ctrlKey: true });
       expect(asked()).toBe("Client,Project name,Start date,Has graphics");
     });
   });

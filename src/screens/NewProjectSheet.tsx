@@ -15,7 +15,9 @@ import {
   planProject,
   setTemplateKitFolder,
 } from "../lib/commands";
-import { hasCommandKey, isMac } from "../lib/platform";
+import { isMac } from "../lib/platform";
+import { isTopDialog } from "../lib/dialogStack";
+import { isShortcut } from "../lib/shortcuts";
 import { formatBytes } from "../lib/search";
 import { alsoMakeFor } from "../lib/alsoMake";
 import { useDialogFocus } from "../lib/useDialogFocus";
@@ -379,10 +381,14 @@ export default function NewProjectSheet({ initialTemplate, example = false, onCl
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
+      // Only when it's the top dialog (a dialog over it keeps its own keys).
+      if (!isTopDialog(sheetRef.current)) return;
       if (e.key === "Escape") {
+        // A picker or list inside that closed itself already handled it.
+        if (e.defaultPrevented) return;
         e.preventDefault();
         cancel();
-      } else if (e.key === "Enter" && hasCommandKey(e) && !e.repeat) {
+      } else if (isShortcut(e, "create") && !e.repeat) {
         e.preventDefault();
         create();
       }

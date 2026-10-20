@@ -1,4 +1,5 @@
 import { useEffect, useRef } from "react";
+import { isTopDialog } from "../lib/dialogStack";
 import { useDialogFocus } from "../lib/useDialogFocus";
 import { Button } from "./ui";
 import type { WhatsNew as WhatsNewNote } from "../lib/types";
@@ -12,7 +13,8 @@ export default function WhatsNew({ note, onOk }: { note: WhatsNewNote; onOk: () 
   // Return or Escape closes it, like a native sheet's default button.
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Enter" || e.key === "Escape") {
+      if (!isTopDialog(sheetRef.current)) return;
+      if ((e.key === "Enter" || e.key === "Escape") && !e.defaultPrevented) {
         e.preventDefault();
         onOk();
       }

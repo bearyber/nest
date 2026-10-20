@@ -1,4 +1,5 @@
 import { useLayoutEffect, useRef, type RefObject } from "react";
+import { pushDialog } from "./dialogStack";
 
 /** Where focus goes when a dialog opens (unless something inside already took it, e.g. autoFocus).
  *  - "field": the element marked `data-autofocus`, else the first text box / dropdown, else the
@@ -97,7 +98,8 @@ function inertOutside(el: HTMLElement): () => void {
 /** Keyboard and screen-reader basics for a dialog or panel (build spec §8, native feel):
  *  focus moves in when it opens, Tab / Shift+Tab stay inside (modal), the rest of the app is inert
  *  (modal), and focus goes back to where it was when it closes. Give the dialog `tabIndex={-1}`.
- *  Works for a dialog opened inside another dialog. */
+ *  Works for a dialog opened inside another dialog. Modal dialogs go on the dialog stack
+ *  (dialogStack.ts): check `isTopDialog` before acting on a window-wide key such as Escape. */
 export function useDialogFocus<T extends HTMLElement>(
   ref: RefObject<T | null>,
   { modal = true, initialFocus = "field" }: DialogFocusOptions = {},
@@ -116,6 +118,8 @@ export function useDialogFocus<T extends HTMLElement>(
     const giveBackToWindow = before !== null && isWindowButton(before) && focusedByMouse(before);
     if (!el.hasAttribute("tabindex")) el.tabIndex = -1;
     if (modal) el.dataset.modalDialog = "";
+    // Modal dialogs stack: only the top one's Escape acts (dialogStack.ts).
+    const unstack = modal ? pushDialog(el) : () => {};
     const undoInert = modal ? inertOutside(el) : () => {};
 
     const focusStart = () => (initialTarget(el, initialFocus) ?? el).focus();
@@ -166,6 +170,7 @@ export function useDialogFocus<T extends HTMLElement>(
 
     return () => {
       late?.disconnect();
+      unstack();
       if (modal) {
         el.removeEventListener("keydown", onKeyDown);
         delete el.dataset.modalDialog;

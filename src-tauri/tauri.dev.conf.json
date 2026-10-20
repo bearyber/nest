@@ -11,6 +11,7 @@
         "center": true,
         "transparent": true,
         "visible": false,
+        "zoomHotkeysEnabled": false,
         "dataDirectory": "com.intrvl.nest/dev-webview"
       }
     ]

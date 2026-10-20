@@ -112,6 +112,8 @@ pub fn open_settings_window(app: &AppHandle) -> tauri::Result<()> {
             .min_inner_size(660.0, 460.0)
             .transparent(true)
             .center()
+            // No webview zoom (Ctrl+wheel, Ctrl+= / Ctrl+-), as in the main window's config.
+            .zoom_hotkeys_enabled(false)
             // Hidden until its page has drawn (see `settings_ready`), so it appears in one go
             // instead of flashing an empty frame.
             .visible(false);

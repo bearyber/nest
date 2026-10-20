@@ -306,11 +306,38 @@ fn setup(app: &mut tauri::App, started_at: std::time::SystemTime) -> Result<(), 
         let id = event.id().0.as_str();
         if tray::handles(id) {
             tray::on_menu(app, id);
-        } else if id == menu::SETTINGS {
-            if let Err(e) = settings_cmd::open_settings_window(app) {
-                log::warn!("couldn't open Settings: {e}");
+            return;
+        }
+        let first_run = app
+            .try_state::<AppState>()
+            .is_some_and(|s| s.first_run.load(std::sync::atomic::Ordering::SeqCst));
+        // Each command goes to one window (never broadcast): see menu::route.
+        let sent = match menu::route(id, first_run) {
+            menu::Route::Settings => {
+                if let Err(e) = settings_cmd::open_settings_window(app) {
+                    log::warn!("couldn't open Settings: {e}");
+                }
+                Ok(())
             }
-        } else if let Err(e) = app.emit("menu", id) {
+            menu::Route::Main => {
+                tray::show_main(app);
+                app.emit_to("main", "menu", id)
+            }
+            menu::Route::ShowMainOnly => {
+                tray::show_main(app);
+                Ok(())
+            }
+            menu::Route::Focused => match app
+                .webview_windows()
+                .into_values()
+                .find(|w| w.is_focused().unwrap_or(false))
+            {
+                Some(w) => app.emit_to(w.label(), "menu", id),
+                None => Ok(()),
+            },
+            menu::Route::Ignore => Ok(()),
+        };
+        if let Err(e) = sent {
             log::warn!("couldn't pass on a menu command: {e}");
         }
     });

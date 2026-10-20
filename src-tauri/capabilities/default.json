@@ -3,5 +3,5 @@
   "identifier": "default",
   "description": "Main window. No fs permissions: all file writes go through Rust commands.",
   "windows": ["main", "settings"],
-  "permissions": ["core:default", "window-state:default"]
+  "permissions": ["core:default", "window-state:default", "core:window:allow-close"]
 }

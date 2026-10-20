@@ -41,7 +41,9 @@ import {
   setStatus,
   takeNotice,
 } from "../lib/commands";
-import { hasCommandKey, isMac } from "../lib/platform";
+import { isMac } from "../lib/platform";
+import { hasOpenDialog } from "../lib/dialogStack";
+import { findShortcut, listenHere, type ShortcutId } from "../lib/shortcuts";
 import { isListKey } from "../lib/listKeys";
 import { createdMessage, toastForNotice } from "../lib/resolve";
 import {
@@ -75,6 +77,17 @@ import styles from "./Main.module.css";
 /** Rescan when the window regains focus after this long (build spec §7). */
 const FOCUS_RESCAN_MS = 10 * 60 * 1000;
 const DEFAULT_SPACES = ["Work", "Personal"];
+/** The main window's shortcuts (lib/shortcuts.ts). */
+const MAIN_SHORTCUTS: readonly ShortcutId[] = [
+  "new-project",
+  "open-settings",
+  "rescan",
+  "search",
+  "toggle-sidebar",
+  "toggle-inspector",
+];
+/** Commands that still act with a dialog open (see runMenu). */
+const OVER_DIALOGS = new Set(["new-project", "open-settings", "check-updates"]);
 
 // Three-pane main window (build spec §3.1).
 export default function Main() {
@@ -523,25 +536,35 @@ export default function Main() {
   const onSort = (key: SortKey) =>
     setSort((s) => (s.key === key ? { key, dir: s.dir === "asc" ? "desc" : "asc" } : { key, dir: key === "created" || key === "size" ? "desc" : "asc" }));
 
-  // ── Menu bar (macOS) and keyboard (build spec §8) ──
+  // ── Menu bar (macOS) and keyboard (build spec §8); the keys are in lib/shortcuts.ts ──
   const runMenu = useCallback(
     (id: string) => {
+      // With a dialog open (the template editor, New Project, What's new) the list's commands
+      // wait: they'd act behind it. New Project still opens (over the editor, as from the menu
+      // bar), and Settings opens in its own window.
+      if (hasOpenDialog() && !OVER_DIALOGS.has(id)) return;
       if (id === "new-project") setSheetOpen(true);
+      else if (id === "open-settings") void openSettings().catch(fail);
       else if (id === "rescan") rescan(true);
       else if (id === "search") searchRef.current?.focus();
       else if (id === "toggle-sidebar") toggleSidebar();
       else if (id === "toggle-inspector") setShowInspector((v) => !v);
       else if (id === "check-updates") checkUpdates();
     },
-    [rescan, checkUpdates, toggleSidebar],
+    [rescan, checkUpdates, toggleSidebar, fail],
   );
 
+  // Menu bar commands, sent to this window only (lib.rs brings it forward first).
   useEffect(() => {
     let unlisten: (() => void) | undefined;
-    listen<string>("menu", (e) => runMenu(e.payload))
-      .then((u) => (unlisten = u))
+    let gone = false;
+    listenHere<string>("menu", (e) => runMenu(e.payload))
+      .then((u) => (gone ? u() : (unlisten = u)))
       .catch(() => {});
-    return () => unlisten?.();
+    return () => {
+      gone = true;
+      unlisten?.();
+    };
   }, [runMenu]);
 
   // Menu bar / notification area icon (tray.rs): "New Project…" and "New from ›".
@@ -562,48 +585,23 @@ export default function Main() {
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
-      if (sheetOpen) return; // the sheet has its own keys
-      const cmd = hasCommandKey(e);
-      // On macOS the menu bar owns these (its accelerators fire first); elsewhere JS does.
-      const menuOwned = isMac();
       const target = e.target as HTMLElement;
       const inSearch = target === searchRef.current;
       const typing = !inSearch && (target.tagName === "INPUT" || target.tagName === "TEXTAREA");
-      const key = e.key.toLowerCase();
 
-      // Block the webview's own reload / find so they never fire.
-      if (e.key === "F5" || (cmd && key === "r")) {
+      // Nest's shortcuts (exact keys: Ctrl+Shift+R or ⌃⌘F are left alone). On Windows the
+      // webview's own reload / find / print are blocked for every window in main.tsx.
+      const hit = findShortcut(e, MAIN_SHORTCUTS);
+      if (hit) {
+        if (typing && hit.shortcut.whileTyping === false) return;
         e.preventDefault();
-        if (e.key === "F5" || !menuOwned) rescan(true);
+        // macOS: the menu bar item ran it already (lib.rs sends it here as a menu command).
+        if (isMac() && hit.combo.menu) return;
+        runMenu(hit.shortcut.id);
         return;
       }
-      if (cmd && (key === "f" || key === "k")) {
-        e.preventDefault();
-        if (key === "f" || !menuOwned) searchRef.current?.focus();
-        return;
-      }
-      if (cmd && e.key === ",") {
-        e.preventDefault();
-        if (!menuOwned) void openSettings().catch(fail);
-        return;
-      }
-      if (cmd && !e.shiftKey && !e.altKey && key === "n") {
-        e.preventDefault();
-        if (!menuOwned) setSheetOpen(true);
-        return;
-      }
-      if (cmd && e.altKey && e.code === "KeyI") {
-        e.preventDefault();
-        if (!menuOwned) setShowInspector((v) => !v);
-        return;
-      }
-      if (cmd && !e.shiftKey && !e.altKey && key === "b") {
-        e.preventDefault();
-        if (!menuOwned) toggleSidebar();
-        return;
-      }
-      // The list's keys don't apply while Templates is showing.
-      if (typing || view === "templates") return;
+      // The list's keys don't apply under a dialog, while typing, or while Templates is showing.
+      if (hasOpenDialog() || typing || view === "templates") return;
       // Search keeps its shortcuts (arrows / Enter act on the list, Escape clears). Anywhere else,
       // a focused button, link, menu, dialog… keeps its own Enter / Space / arrows.
       if (!inSearch && !isListKey(e)) return;
@@ -623,7 +621,7 @@ export default function Main() {
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [sheetOpen, rescan, moveSelection, selectedRow, open, fail, toggleSidebar, view]);
+  }, [runMenu, moveSelection, selectedRow, open, view]);
 
   const closeSheet = useCallback(() => setSheetOpen(false), []);
   const dismissToast = useCallback(() => setToast(null), []);

@@ -2,8 +2,8 @@
 // handled by each screen's keys). The menu item is our own (src-tauri/src/menu.rs), so the
 // predefined text-only Undo doesn't swallow it: in a text box it undoes the typing, anywhere
 // else it's handed to whatever screen has its own history (the template editor).
-import { listen } from "@tauri-apps/api/event";
 import { getCurrentWindow } from "@tauri-apps/api/window";
+import { listenHere } from "./shortcuts";
 
 export type EditStep = "undo" | "redo";
 
@@ -30,11 +30,12 @@ export function runEditStep(step: EditStep) {
   window.dispatchEvent(new CustomEvent<EditStep>(EDIT_STEP_EVENT, { detail: step }));
 }
 
-/** Listen for the menu's Undo / Redo. Every window hears the menu; only the focused one acts. */
+/** Listen for the menu's Undo / Redo. lib.rs sends them to the focused window only; the focus
+ *  check here is a second guard. */
 export function listenEditMenu(): () => void {
   let unlisten: (() => void) | undefined;
   let gone = false;
-  listen<string>("menu", async (e) => {
+  listenHere<string>("menu", async (e) => {
     const step = e.payload;
     if (step !== "undo" && step !== "redo") return;
     let focused = document.hasFocus();
