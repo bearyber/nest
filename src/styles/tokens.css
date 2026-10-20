@@ -4,8 +4,14 @@
   /* Native controls (dropdown popups, date pickers, scrollbars) follow the OS theme. */
   color-scheme: light dark;
 
-  /* Accent: fallback until the OS accent is read (M3). */
+  /* Accent: fallback until the OS accent is read (M3). Use it for shapes (dots, rings, outlines);
+     text and filled buttons use the variants below, which keep WCAG AA contrast (4.5:1). */
   --accent: #0a84ff;
+  /* Accent as text (links, pressed segments): darker in light, lighter in dark. */
+  --accent-text: #075cb2; /* = --accent mixed with 30% black */
+  /* Fill behind white text (primary buttons, highlighted menu items): 5.9:1 with white. */
+  --accent-fill: #0863bf; /* = --accent mixed with 25% black */
+  --accent-fill-hover: #075aad; /* = --accent mixed with 32% black: a touch darker on hover, 6.8:1 */
 
   --space-1: 4px;
   --space-2: 8px;
@@ -19,10 +25,10 @@
 
   --motion: 180ms ease-out;
 
-  /* Light */
+  /* Light. Secondary and tertiary text stay at or above 4.5:1 on every light surface. */
   --text: rgba(0, 0, 0, 0.85);
-  --text-secondary: rgba(0, 0, 0, 0.5);
-  --text-tertiary: rgba(0, 0, 0, 0.4);
+  --text-secondary: rgba(0, 0, 0, 0.62);
+  --text-tertiary: rgba(0, 0, 0, 0.56);
   --separator: rgba(0, 0, 0, 0.1);
   --bg-solid: #f3f3f3;
   --pane-bg: rgba(255, 255, 255, 0.6);
@@ -40,8 +46,8 @@
   --shadow-sheet: 0 24px 60px rgba(20, 24, 32, 0.22), 0 2px 6px rgba(20, 24, 32, 0.08);
   --shadow-popover: 0 8px 28px rgba(20, 24, 32, 0.2);
   /* Errors only: the one non-accent colour besides status (spec §8). */
-  --error: #d70015;
-  --error-bg: rgba(215, 0, 21, 0.08);
+  --error: #c00013;
+  --error-bg: rgba(192, 0, 19, 0.08);
 }
 
 /* Dark: follows the system unless Settings → Appearance says otherwise (data-theme on <html>). */
@@ -50,7 +56,8 @@
     color-scheme: dark;
     --text: rgba(255, 255, 255, 0.88);
     --text-secondary: rgba(255, 255, 255, 0.6);
-    --text-tertiary: rgba(255, 255, 255, 0.45);
+    --text-tertiary: rgba(255, 255, 255, 0.58);
+    --accent-text: #6cb5ff; /* = --accent mixed with 40% white */
     --separator: rgba(255, 255, 255, 0.12);
     --bg-solid: #202020;
     --pane-bg: rgba(30, 30, 30, 0.55);
@@ -66,8 +73,8 @@
     --accent-soft: rgba(10, 132, 255, 0.2);
     --shadow-sheet: 0 24px 60px rgba(0, 0, 0, 0.55), 0 2px 6px rgba(0, 0, 0, 0.3);
     --shadow-popover: 0 8px 28px rgba(0, 0, 0, 0.5);
-    --error: #ff6961;
-    --error-bg: rgba(255, 105, 97, 0.12);
+    --error: #ff8a80;
+    --error-bg: rgba(255, 138, 128, 0.12);
   }
 }
 
@@ -75,7 +82,8 @@
   color-scheme: dark;
   --text: rgba(255, 255, 255, 0.88);
   --text-secondary: rgba(255, 255, 255, 0.6);
-  --text-tertiary: rgba(255, 255, 255, 0.45);
+  --text-tertiary: rgba(255, 255, 255, 0.58);
+  --accent-text: #6cb5ff; /* = --accent mixed with 40% white */
   --separator: rgba(255, 255, 255, 0.12);
   --bg-solid: #202020;
   --pane-bg: rgba(30, 30, 30, 0.55);
@@ -91,12 +99,30 @@
   --accent-soft: rgba(10, 132, 255, 0.2);
   --shadow-sheet: 0 24px 60px rgba(0, 0, 0, 0.55), 0 2px 6px rgba(0, 0, 0, 0.3);
   --shadow-popover: 0 8px 28px rgba(0, 0, 0, 0.5);
-  --error: #ff6961;
-  --error-bg: rgba(255, 105, 97, 0.12);
+  --error: #ff8a80;
+  --error-bg: rgba(255, 138, 128, 0.12);
 }
 
 :root[data-theme="light"] {
   color-scheme: light;
+}
+
+/* Where color-mix works (WebView2, WebKit on macOS 13.1+), the accent variants follow --accent,
+   so the system accent can replace the fallback later. Same values as above for the fallback. */
+@supports (color: color-mix(in srgb, red, blue)) {
+  :root {
+    --accent-text: color-mix(in srgb, var(--accent), black 30%);
+    --accent-fill: color-mix(in srgb, var(--accent), black 25%);
+    --accent-fill-hover: color-mix(in srgb, var(--accent), black 32%);
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --accent-text: color-mix(in srgb, var(--accent), white 40%);
+    }
+  }
+  :root[data-theme="dark"] {
+    --accent-text: color-mix(in srgb, var(--accent), white 40%);
+  }
 }
 
 :root[data-platform="mac"] {

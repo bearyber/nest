@@ -95,7 +95,7 @@
 .chip[aria-pressed="true"] {
   border-color: var(--accent);
   background: var(--accent-soft);
-  color: var(--accent);
+  color: var(--accent-text);
   font-weight: 600;
 }
 
@@ -146,13 +146,17 @@
 }
 
 .activeSuggestion {
-  background: var(--accent);
+  background: var(--accent-fill);
   color: #fff;
 }
 
 .suggestionCode {
   font-family: var(--font-mono);
-  opacity: 0.7;
+  color: var(--text-secondary);
+}
+
+.activeSuggestion .suggestionCode {
+  color: rgba(255, 255, 255, 0.85);
 }
 
 /* Label above the control, for narrow places (the template editor's preview). */

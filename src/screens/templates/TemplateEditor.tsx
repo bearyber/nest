@@ -53,6 +53,7 @@ import {
   type TemplatePreview,
 } from "../../lib/types";
 import { EDIT_STEP_EVENT, type EditStep } from "../../lib/editMenu";
+import { useDialogFocus } from "../../lib/useDialogFocus";
 import { usePointerDrag } from "./drag";
 import { blankLabel } from "./NameField";
 import QuestionSettings from "./QuestionSettings";
@@ -86,6 +87,9 @@ const isMac = () => navigator.userAgent.includes("Mac");
  *  in as chips. Right-click (or ⋯) for the rest. Rust previews every change with the real
  *  planner and does the saving. */
 export default function TemplateEditor({ sourceKey, mode, start, note, onClose, onSaved }: Props) {
+  const sheetRef = useRef<HTMLDivElement>(null);
+  // Focus starts on the editor itself (so Escape still closes it), stays inside, and goes back.
+  useDialogFocus(sheetRef, { initialFocus: "container" });
   const [hist, setHist] = useState<History<Doc>>(() => startHistory({ draft: start, nodes: toNodes(start.tree) }));
   const { draft, nodes } = hist.present;
   const [selected, setSelected] = useState<RowId | null>(null);
@@ -685,7 +689,13 @@ export default function TemplateEditor({ sourceKey, mode, start, note, onClose, 
 
   return (
     <div className={styles.scrim}>
-      <div className={styles.sheet} role="dialog" aria-modal="true" aria-label={mode === "customize" ? `Customize “${start.name}”` : "Template"}>
+      <div
+        ref={sheetRef}
+        tabIndex={-1}
+        className={styles.sheet}
+        role="dialog"
+        aria-modal="true"
+        aria-label={mode === "customize" ? `Customize “${start.name}”` : "Template"}>
         <header className={styles.head}>
           <input
             className={styles.nameInput}
