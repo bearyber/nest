@@ -750,6 +750,22 @@ pub fn delete(t: &Installed, user_dir: &Path) -> Result<(), String> {
     if dir == base || !dir.starts_with(&base) {
         return Err("That template isn't in your templates folder".into());
     }
-    trash::delete(&dir)
-        .map_err(|e| format!("Couldn't move it to the {}: {e}", crate::error::bin_name()))
+    to_bin(&dir).map_err(|e| format!("Couldn't move it to the {}: {e}", crate::error::bin_name()))
+}
+
+/// Recycle Bin / Trash. On the Mac through the system call, not by asking Finder: Finder's way
+/// makes macOS ask "Nest wants access to control Finder" (seen in 0.7.0). Still restorable by
+/// dragging it out of the Trash; only Finder's "Put Back" item is missing.
+fn to_bin(dir: &Path) -> Result<(), trash::Error> {
+    #[cfg(target_os = "macos")]
+    {
+        use trash::macos::{DeleteMethod, TrashContextExtMacos};
+        let mut bin = trash::TrashContext::default();
+        bin.set_delete_method(DeleteMethod::NsFileManager);
+        bin.delete(dir)
+    }
+    #[cfg(not(target_os = "macos"))]
+    {
+        trash::delete(dir)
+    }
 }

@@ -1,4 +1,11 @@
 {
+  "0.7.1": [
+    "Resolve: a project with no client goes into a folder named after its space (e.g. Personal), never loose at the top",
+    "New Project says plainly what happens in Resolve: Adds “…” to DaVinci Resolve, in Acme",
+    "The preview's fold button opens the folders again on the next press",
+    "Saving a template no longer asks for permission to control Finder",
+    "A calmer sidebar: hovering a row no longer looks like a second selection"
+  ],
   "0.7.0": [
     "Nest lives in the menu bar (Windows: by the clock): close the window and it keeps running, with New Project and your recent jobs one click away",
     "DaVinci Resolve: give a template a Resolve starter project, and each new job gets its own copy in Resolve, named and filed for you",

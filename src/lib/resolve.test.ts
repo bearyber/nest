@@ -2,11 +2,14 @@ import { describe, expect, it } from "vitest";
 import { createdMessage, libraryKey, plannedLine, projectLine, sameLibrary, toastForNotice } from "./resolve";
 
 describe("Resolve words", () => {
-  it("preview line: folders inside folders, or the top level", () => {
+  it("preview line: says it adds to Resolve, and where (library only when the template picks one)", () => {
     const r = { drp: "files/G.drp", name: "Grade", folder: "Acme/2026", library: null, libraryLabel: "x" };
-    expect(plannedLine(r)).toBe("Resolve project: Grade in Acme / 2026");
-    expect(plannedLine({ ...r, folder: "" })).toBe("Resolve project: Grade in the top level");
-    expect(plannedLine({ ...r, name: "한국 프로젝트", folder: "客户" })).toBe("Resolve project: 한국 프로젝트 in 客户");
+    expect(plannedLine(r)).toBe("Adds “Grade” to DaVinci Resolve, in Acme › 2026");
+    expect(plannedLine({ ...r, library: { dbType: "Disk", dbName: "Client Work" } })).toBe(
+      "Adds “Grade” to DaVinci Resolve, in Client Work › Acme › 2026",
+    );
+    expect(plannedLine({ ...r, folder: "", library: null })).toBe("Adds “Grade” to DaVinci Resolve");
+    expect(plannedLine({ ...r, name: "한국 프로젝트", folder: "客户" })).toBe("Adds “한국 프로젝트” to DaVinci Resolve, in 客户");
   });
 
   it("details line for each status", () => {

@@ -8,10 +8,11 @@ export function shortDay(iso: string): string {
   return d.toLocaleDateString(undefined, { day: "numeric", month: "short" });
 }
 
-/** New Project's preview: "Resolve project: Grade in Acme / 2026" ("" folder = the top level). */
+/** New Project's preview: "Adds “261020_TEST” to DaVinci Resolve, in Client Work › Acme › 2026".
+ *  The library is named only when the template picks one; no folder = no "in …". */
 export function plannedLine(r: PlannedResolve): string {
-  const folder = r.folder ? r.folder.split("/").join(" / ") : "the top level";
-  return `Resolve project: ${r.name} in ${folder}`;
+  const where = [...(r.library ? [r.library.dbName] : []), ...r.folder.split("/").filter(Boolean)];
+  return `Adds “${r.name}” to DaVinci Resolve${where.length ? `, in ${where.join(" › ")}` : ""}`;
 }
 
 /** The details panel: "added 17 Oct", "waiting for Resolve", "already in Resolve"… */

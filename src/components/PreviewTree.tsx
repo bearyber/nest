@@ -22,7 +22,10 @@ export default function PreviewTree({ plan, tall }: { plan: Plan; /** Grow with 
       return next;
     });
 
-  const collapseAll = () => setClosed(new Set(plan.folders.filter((f) => !f.includes("/"))));
+  // One button: folds the top folders, and opens everything again on the next press.
+  const top = plan.folders.filter((f) => !f.includes("/"));
+  const allFolded = top.length > 0 && top.every((f) => closed.has(f));
+  const foldAll = () => setClosed(allFolded ? new Set() : new Set(top));
 
   return (
     <section className={styles.preview} aria-label="Preview">
@@ -32,7 +35,12 @@ export default function PreviewTree({ plan, tall }: { plan: Plan; /** Grow with 
           {plan.folders.length} folder{plan.folders.length === 1 ? "" : "s"} · {fileCount} file
           {fileCount === 1 ? "" : "s"}
         </span>
-        <IconButton icon="collapse" label="Collapse all folders" onClick={collapseAll} className={styles.collapse} />
+        <IconButton
+          icon="collapse"
+          label={allFolded ? "Open all folders" : "Collapse all folders"}
+          onClick={foldAll}
+          className={styles.collapse}
+        />
       </div>
       <div className={tall ? `${styles.box} ${styles.tall}` : styles.box}>
         <ul className={styles.list} role="tree" aria-label={plan.folderName}>

@@ -499,7 +499,14 @@ fn plan_resolve(
         None if folder_name.is_empty() => return None,
         None => folder_name.to_string(),
     };
-    let folder = match render_path(&r.folder, vars) {
+    // No client (a Personal space, a passion project): a folder that would be named after the
+    // client is named after the project's space instead, so it never lands loose at the top
+    // of the library (Bernard, 0.7.1: "leave it in the space they saved it").
+    let pattern = match client_key(&loaded.template) {
+        Some(key) if ctx.own_code.is_some() => space_for_client(&r.folder, key, &ctx.space),
+        _ => r.folder.clone(),
+    };
+    let folder = match render_path(&pattern, vars) {
         Ok(segments) => segments.join("/"),
         Err(e) => {
             issues.error(None, format!("Resolve folder: {e}"));
@@ -516,6 +523,35 @@ fn plan_resolve(
             None => OPEN_LIBRARY_LABEL.to_string(),
         },
     })
+}
+
+/// The key of the template's client question, if it has one.
+fn client_key(t: &Template) -> Option<&str> {
+    t.fields
+        .iter()
+        .find(|f| f.kind == FieldKind::Client)
+        .map(|f| f.key.as_str())
+}
+
+/// `{client}/{year}` → `Personal/{year}`: each `/` part that uses the client blank becomes the
+/// space's name (as written; its braces are dropped so it can't become a blank).
+fn space_for_client(pattern: &str, key: &str, space: &str) -> String {
+    let blank = format!("{{{key}");
+    let space: String = space.chars().filter(|c| *c != '{' && *c != '}').collect();
+    pattern
+        .split('/')
+        .map(|seg| {
+            let uses = seg.match_indices(&blank).any(|(i, _)| {
+                matches!(seg[i + blank.len()..].chars().next(), Some('}') | Some('|'))
+            });
+            if uses {
+                space.clone()
+            } else {
+                seg.to_string()
+            }
+        })
+        .collect::<Vec<_>>()
+        .join("/")
 }
 
 /// The kit's files under the template's kit folder (`base`). Names are cleaned like every other
@@ -2187,13 +2223,26 @@ mod tests {
         let plan = plan_project(&t, &v, &c);
         assert!(plan.resolve.is_none() && plan.manifest.get("resolve").is_none());
 
-        // No folder: "" stays at the top level; an empty answer drops its folder.
+        // No folder: "" stays at the top level.
         let t = with_resolve(json!({ "drp": "files/Grade.drp", "folder": "" }));
         assert_eq!(plan_project(&t, &v, &ctx()).resolve.unwrap().folder, "");
+        // No client (Personal space): the client's folder becomes the space's, never loose.
         let mut c = ctx();
         c.own_code = Some("OWN".into());
+        c.space = "Personal".into();
         let t = with_resolve(json!({ "drp": "files/Grade.drp" }));
-        assert_eq!(plan_project(&t, &v, &c).resolve.unwrap().folder, "");
+        assert_eq!(plan_project(&t, &v, &c).resolve.unwrap().folder, "Personal");
+        let t =
+            with_resolve(json!({ "drp": "files/Grade.drp", "folder": "{client|upper}/{year}" }));
+        assert_eq!(
+            plan_project(&t, &v, &c).resolve.unwrap().folder,
+            "Personal/2026"
+        );
+        let t = with_resolve(json!({ "drp": "files/Grade.drp", "folder": "Clients/{year}" }));
+        assert_eq!(
+            plan_project(&t, &v, &c).resolve.unwrap().folder,
+            "Clients/2026"
+        );
 
         // The .drp isn't in the template: Create is blocked with plain words.
         let mut v2: serde_json::Value = serde_json::from_str(GRADING_MV).unwrap();

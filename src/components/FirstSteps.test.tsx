@@ -320,7 +320,7 @@ describe("Main: Create with a Resolve project", () => {
     }));
     render(<Main />);
     fireEvent.click(await screen.findByRole("button", { name: "Try an example" }));
-    await screen.findByText("Resolve project: SUMMER FILM in Acme");
+    await screen.findByText("Adds “SUMMER FILM” to DaVinci Resolve, in Acme");
     await waitFor(() => expect(createButton().disabled).toBe(false));
     fireEvent.click(createButton());
     expect(await screen.findByText("Created ACME-L01 · Ready when Resolve opens")).toBeTruthy();

@@ -367,10 +367,10 @@ describe("Resolve project", () => {
     expect(screen.getByText("Also make:")).toBeTruthy();
     const box = screen.getByLabelText("Resolve project") as HTMLInputElement;
     expect(box.checked).toBe(true);
-    expect(await screen.findByText("Resolve project: Artist in Vertex Studio / 2026")).toBeTruthy();
+    expect(await screen.findByText("Adds “Artist” to DaVinci Resolve, in Vertex Studio › 2026")).toBeTruthy();
 
     fireEvent.change(screen.getByLabelText(/^Artist/), { target: { value: "KIRA" } });
-    expect(await screen.findByText("Resolve project: KIRA in Vertex Studio / 2026")).toBeTruthy();
+    expect(await screen.findByText("Adds “KIRA” to DaVinci Resolve, in Vertex Studio › 2026")).toBeTruthy();
     const create = vi.mocked(commands.createProject);
     create.mockResolvedValue({ key: "k", jobCode: "VX-L01", title: "KIRA", root: "D:/NestDev/x", bumped: false });
     const button = screen.getByRole("button", { name: /^Create/ }) as HTMLButtonElement;
@@ -385,19 +385,19 @@ describe("Resolve project", () => {
 
   it("unticking sends resolve: false and the preview line goes", async () => {
     const { restore } = await openWithResolve(true);
-    await screen.findByText(/^Resolve project: /);
+    await screen.findByText(/^Adds “.*” to DaVinci Resolve/);
     fireEvent.click(screen.getByLabelText("Resolve project"));
     await waitFor(() => expect(vi.mocked(commands.planProject).mock.lastCall![0].resolve).toBe(false));
-    await waitFor(() => expect(screen.queryByText(/^Resolve project: /)).toBeNull());
+    await waitFor(() => expect(screen.queryByText(/^Adds “.*” to DaVinci Resolve/)).toBeNull());
     restore();
   });
 
   it("starts unticked when the template says so", async () => {
     const { restore } = await openWithResolve(false);
     expect((screen.getByLabelText("Resolve project") as HTMLInputElement).checked).toBe(false);
-    expect(screen.queryByText(/^Resolve project: /)).toBeNull();
+    expect(screen.queryByText(/^Adds “.*” to DaVinci Resolve/)).toBeNull();
     fireEvent.click(screen.getByLabelText("Resolve project"));
-    expect(await screen.findByText(/^Resolve project: Artist in/)).toBeTruthy();
+    expect(await screen.findByText(/^Adds “Artist” to DaVinci Resolve, in/)).toBeTruthy();
     restore();
   });
 
