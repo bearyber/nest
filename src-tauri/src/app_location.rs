@@ -375,6 +375,8 @@ mod tests {
     const RO: bool = true;
     const RW: bool = false;
 
+    // Mac paths: the feature is Mac-only, and Windows reads "/Volumes/…" differently.
+    #[cfg(target_os = "macos")]
     #[test]
     fn disk_image_and_translocation_are_misplaced() {
         assert_eq!(
@@ -399,6 +401,8 @@ mod tests {
         );
     }
 
+    // Mac paths: the feature is Mac-only, and Windows reads "/Volumes/…" differently.
+    #[cfg(target_os = "macos")]
     #[test]
     fn a_nest_kept_on_a_writable_drive_is_fine() {
         assert_eq!(misplaced(&p("/Volumes/Work/Nest.app"), RW), None);
@@ -491,6 +495,8 @@ mod tests {
         }
     }
 
+    // Mac paths: the feature is Mac-only, and Windows reads "/Volumes/…" differently.
+    #[cfg(target_os = "macos")]
     #[test]
     fn korean_chinese_and_odd_names() {
         assert_eq!(
