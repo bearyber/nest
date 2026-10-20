@@ -100,6 +100,9 @@ pub fn open_settings_window(app: &AppHandle) -> tauri::Result<()> {
     if let Some(w) = app.get_webview_window(SETTINGS_WINDOW) {
         w.unminimize()?;
         w.show()?;
+        // A Nest window shows: folder work may start (folder_access.rs), even if it never
+        // gets focus.
+        crate::folder_access::window_shown(app);
         return w.set_focus();
     }
     let mut builder =
@@ -130,6 +133,7 @@ pub fn open_settings_window(app: &AppHandle) -> tauri::Result<()> {
         if !fallback.is_visible().unwrap_or(true) {
             let _ = fallback.show();
             let _ = fallback.set_focus();
+            crate::folder_access::window_shown(fallback.app_handle());
         }
     });
     let theme = app
@@ -363,11 +367,39 @@ pub fn set_launch_at_login(
     state: State<'_, AppState>,
     on: bool,
 ) -> AppResult<SettingsView> {
-    crate::login_item::set(&app, on)?;
+    if let Some(e) = &state.settings_error {
+        return Err(AppError::new(format!(
+            "Settings can't be changed while the settings file is damaged. {e}"
+        )));
+    }
+    let was_on = crate::login_item::registered(crate::login_item::state(&app));
     // Remembered too: an old-style entry is only moved over (login_item::migrate) if it was on.
-    edit(&app, &state, |s| {
-        s.launch_at_login = on;
-        Ok(())
+    system_then_save(
+        || crate::login_item::set(&app, on).map(|_| ()),
+        || {
+            edit(&app, &state, |s| {
+                s.launch_at_login = on;
+                Ok(())
+            })
+        },
+        || crate::login_item::restore(&app, was_on),
+    )
+}
+
+/// Change the system, then save the setting. If saving fails, undo the system change, so the
+/// system and the settings file never disagree. Nothing changed → nothing saved or undone.
+fn system_then_save<T>(
+    change: impl FnOnce() -> AppResult<()>,
+    save: impl FnOnce() -> AppResult<T>,
+    undo: impl FnOnce(),
+) -> AppResult<T> {
+    change()?;
+    save().inspect_err(|e| {
+        log::warn!(
+            "couldn't save the setting, putting the system back: {}",
+            e.message
+        );
+        undo();
     })
 }
 
@@ -833,6 +865,7 @@ pub fn open_templates(app: AppHandle) -> AppResult<()> {
     main.show()
         .and_then(|_| main.set_focus())
         .map_err(|e| AppError::new(format!("Couldn't show the main window: {e}")))?;
+    crate::folder_access::window_shown(&app);
     main.emit_to("main", "open-templates", ())
         .map_err(|e| AppError::new(e.to_string()))
 }
@@ -1490,6 +1523,7 @@ pub fn settings_ready(app: AppHandle) -> AppResult<()> {
                 .and_then(|_| w.set_focus())
                 .map_err(|e| AppError::new(format!("Couldn't show Settings: {e}")))?;
         }
+        crate::folder_access::window_shown(&app);
     }
     Ok(())
 }
@@ -1556,5 +1590,63 @@ mod first_template_tests {
         let note = save_first_template(&gone, &installed, &user, &ex()).unwrap_err();
         assert!(note.starts_with("Couldn't make a template from \u{201c}Missing Folder\u{201d}: "));
         assert!(note.ends_with("You can try again in Templates."));
+    }
+}
+
+#[cfg(test)]
+mod system_then_save_tests {
+    use super::system_then_save;
+    use crate::error::AppError;
+    use std::cell::RefCell;
+
+    #[test]
+    fn a_failed_save_puts_the_system_back() {
+        let log = RefCell::new(vec![]);
+        let r: Result<(), AppError> = system_then_save(
+            || {
+                log.borrow_mut().push("change");
+                Ok(())
+            },
+            || {
+                log.borrow_mut().push("save");
+                Err(AppError::new("disk full"))
+            },
+            || log.borrow_mut().push("undo"),
+        );
+        assert_eq!(r.unwrap_err().message, "disk full");
+        assert_eq!(*log.borrow(), ["change", "save", "undo"]);
+    }
+
+    #[test]
+    fn a_good_save_keeps_the_change_and_a_failed_change_saves_nothing() {
+        let log = RefCell::new(vec![]);
+        let r = system_then_save(
+            || {
+                log.borrow_mut().push("change");
+                Ok(())
+            },
+            || {
+                log.borrow_mut().push("save");
+                Ok(7)
+            },
+            || log.borrow_mut().push("undo"),
+        );
+        assert_eq!(r.unwrap(), 7);
+        assert_eq!(*log.borrow(), ["change", "save"]);
+
+        log.borrow_mut().clear();
+        let r: Result<(), AppError> = system_then_save(
+            || {
+                log.borrow_mut().push("change");
+                Err(AppError::new("not allowed"))
+            },
+            || {
+                log.borrow_mut().push("save");
+                Ok(())
+            },
+            || log.borrow_mut().push("undo"),
+        );
+        assert_eq!(r.unwrap_err().message, "not allowed");
+        assert_eq!(*log.borrow(), ["change"]);
     }
 }

@@ -42,13 +42,26 @@ function App() {
   );
 }
 
+/** How `el` got focus, as the browser's focus ring says (`:focus-visible`): the keyboard shows
+ *  it, a mouse click on a button doesn't. jsdom can't tell, so the test says. */
+function focusBy(el: HTMLElement, how: "keyboard" | "mouse") {
+  const matches = Element.prototype.matches;
+  Object.defineProperty(el, "matches", {
+    configurable: true,
+    value(this: Element, sel: string) {
+      return sel === ":focus-visible" ? how === "keyboard" : matches.call(this, sel);
+    },
+  });
+  el.focus();
+}
+
 const tab = (shift = false) => fireEvent.keyDown(document.activeElement!, { key: "Tab", shiftKey: shift });
 
 describe("useDialogFocus", () => {
   it("moves focus in, traps Tab, makes the rest inert, and gives focus back", () => {
     render(<App />);
     const opener = screen.getByRole("button", { name: "Open" });
-    opener.focus();
+    focusBy(opener, "keyboard");
     fireEvent.click(opener);
 
     // Focus in: the first field.
@@ -73,7 +86,7 @@ describe("useDialogFocus", () => {
     render(<App />);
     fireEvent.click(screen.getByRole("button", { name: "Open" }));
     const more = screen.getByRole("button", { name: "More" });
-    more.focus();
+    focusBy(more, "keyboard");
     fireEvent.click(more);
 
     // No text field: the first button.
@@ -109,7 +122,7 @@ describe("useDialogFocus", () => {
     }
     render(<Panel />);
     const toggle = screen.getByRole("button", { name: "Toggle" });
-    toggle.focus();
+    focusBy(toggle, "keyboard");
     fireEvent.click(toggle);
     expect(document.activeElement).toBe(screen.getByRole("dialog", { name: "Panel" }));
     expect(document.querySelector("[inert]")).toBeNull();
@@ -149,5 +162,55 @@ describe("useDialogFocus", () => {
     expect(screen.getByRole("dialog", { name: "Second" }).closest("[inert]")).toBeNull();
     expect(screen.getByRole("dialog", { name: "First" }).hasAttribute("inert")).toBe(true);
     expect(document.activeElement).toBe(screen.getByLabelText("B"));
+  });
+
+  it("a window button clicked with the mouse: focus goes back to the window, not the button", () => {
+    render(<App />);
+    const opener = screen.getByRole("button", { name: "Open" });
+    // WebView2 focuses a clicked button, without a focus ring.
+    focusBy(opener, "mouse");
+    fireEvent.click(opener);
+    expect(document.activeElement).toBe(screen.getByLabelText("Name"));
+
+    fireEvent.click(screen.getByRole("button", { name: "Close" }));
+    // The list keys work again (nothing focused), and nothing stays inert.
+    expect(document.activeElement).toBe(document.body);
+    expect(document.querySelector("[inert]")).toBeNull();
+  });
+
+  it("a button inside a dialog gets focus back even after a mouse click", () => {
+    render(<App />);
+    fireEvent.click(screen.getByRole("button", { name: "Open" }));
+    const more = screen.getByRole("button", { name: "More" });
+    focusBy(more, "mouse");
+    fireEvent.click(more);
+    fireEvent.click(screen.getByRole("button", { name: "Done" }));
+    expect(document.activeElement).toBe(more);
+  });
+
+  it("toasts and alerts outside the dialog are never made inert", async () => {
+    function WithToast({ late }: { late: boolean }) {
+      const [open, setOpen] = useState(true);
+      return (
+        <div>
+          <div id="app">
+            <button onClick={() => setOpen(true)}>Open</button>
+          </div>
+          <div role="status">Saved</div>
+          {late && <div role="alert">Couldn't save</div>}
+          {open && (
+            <Dialog label="D">
+              <input aria-label="X" />
+            </Dialog>
+          )}
+        </div>
+      );
+    }
+    const { rerender } = render(<WithToast late={false} />);
+    expect(document.getElementById("app")!.hasAttribute("inert")).toBe(true);
+    expect(screen.getByRole("status").hasAttribute("inert")).toBe(false);
+    rerender(<WithToast late />);
+    await act(async () => {}); // the observer sees the new sibling
+    expect(screen.getByRole("alert").hasAttribute("inert")).toBe(false);
   });
 });

@@ -90,6 +90,9 @@ pub struct Settings {
     pub client_kits: std::collections::BTreeMap<String, PathBuf>,
     /// v0.7: the "<CODE> is ready" note after your very first project was shown (once).
     pub first_project_tip_seen: bool,
+    /// v0.7.2 (macOS): the misplaced Nest (disk image, translocated copy) whose "Move to
+    /// Applications?" got "Not now". Not asked again while Nest runs from that same place.
+    pub move_declined: Option<PathBuf>,
     /// Keys this version doesn't know (an older `resolveLibrary`, from before the library moved
     /// into each template, included) (e.g. written by a newer Nest): kept on every save.
     #[serde(flatten)]
@@ -143,6 +146,7 @@ impl Default for Settings {
             kits_folder: None,
             client_kits: Default::default(),
             first_project_tip_seen: false,
+            move_declined: None,
             other: serde_json::Map::new(),
         }
     }

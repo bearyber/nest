@@ -8,9 +8,13 @@
 //!   start goes (anything made since is kept);
 //! - project folders the index knows: only `.nest-<id>.tmp` **files** directly inside them
 //!   (a half-written project file), older than a day. No other file, no folders, no deeper.
+//! - macOS `/Applications`: only `.Nest-moving-<uuid>` **folders** (a move to Applications
+//!   that stopped half-way, app_location.rs), older than a day. Run by app_location before it
+//!   offers a move, on the same thread, so it never meets a copy being made.
 //!
-//! `<id>` is always the 32 hex characters of a UUID, so a file like `notes.nest-tmp.txt` or
-//! `.nest-backup.tmp` is never touched. Everything runs on a background thread.
+//! `<id>` is always the 32 hex characters of a UUID (in `.Nest-moving-`, the hyphenated
+//! lowercase form `uuid` prints), so a file like `notes.nest-tmp.txt` or `.nest-backup.tmp` is
+//! never touched. Everything runs on a background thread.
 
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -42,6 +46,16 @@ fn is_export_tmp(name: &str) -> bool {
 /// A template save or import that didn't finish.
 fn is_unfinished_template(name: &str) -> bool {
     named(name, ".edit-", "") || named(name, ".import-", "")
+}
+
+/// The hidden name a move to Applications copies into first (app_location.rs).
+pub const MOVING_PREFIX: &str = ".Nest-moving-";
+
+/// `.Nest-moving-<uuid>`, the uuid exactly as `Uuid::new_v4()` prints it (36 characters,
+/// lowercase, hyphenated).
+fn is_moving_copy(name: &str) -> bool {
+    name.strip_prefix(MOVING_PREFIX)
+        .is_some_and(|id| uuid::Uuid::try_parse(id).is_ok_and(|u| u.hyphenated().to_string() == id))
 }
 
 fn older_than(meta: &fs::Metadata, cutoff: SystemTime) -> bool {
@@ -123,6 +137,19 @@ pub fn project_folders(dirs: &[PathBuf], now: SystemTime) -> Vec<PathBuf> {
             if meta.is_file() && is_json_tmp(&name) && older_than(&meta, cutoff) {
                 remove_file(&path, &mut removed);
             }
+        }
+    }
+    removed
+}
+
+/// `/Applications` (macOS): only Nest's own half-made copies, `.Nest-moving-<uuid>` folders
+/// (never a file or a link), older than a day. Nothing else there is ever looked at twice.
+pub fn applications_folder(dir: &Path, now: SystemTime) -> Vec<PathBuf> {
+    let cutoff = now - MIN_AGE;
+    let mut removed = Vec::new();
+    for (name, path, meta) in entries(dir) {
+        if meta.is_dir() && is_moving_copy(&name) && older_than(&meta, cutoff) {
+            remove_dir(&path, &mut removed);
         }
     }
     removed
@@ -215,6 +242,76 @@ mod tests {
         assert!(is_unfinished_template(&format!(".import-{ID}")));
         assert!(!is_unfinished_template(".edit-my-notes"));
         assert!(!is_unfinished_template(&format!("edit-{ID}")));
+    }
+
+    #[test]
+    fn moving_copies_are_matched_exactly() {
+        let u = "0f3e11aa-1234-4abc-8def-0123456789ab";
+        assert!(is_moving_copy(&format!(".Nest-moving-{u}")));
+        assert!(is_moving_copy(&format!(
+            ".Nest-moving-{}",
+            uuid::Uuid::new_v4()
+        )));
+        for name in [
+            format!(".Nest-moving-{}", u.to_uppercase()),
+            format!(".Nest-moving-{}", u.replace('-', "")),
+            format!(".Nest-moving-{{{u}}}"),
+            format!(".Nest-moving-{u}.app"),
+            format!(".Nest-moving-{u}x"),
+            format!("Nest-moving-{u}"),
+            format!(".nest-moving-{u}"),
+            format!("x.Nest-moving-{u}"),
+            ".Nest-moving-".to_string(),
+            ".Nest-moving-notes".to_string(),
+            "Nest.app".to_string(),
+        ] {
+            assert!(!is_moving_copy(&name), "{name}");
+        }
+    }
+
+    #[test]
+    fn applications_lose_only_old_half_made_nest_copies() {
+        let tmp = tempfile::tempdir().unwrap();
+        let dir = tmp.path();
+        let u1 = "0f3e11aa-1234-4abc-8def-0123456789ab";
+        let u2 = "1f3e11aa-1234-4abc-8def-0123456789ab";
+        let old_copy = dir.join(format!(".Nest-moving-{u1}"));
+        let new_copy = dir.join(format!(".Nest-moving-{u2}"));
+        let nest = dir.join("Nest.app");
+        let other_app = dir.join("Resolve.app");
+        // Not the uppercase form: a Mac's disk ignores case, so that's the same folder.
+        let lookalike = dir.join(format!(".Nest-moving-{}", u1.replace('-', "")));
+        for d in [&old_copy, &new_copy, &nest, &other_app, &lookalike] {
+            fs::create_dir_all(d.join("Contents")).unwrap();
+        }
+        // A file and a link with the exact name: never touched (folders only).
+        let file_named = dir.join(format!(
+            ".Nest-moving-{}",
+            "2f3e11aa-1234-4abc-8def-0123456789ab"
+        ));
+        fs::write(&file_named, "x").unwrap();
+        let link_named = dir.join(format!(
+            ".Nest-moving-{}",
+            "3f3e11aa-1234-4abc-8def-0123456789ab"
+        ));
+        #[cfg(unix)]
+        std::os::unix::fs::symlink(&other_app, &link_named).unwrap();
+        for p in [&old_copy, &nest, &other_app, &lookalike, &file_named] {
+            age(p, OLD);
+        }
+        age(&new_copy, Duration::from_secs(60));
+
+        let removed = applications_folder(dir, SystemTime::now());
+        assert_eq!(removed, std::slice::from_ref(&old_copy));
+        for p in [&new_copy, &nest, &other_app, &lookalike, &file_named] {
+            assert!(p.exists(), "{} kept", p.display());
+        }
+        #[cfg(unix)]
+        {
+            assert!(fs::symlink_metadata(&link_named).is_ok(), "link kept");
+            assert!(other_app.join("Contents").is_dir(), "link target untouched");
+        }
+        assert!(applications_folder(&dir.join("nope"), SystemTime::now()).is_empty());
     }
 
     #[test]

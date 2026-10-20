@@ -67,6 +67,38 @@ pub fn is_old_launch_agent(contents: &str) -> bool {
         && tight.contains(".app/Contents/MacOS/")
 }
 
+/// One step of moving an old-style open-at-login file over to a real Login Item.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Migrate {
+    /// Add the Login Item first; the old file goes only once that worked.
+    Register,
+    /// Remove the old file (it was off, or the Login Item is in place now).
+    RemoveOld,
+    /// Leave the old file: it still opens Nest at login, so what you chose keeps working.
+    /// Tried again at the next start.
+    KeepOld,
+}
+
+/// First step. `wanted`: None = settings unreadable (damaged), so nothing is touched. Pure.
+pub fn migrate_first(wanted: Option<bool>, misplaced: bool) -> Migrate {
+    match wanted {
+        None => Migrate::KeepOld,
+        Some(false) => Migrate::RemoveOld,
+        // From the disk image or a translocated copy a Login Item can't be added (yet).
+        Some(true) if misplaced => Migrate::KeepOld,
+        Some(true) => Migrate::Register,
+    }
+}
+
+/// After registering: the old file goes only once the system has the Login Item (on, or
+/// waiting for your OK in System Settings). `None`: registering failed. Pure.
+pub fn migrate_after(status: Option<SystemStatus>) -> Migrate {
+    match status {
+        Some(SystemStatus::Enabled | SystemStatus::RequiresApproval) => Migrate::RemoveOld,
+        _ => Migrate::KeepOld,
+    }
+}
+
 /// The state Settings shows now.
 pub fn state(app: &AppHandle) -> LoginItem {
     let misplaced = crate::app_location::misplaced_now().is_some();
@@ -93,6 +125,22 @@ pub fn set(app: &AppHandle, on: bool) -> AppResult<LoginItem> {
     Ok(state(app))
 }
 
+/// Put opening at login back to `on` after a change that couldn't be saved (settings_cmd):
+/// quietly, never opening System Settings. Best effort.
+pub fn restore(app: &AppHandle, on: bool) {
+    if cfg!(debug_assertions) {
+        return;
+    }
+    if let Err(e) = set_system_quietly(app, on) {
+        log::warn!("couldn't put open at login back: {e}");
+    }
+}
+
+/// Is opening at login registered with the system (on, or waiting for your OK)?
+pub fn registered(item: LoginItem) -> bool {
+    matches!(item, LoginItem::On | LoginItem::NeedsApproval)
+}
+
 /// The old LaunchAgent file's place (macOS).
 pub fn old_launch_agent(home: &Path) -> std::path::PathBuf {
     home.join("Library").join("LaunchAgents").join("Nest.plist")
@@ -106,26 +154,27 @@ fn service() -> smappservice_rs::AppService {
 }
 
 #[cfg(target_os = "macos")]
-fn system_state(_app: &AppHandle) -> LoginItem {
+fn system_status() -> SystemStatus {
     use smappservice_rs::ServiceStatus as S;
-    from_status(match service().status() {
+    match service().status() {
         S::NotRegistered => SystemStatus::NotRegistered,
         S::Enabled => SystemStatus::Enabled,
         S::RequiresApproval => SystemStatus::RequiresApproval,
         S::NotFound => SystemStatus::NotFound,
-    })
+    }
 }
 
 #[cfg(target_os = "macos")]
-fn set_system(app: &AppHandle, on: bool) -> Result<(), String> {
+fn system_state(_app: &AppHandle) -> LoginItem {
+    from_status(system_status())
+}
+
+/// Register or unregister, nothing else (never opens System Settings).
+#[cfg(target_os = "macos")]
+fn set_system_quietly(app: &AppHandle, on: bool) -> Result<(), String> {
     let s = service();
     if on {
-        s.register().map_err(|e| e.to_string())?;
-        // Registered but not allowed yet: open the page where it's allowed.
-        if system_state(app) == LoginItem::NeedsApproval {
-            smappservice_rs::AppService::open_system_settings_login_items();
-        }
-        Ok(())
+        s.register().map_err(|e| e.to_string())
     } else if system_state(app) == LoginItem::Off {
         Ok(())
     } else {
@@ -133,10 +182,25 @@ fn set_system(app: &AppHandle, on: bool) -> Result<(), String> {
     }
 }
 
-/// Once, at launch (release builds): replace the LaunchAgent file older versions wrote with a
-/// real Login Item. Nest's own file only; registered again only if it was on.
+/// The Settings checkbox: like `set_system_quietly`, and if macOS wants your OK first, open
+/// the page where it's given. Only from the checkbox, never at start.
 #[cfg(target_os = "macos")]
-pub fn migrate(app: &AppHandle, wanted: bool) {
+fn set_system(app: &AppHandle, on: bool) -> Result<(), String> {
+    set_system_quietly(app, on)?;
+    if on && system_state(app) == LoginItem::NeedsApproval {
+        smappservice_rs::AppService::open_system_settings_login_items();
+    }
+    Ok(())
+}
+
+/// Once, at launch (release builds): replace the LaunchAgent file older versions wrote with a
+/// real Login Item. Nest's own file only. If it was on, the Login Item is added FIRST and the
+/// old file removed only once macOS has it (on, or waiting for your OK), so opening at login
+/// never quietly stops. Never opens System Settings (a launch isn't the moment to ask);
+/// Settings shows "allow in System Settings" instead. `launch_at_login` stays as it was: it
+/// keeps matching what opens Nest at login (the Login Item, or the old file still there).
+#[cfg(target_os = "macos")]
+pub fn migrate(app: &AppHandle, wanted: Option<bool>) {
     if cfg!(debug_assertions) {
         return;
     }
@@ -151,15 +215,27 @@ pub fn migrate(app: &AppHandle, wanted: bool) {
         log::warn!("{} isn't Nest's: left alone", file.display());
         return;
     }
-    if let Err(e) = std::fs::remove_file(&file) {
-        log::warn!("couldn't remove the old open-at-login file: {e}");
-        return;
+    let misplaced = crate::app_location::misplaced_now().is_some();
+    let mut step = migrate_first(wanted, misplaced);
+    if step == Migrate::Register {
+        let status = match set_system_quietly(app, true) {
+            Ok(()) => Some(system_status()),
+            Err(e) => {
+                log::warn!("couldn't add Nest to Login Items: {e}");
+                None
+            }
+        };
+        step = migrate_after(status);
     }
-    log::info!("removed the old open-at-login file");
-    if wanted && crate::app_location::misplaced_now().is_none() {
-        if let Err(e) = set_system(app, true) {
-            log::warn!("couldn't add Nest to Login Items: {e}");
+    match step {
+        Migrate::RemoveOld => match std::fs::remove_file(&file) {
+            Ok(()) => log::info!("removed the old open-at-login file"),
+            Err(e) => log::warn!("couldn't remove the old open-at-login file: {e}"),
+        },
+        Migrate::KeepOld => {
+            log::info!("kept the old open-at-login file for now (tried again next start)")
         }
+        Migrate::Register => {}
     }
 }
 
@@ -224,11 +300,16 @@ fn set_system(app: &AppHandle, on: bool) -> Result<(), String> {
     done.map_err(|e| e.to_string())
 }
 
+#[cfg(not(target_os = "macos"))]
+fn set_system_quietly(app: &AppHandle, on: bool) -> Result<(), String> {
+    set_system(app, on)
+}
+
 /// Launch (release builds): Run entries made before v0.7 open without `--hidden`; write them
 /// again, only if still on (so one turned off in Task Manager stays off).
 #[cfg(not(target_os = "macos"))]
-pub fn migrate(app: &AppHandle, wanted: bool) {
-    if !wanted || cfg!(debug_assertions) {
+pub fn migrate(app: &AppHandle, wanted: Option<bool>) {
+    if wanted != Some(true) || cfg!(debug_assertions) {
         return;
     }
     use tauri_plugin_autostart::ManagerExt;
@@ -272,6 +353,47 @@ mod tests {
             LoginItem::NeedsApproval
         );
         assert_eq!(shown(LoginItem::Off, false, false), LoginItem::Off);
+    }
+
+    #[test]
+    fn migrate_adds_the_login_item_before_removing_the_old_file() {
+        // On: register first, never remove straight away.
+        assert_eq!(migrate_first(Some(true), false), Migrate::Register);
+        // The old file goes only once macOS has the Login Item.
+        assert_eq!(
+            migrate_after(Some(SystemStatus::Enabled)),
+            Migrate::RemoveOld
+        );
+        assert_eq!(
+            migrate_after(Some(SystemStatus::RequiresApproval)),
+            Migrate::RemoveOld
+        );
+        // Not there after registering, or registering failed: the old file keeps working.
+        assert_eq!(
+            migrate_after(Some(SystemStatus::NotRegistered)),
+            Migrate::KeepOld
+        );
+        assert_eq!(
+            migrate_after(Some(SystemStatus::NotFound)),
+            Migrate::KeepOld
+        );
+        assert_eq!(migrate_after(None), Migrate::KeepOld);
+        // From the disk image: can't register yet, keep the old file.
+        assert_eq!(migrate_first(Some(true), true), Migrate::KeepOld);
+        // Off: nothing to register, the old file goes (settings already say off).
+        assert_eq!(migrate_first(Some(false), false), Migrate::RemoveOld);
+        assert_eq!(migrate_first(Some(false), true), Migrate::RemoveOld);
+        // Settings unreadable: don't guess, touch nothing.
+        assert_eq!(migrate_first(None, false), Migrate::KeepOld);
+    }
+
+    #[test]
+    fn registered_means_on_or_waiting() {
+        assert!(registered(LoginItem::On));
+        assert!(registered(LoginItem::NeedsApproval));
+        assert!(!registered(LoginItem::Off));
+        assert!(!registered(LoginItem::MoveFirst));
+        assert!(!registered(LoginItem::DevBuild));
     }
 
     #[test]

@@ -244,6 +244,8 @@ fn setup(app: &mut tauri::App, started_at: std::time::SystemTime) -> Result<(), 
         .lock()
         .map(|s| (s.theme.clone(), s.launch_at_login))
         .unwrap_or_default();
+    // A damaged settings file reads as the defaults: then nobody knows what was chosen.
+    let at_login = state.settings_error.is_none().then_some(at_login);
     // Opened at login (`--hidden`) or relaunched by an update while hidden: start in the menu
     // bar / notification area, no window. A restart you asked for ("Restart to update") keeps
     // the arguments but leaves a start-visible note, which wins.
@@ -270,7 +272,7 @@ fn setup(app: &mut tauri::App, started_at: std::time::SystemTime) -> Result<(), 
     let icon_up = app.tray_by_id(tray::TRAY_ID).is_some();
     let hidden = tray::start_hidden(icon_up, first_run, asked_hidden, asked_visible);
     // macOS: after a hidden start, reading your folders waits for a window (folder_access.rs).
-    folder_access::init(app.handle(), &config_dir, hidden);
+    folder_access::init(app.handle(), &config_dir, hidden, first_run);
     if hidden {
         log::info!("started in the menu bar / notification area");
         if let Some(t) = app.try_state::<tray::Tray>() {

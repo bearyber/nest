@@ -42,14 +42,33 @@ function initialTarget(root: HTMLElement, mode: InitialFocus): HTMLElement | nul
   return field ?? tabbables(root)[0] ?? null;
 }
 
+/** Live notes (toasts, "Saved", errors) stay readable and clickable while a dialog is open. */
+const LIVE = "[role='status'], [role='alert']";
+
+/** Was `el` (focused now) focused by a mouse click rather than the keyboard? Browsers show the
+ *  focus ring (`:focus-visible`) only for keyboard focus. Unknown → keyboard. */
+function focusedByMouse(el: HTMLElement): boolean {
+  try {
+    return !el.matches(":focus-visible");
+  } catch {
+    return false;
+  }
+}
+
+/** A button in the window (a toolbar's "New"), not one inside a dialog. */
+const isWindowButton = (el: HTMLElement) =>
+  el.matches("button, [role='button']") && !el.closest("[role='dialog'], [role='alertdialog'], dialog");
+
 /** Sets `inert` on everything outside `el` (each ancestor's other children, up to <body>), also on
- *  siblings added while it's open. Returns the undo, which only clears what it set itself, so a
- *  dialog inside another dialog leaves the outer one's `inert` alone. */
+ *  siblings added while it's open. Live notes (`role="status"` / `"alert"`, e.g. a toast) are left
+ *  alone. Returns the undo, which only clears what it set itself, so a dialog inside another
+ *  dialog leaves the outer one's `inert` alone. */
 function inertOutside(el: HTMLElement): () => void {
   const set: Element[] = [];
   const onPath = new Set<Element>();
   const mark = (sib: Element) => {
     if (onPath.has(sib) || sib.hasAttribute("inert") || sib.tagName === "SCRIPT" || sib.tagName === "STYLE") return;
+    if (sib.matches(LIVE)) return;
     sib.setAttribute("inert", "");
     set.push(sib);
   };
@@ -91,6 +110,10 @@ export function useDialogFocus<T extends HTMLElement>(
     if (!el) return;
     const { modal, initialFocus } = opts.current;
     const before = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+    // A window button clicked with the mouse (WebView2 focuses it on click): on close, focus goes
+    // back to the window instead, so arrows / Enter / Space move the project list again (listKeys).
+    // Keyboard users still get the button back.
+    const giveBackToWindow = before !== null && isWindowButton(before) && focusedByMouse(before);
     if (!el.hasAttribute("tabindex")) el.tabIndex = -1;
     if (modal) el.dataset.modalDialog = "";
     const undoInert = modal ? inertOutside(el) : () => {};
@@ -153,7 +176,11 @@ export function useDialogFocus<T extends HTMLElement>(
       const ours = !active || active === document.body || el.contains(active);
       if (!ours) return;
       if (before && before !== el && before.isConnected && !before.closest("[inert]") && !el.contains(before)) {
-        before.focus();
+        if (giveBackToWindow) {
+          if (active instanceof HTMLElement && active !== document.body) active.blur();
+        } else {
+          before.focus();
+        }
       } else {
         // The opener is gone (e.g. a row that was removed): the enclosing dialog, if any.
         el.parentElement?.closest<HTMLElement>("[role='dialog']")?.focus();

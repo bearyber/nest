@@ -9,6 +9,14 @@
 //! remembers the answer (allow or not) from then on, so a later hidden start can't bring the
 //! question up again. Folders added later come from a folder picker, which grants access by
 //! itself. Windows doesn't ask: nothing waits there.
+//!
+//! Updating from a version before the note: a settings file already there means Nest has run
+//! with its window before, so macOS has already asked. The note is left at start then
+//! (`seed_note`), or every updated Mac would pause syncing after its next login.
+//!
+//! macOS keeps these answers per code signature. Release builds are signed with Developer ID
+//! (`tauri.signing.conf.json` replaces the ad-hoc `signingIdentity: "-"`), so the answers
+//! survive updates. Local builds are signed ad hoc: macOS may ask again after each rebuild.
 
 use std::path::Path;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -30,9 +38,20 @@ pub fn must_wait(mac: bool, started_hidden: bool, asked_before: bool) -> bool {
     mac && started_hidden && !asked_before
 }
 
-/// Launch: open now, or wait for the first window.
-pub fn init(app: &AppHandle, config_dir: &Path, started_hidden: bool) {
-    let asked = config_dir.join(NOTE).exists();
+/// Leave the note at start without a window? On a Mac, when it's missing but Nest has run
+/// here before (a settings file was already there: not a first run). Pure.
+pub fn seed_note(mac: bool, first_run: bool, note_there: bool) -> bool {
+    mac && !first_run && !note_there
+}
+
+/// Launch: open now, or wait for the first window. `first_run`: no settings file was there.
+pub fn init(app: &AppHandle, config_dir: &Path, started_hidden: bool, first_run: bool) {
+    let mut asked = config_dir.join(NOTE).exists();
+    if seed_note(cfg!(target_os = "macos"), first_run, asked) {
+        // Ran here before this version: macOS asked then (with a window showing).
+        leave_note(config_dir);
+        asked = true;
+    }
     let wait = must_wait(cfg!(target_os = "macos"), started_hidden, asked);
     if wait {
         log::info!("folder work waits until a Nest window shows");
@@ -83,7 +102,22 @@ pub fn window_shown(app: &AppHandle) {
 
 #[cfg(test)]
 mod tests {
-    use super::must_wait;
+    use super::{must_wait, seed_note};
+
+    #[test]
+    fn the_note_is_left_for_macs_that_ran_nest_before() {
+        // Updated from a version before the note: settings were there, no note yet.
+        assert!(seed_note(true, false, false));
+        // A first run shows its window; the note comes with it.
+        assert!(!seed_note(true, true, false));
+        // Already there: nothing to do.
+        assert!(!seed_note(true, false, true));
+        // Windows never asks.
+        assert!(!seed_note(false, false, false));
+        // Seeded → an updated Mac's hidden start doesn't wait.
+        let asked = seed_note(true, false, false);
+        assert!(!must_wait(true, true, asked));
+    }
 
     #[test]
     fn only_a_hidden_mac_start_never_asked_before_waits() {
