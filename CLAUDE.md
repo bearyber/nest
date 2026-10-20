@@ -60,6 +60,9 @@ src-tauri/
     tray.rs          menu bar / notification area icon; keep running when the window closes; idle updates
     whats_new.rs     What's new (bundled src/whats-new.json; shown once after an update)
     startup.rs       the "Nest couldn't start" message box (works before the app is up)
+    app_location.rs  macOS: running from the disk image / App Translocation → offer to move to Applications
+    login_item.rs    open at login: SMAppService Login Item (macOS), Run entry (Windows); real state for Settings
+    folder_access.rs macOS: after a hidden start, folder-reading background work waits for a window
     tidy.rs          start-up tidy of Nest's own leftovers (exact-pattern temp files, extras/)
     archive.rs       Archive / Unarchive: one rename, same drive only (moves project folders)
     error.rs         AppError (user-facing message)

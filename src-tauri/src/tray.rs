@@ -633,11 +633,19 @@ pub fn on_menu(app: &AppHandle, id: &str) {
         std::thread::spawn(move || {
             let state = app.state::<AppState>();
             if let Err(e) = crate::commands::open_project(app.clone(), state, key) {
-                app.dialog()
+                let mut d = app
+                    .dialog()
                     .message(e.message)
                     .title("Couldn't open the project")
-                    .kind(tauri_plugin_dialog::MessageDialogKind::Warning)
-                    .show(|_| {});
+                    .kind(tauri_plugin_dialog::MessageDialogKind::Warning);
+                // On the window if it shows (a sheet on a Mac); on its own from the menu bar.
+                if let Some(w) = app
+                    .get_webview_window("main")
+                    .filter(|w| w.is_visible().unwrap_or(false))
+                {
+                    d = d.parent(&w);
+                }
+                d.show(|_| {});
             }
         });
     } else if id == ID_OPEN || id == ID_RESOLVE {
@@ -697,6 +705,7 @@ pub fn show_main(app: &AppHandle) {
         let _ = w.show();
         let _ = w.set_focus();
     }
+    crate::folder_access::window_shown(app);
     if let Some(t) = tray_state(app) {
         if let Ok(mut since) = t.hidden_since.lock() {
             *since = None;
@@ -765,6 +774,7 @@ pub fn on_window_event(window: &Window, event: &WindowEvent) {
             note_activity(app);
             if *focused {
                 set_dock(app, true);
+                crate::folder_access::window_shown(app);
             }
         }
         WindowEvent::Destroyed => {

@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!-- Merged by Tauri into Nest.app's Info.plist. The lines macOS shows when it asks for access. -->
+<plist version="1.0">
+<dict>
+	<key>NSDocumentsFolderUsageDescription</key>
+	<string>Nest makes and lists project folders in the jobs folders you choose.</string>
+	<key>NSDesktopFolderUsageDescription</key>
+	<string>Nest makes and lists project folders in the jobs folders you choose.</string>
+	<key>NSDownloadsFolderUsageDescription</key>
+	<string>Nest makes and lists project folders in the jobs folders you choose.</string>
+	<key>NSRemovableVolumesUsageDescription</key>
+	<string>Nest makes and lists project folders on the drives you choose for your jobs.</string>
+	<key>NSNetworkVolumesUsageDescription</key>
+	<string>Nest makes and lists project folders on the network drives you choose for your jobs.</string>
+</dict>
+</plist>

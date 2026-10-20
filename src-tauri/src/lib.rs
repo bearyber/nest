@@ -1,12 +1,15 @@
+pub mod app_location;
 pub mod apply;
 pub mod archive;
 mod commands;
 pub mod devices;
 mod devices_cmd;
 pub mod error;
+pub mod folder_access;
 pub mod index;
 pub mod kits;
 mod kits_cmd;
+pub mod login_item;
 pub mod manifest;
 mod menu;
 pub mod names;
@@ -58,6 +61,15 @@ pub fn run() {
             tray::show_main(app);
         }));
     }
+    // Windows: open at login through a Run entry that starts Nest with `--hidden` (in the
+    // notification area if the icon is on). macOS uses a real Login Item instead (login_item.rs).
+    #[cfg(not(target_os = "macos"))]
+    {
+        builder = builder.plugin(tauri_plugin_autostart::init(
+            tauri_plugin_autostart::MacosLauncher::LaunchAgent,
+            Some(vec![tray::HIDDEN_ARG]),
+        ));
+    }
     builder
         // One small, rotated log file per machine (Settings → About → Open logs folder).
         // Never logs tokens, device files or project contents.
@@ -86,11 +98,6 @@ pub fn run() {
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_clipboard_manager::init())
         .plugin(tauri_plugin_updater::Builder::new().build())
-        .plugin(tauri_plugin_autostart::init(
-            tauri_plugin_autostart::MacosLauncher::LaunchAgent,
-            // Opened at login: start in the menu bar / notification area if the icon is on.
-            Some(vec![tray::HIDDEN_ARG]),
-        ))
         .manage(update::Pending::default())
         .manage(kits_cmd::Kits::default())
         .manage(tray::Tray::default())
@@ -224,6 +231,9 @@ pub fn run() {
 /// Everything Nest needs before its window shows. An error here becomes the start-up message
 /// box (startup.rs); only what truly can't be worked around is an error.
 fn setup(app: &mut tauri::App, started_at: std::time::SystemTime) -> Result<(), StartupError> {
+    // macOS opens a Login Item without arguments: AppKit's open event says it was a login
+    // launch. Asked first, while that event is still the current one.
+    let at_login_launch = login_item::launched_at_login();
     match app.path().app_log_dir() {
         Ok(dir) => startup::set_log_dir(dir),
         Err(e) => log::warn!("couldn't find the log folder: {e}"),
@@ -241,8 +251,10 @@ fn setup(app: &mut tauri::App, started_at: std::time::SystemTime) -> Result<(), 
     let now = std::time::SystemTime::now();
     let hidden_note = tray::take_start_note(&state.config_dir, tray::StartNote::Hidden, now);
     let asked_visible = tray::take_start_note(&state.config_dir, tray::StartNote::Visible, now);
-    let asked_hidden = std::env::args().any(|a| a == tray::HIDDEN_ARG) || hidden_note;
+    let asked_hidden =
+        std::env::args().any(|a| a == tray::HIDDEN_ARG) || hidden_note || at_login_launch;
     let first_run = state.first_run.load(std::sync::atomic::Ordering::SeqCst);
+    let config_dir = state.config_dir.clone();
     app.manage(state);
     let main = app
         .get_webview_window("main")
@@ -256,7 +268,10 @@ fn setup(app: &mut tauri::App, started_at: std::time::SystemTime) -> Result<(), 
     tray::start(app.handle());
     // Decided by whether the icon is really there: if it couldn't be made, the window shows.
     let icon_up = app.tray_by_id(tray::TRAY_ID).is_some();
-    if tray::start_hidden(icon_up, first_run, asked_hidden, asked_visible) {
+    let hidden = tray::start_hidden(icon_up, first_run, asked_hidden, asked_visible);
+    // macOS: after a hidden start, reading your folders waits for a window (folder_access.rs).
+    folder_access::init(app.handle(), &config_dir, hidden);
+    if hidden {
         log::info!("started in the menu bar / notification area");
         if let Some(t) = app.try_state::<tray::Tray>() {
             t.started_hidden();
@@ -267,17 +282,11 @@ fn setup(app: &mut tauri::App, started_at: std::time::SystemTime) -> Result<(), 
         main.show()
             .map_err(|e| StartupError::new(Step::Window, e))?;
     }
-    // Open-at-login entries made before v0.7 open without `--hidden`: write them again (only
-    // if still on, so a login item turned off in System Settings stays off).
-    if at_login && !cfg!(debug_assertions) {
-        use tauri_plugin_autostart::ManagerExt;
-        let launcher = app.autolaunch();
-        if launcher.is_enabled().unwrap_or(false) {
-            if let Err(e) = launcher.enable() {
-                log::warn!("couldn't refresh open at login: {e}");
-            }
-        }
-    }
+    // Open-at-login entries from older versions: macOS moves to a real Login Item, Windows
+    // rewrites its Run entry with `--hidden` (only if still on).
+    login_item::migrate(app.handle(), at_login);
+    // macOS: running from the disk image or Downloads? Offer to move to Applications.
+    app_location::start(app.handle());
     update::start(app.handle());
     devices_cmd::start(app.handle());
     resolve_cmd::start(app.handle());

@@ -10,14 +10,14 @@ use std::sync::atomic::Ordering;
 
 use chrono::{Datelike, Local};
 use serde::Serialize;
-use tauri::{AppHandle, Emitter, Manager, State, WebviewUrl, WebviewWindowBuilder};
-use tauri_plugin_autostart::ManagerExt as _;
+use tauri::{AppHandle, Emitter, Manager, State, WebviewUrl, WebviewWindow, WebviewWindowBuilder};
 use tauri_plugin_dialog::{DialogExt, MessageDialogButtons, MessageDialogKind};
 use tauri_plugin_opener::OpenerExt;
 
 use crate::commands::{lock, reload_templates, AppState};
 use crate::error::{bin_name, io_reason, AppError, AppResult};
 use crate::index::scan_root;
+use crate::login_item::LoginItem;
 use crate::plan::Date;
 use crate::settings::{self, Settings};
 use crate::template::{FileEntry, Template};
@@ -42,9 +42,11 @@ pub struct SettingsView {
     pub dev_build: bool,
     /// First run suggests this job-code letter for this computer (W on Windows, M on a Mac).
     pub suggested_marker: &'static str,
+    /// Opening at login as the system has it now (not just what was last clicked).
+    pub login_item: LoginItem,
 }
 
-fn view(state: &AppState) -> AppResult<SettingsView> {
+fn view(app: &AppHandle, state: &AppState) -> AppResult<SettingsView> {
     Ok(SettingsView {
         settings: lock(&state.settings)?.clone(),
         settings_error: state.settings_error.clone(),
@@ -52,6 +54,7 @@ fn view(state: &AppState) -> AppResult<SettingsView> {
         templates_folder: state.user_templates.clone(),
         dev_build: cfg!(debug_assertions),
         suggested_marker: crate::settings::suggested_marker(),
+        login_item: crate::login_item::state(app),
     })
 }
 
@@ -73,14 +76,14 @@ fn edit(
         settings::save(&state.config_dir, &next)?;
         *current = next;
     }
-    let v = view(state)?;
+    let v = view(app, state)?;
     let _ = app.emit(CHANGED_EVENT, ());
     Ok(v)
 }
 
 #[tauri::command(async)]
-pub fn get_settings(state: State<'_, AppState>) -> AppResult<SettingsView> {
-    view(&state)
+pub fn get_settings(app: AppHandle, state: State<'_, AppState>) -> AppResult<SettingsView> {
+    view(&app, &state)
 }
 
 // ── Windows ──
@@ -149,9 +152,10 @@ pub fn open_settings_window(app: &AppHandle) -> tauri::Result<()> {
 #[tauri::command(async)]
 pub fn add_jobs_root(
     app: AppHandle,
+    window: WebviewWindow,
     state: State<'_, AppState>,
 ) -> AppResult<Option<SettingsView>> {
-    let Some(path) = pick_folder(&app, "Add a jobs folder")? else {
+    let Some(path) = pick_folder(&window, "Add a jobs folder")? else {
         return Ok(None);
     };
     edit(&app, &state, |s| {
@@ -180,9 +184,10 @@ pub fn set_personal_root(
 #[tauri::command(async)]
 pub fn choose_personal_root(
     app: AppHandle,
+    window: WebviewWindow,
     state: State<'_, AppState>,
 ) -> AppResult<Option<SettingsView>> {
-    let Some(path) = pick_folder(&app, "Choose the folder for Personal projects")? else {
+    let Some(path) = pick_folder(&window, "Choose the folder for Personal projects")? else {
         return Ok(None);
     };
     edit(&app, &state, |s| {
@@ -204,12 +209,13 @@ pub fn choose_personal_root(
 #[tauri::command(async)]
 pub fn set_archive_folder(
     app: AppHandle,
+    window: WebviewWindow,
     state: State<'_, AppState>,
 ) -> AppResult<Option<SettingsView>> {
-    let Some(path) = pick_folder(&app, "Choose the archive folder")? else {
+    let Some(path) = pick_folder(&window, "Choose the archive folder")? else {
         return Ok(None);
     };
-    switch_archive_folder(&app, &state, Some(path))
+    switch_archive_folder(&app, &window, &state, Some(path))
 }
 
 /// Stop watching the archive folder. Nothing on disk changes; its projects leave the list.
@@ -217,15 +223,17 @@ pub fn set_archive_folder(
 #[tauri::command(async)]
 pub fn clear_archive_folder(
     app: AppHandle,
+    window: WebviewWindow,
     state: State<'_, AppState>,
 ) -> AppResult<Option<SettingsView>> {
-    switch_archive_folder(&app, &state, None)
+    switch_archive_folder(&app, &window, &state, None)
 }
 
 /// "Use again" on a previous archive folder.
 #[tauri::command(async)]
 pub fn use_past_archive_folder(
     app: AppHandle,
+    window: WebviewWindow,
     state: State<'_, AppState>,
     path: PathBuf,
 ) -> AppResult<Option<SettingsView>> {
@@ -240,7 +248,7 @@ pub fn use_past_archive_folder(
             path.display()
         )));
     }
-    switch_archive_folder(&app, &state, Some(path))
+    switch_archive_folder(&app, &window, &state, Some(path))
 }
 
 /// Remove a folder from "Previous archive folders" (only the note; nothing on disk changes).
@@ -261,6 +269,7 @@ pub fn forget_past_archive_folder(
 /// "Previous archive folders". `None` = cancelled.
 fn switch_archive_folder(
     app: &AppHandle,
+    window: &WebviewWindow,
     state: &AppState,
     to: Option<PathBuf>,
 ) -> AppResult<Option<SettingsView>> {
@@ -273,7 +282,7 @@ fn switch_archive_folder(
             } else {
                 format!("{count} projects")
             };
-            let confirmed = app
+            let confirmed = window
                 .dialog()
                 .message(format!(
                     "Your current archive folder ({}) has {projects}. They stay there, but Nest will stop showing them. You can switch back any time under \"Previous archive folders\".",
@@ -285,6 +294,7 @@ fn switch_archive_folder(
                     "Turn off the archive folder?"
                 })
                 .kind(MessageDialogKind::Info)
+                .parent(window)
                 .buttons(MessageDialogButtons::OkCancelCustom(
                     if to.is_some() { "Change" } else { "Turn off" }.into(),
                     "Cancel".into(),
@@ -353,18 +363,8 @@ pub fn set_launch_at_login(
     state: State<'_, AppState>,
     on: bool,
 ) -> AppResult<SettingsView> {
-    if cfg!(debug_assertions) {
-        return Err(AppError::new(
-            "Launch at login only works in the installed app",
-        ));
-    }
-    let launcher = app.autolaunch();
-    let result = if on {
-        launcher.enable()
-    } else {
-        launcher.disable()
-    };
-    result.map_err(|e| AppError::new(format!("Couldn't change launch at login: {e}")))?;
+    crate::login_item::set(&app, on)?;
+    // Remembered too: an old-style entry is only moved over (login_item::migrate) if it was on.
     edit(&app, &state, |s| {
         s.launch_at_login = on;
         Ok(())
@@ -525,12 +525,14 @@ pub(crate) fn templates_changed(app: &AppHandle, state: &AppState) -> AppResult<
 #[tauri::command(async)]
 pub fn import_template(
     app: AppHandle,
+    window: WebviewWindow,
     state: State<'_, AppState>,
 ) -> AppResult<Option<TemplateInfo>> {
     let _one = lock(&state.templates_lock)?; // one change to your templates at a time
-    let Some(file) = app
+    let Some(file) = window
         .dialog()
         .file()
+        .set_parent(&window)
         .set_title("Import a template")
         .add_filter("Nest template", &[PACKAGE_EXT, "json"])
         .blocking_pick_file()
@@ -606,11 +608,16 @@ fn install_template_file(
 
 /// Save a template as a `.nesttemplate` file. `false` if the dialog was cancelled.
 #[tauri::command(async)]
-pub fn export_template(app: AppHandle, state: State<'_, AppState>, key: String) -> AppResult<bool> {
+pub fn export_template(
+    window: WebviewWindow,
+    state: State<'_, AppState>,
+    key: String,
+) -> AppResult<bool> {
     let t = find_template(&state, &key)?;
-    let Some(dest) = app
+    let Some(dest) = window
         .dialog()
         .file()
+        .set_parent(&window)
         .set_title("Export template")
         .set_file_name(format!("{}.{PACKAGE_EXT}", t.loaded.template.id))
         .add_filter("Nest template", &[PACKAGE_EXT])
@@ -649,7 +656,12 @@ fn versions_phrase(n: usize) -> String {
 /// Move one of your templates (every saved version of it) to the Recycle Bin / Trash, after a
 /// native confirm that says how many versions go (spec §12a #16, extended 2026-10-02).
 #[tauri::command(async)]
-pub fn delete_template(app: AppHandle, state: State<'_, AppState>, key: String) -> AppResult<bool> {
+pub fn delete_template(
+    app: AppHandle,
+    window: WebviewWindow,
+    state: State<'_, AppState>,
+    key: String,
+) -> AppResult<bool> {
     let _one = lock(&state.templates_lock)?; // one change to your templates at a time
     let t = find_template(&state, &key)?;
     if t.built_in {
@@ -657,13 +669,14 @@ pub fn delete_template(app: AppHandle, state: State<'_, AppState>, key: String) 
             "Built-in templates can't be deleted, only hidden",
         ));
     }
-    bin_yours(&app, &state, &t, "")
+    bin_yours(&app, &window, &state, &t, "")
 }
 
 /// The native confirm, then every version of one of yours to the Recycle Bin / Trash.
 /// `false` if cancelled. The caller holds the templates lock.
 fn bin_yours(
     app: &AppHandle,
+    window: &WebviewWindow,
     state: &AppState,
     t: &template_io::Installed,
     extra: &str,
@@ -672,7 +685,7 @@ fn bin_yours(
     let id = t.loaded.template.id.clone();
     let count = template_edit::your_versions(&id, &installed).len();
     let bin = bin_name();
-    let confirmed = app
+    let confirmed = window
         .dialog()
         .message(format!(
             "\"{}\"{} will be moved to the {bin}. You can restore it from there. Projects made with it aren't affected.{extra}",
@@ -681,6 +694,7 @@ fn bin_yours(
         ))
         .title(format!("Move template to the {bin}?"))
         .kind(MessageDialogKind::Warning)
+        .parent(window)
         .buttons(MessageDialogButtons::OkCancelCustom(format!("Move to {bin}"), "Cancel".into()))
         .blocking_show();
     if !confirmed {
@@ -698,7 +712,12 @@ fn bin_yours(
 /// version of one of Nest's goes to the bin and Nest's original is hidden too, so removing
 /// it doesn't bring the original back in its place. `false` if cancelled.
 #[tauri::command(async)]
-pub fn remove_template(app: AppHandle, state: State<'_, AppState>, key: String) -> AppResult<bool> {
+pub fn remove_template(
+    app: AppHandle,
+    window: WebviewWindow,
+    state: State<'_, AppState>,
+    key: String,
+) -> AppResult<bool> {
     let _one = lock(&state.templates_lock)?; // one change to your templates at a time
     let t = find_template(&state, &key)?;
     let installed = lock(&state.templates)?.clone();
@@ -716,7 +735,7 @@ pub fn remove_template(app: AppHandle, state: State<'_, AppState>, key: String) 
             } else {
                 ""
             };
-            if !bin_yours(&app, &state, &t, extra)? {
+            if !bin_yours(&app, &window, &state, &t, extra)? {
                 return Ok(false);
             }
             if hide_original {
@@ -744,7 +763,12 @@ pub fn restore_builtin_templates(
 
 /// "Go back to Nest's original": your version of a built-in goes to the Recycle Bin / Trash.
 #[tauri::command(async)]
-pub fn reset_template(app: AppHandle, state: State<'_, AppState>, key: String) -> AppResult<bool> {
+pub fn reset_template(
+    app: AppHandle,
+    window: WebviewWindow,
+    state: State<'_, AppState>,
+    key: String,
+) -> AppResult<bool> {
     let _one = lock(&state.templates_lock)?; // one change to your templates at a time
     let t = find_template(&state, &key)?;
     let installed = lock(&state.templates)?.clone();
@@ -759,7 +783,7 @@ pub fn reset_template(app: AppHandle, state: State<'_, AppState>, key: String) -
     }
     let count = template_edit::your_versions(&id, &installed).len();
     let bin = bin_name();
-    let confirmed = app
+    let confirmed = window
         .dialog()
         .message(format!(
             "Your version of \"{}\"{} will be moved to the {bin}, and Nest's original comes back in New Project. You can restore yours from the {bin}. Projects you already made aren't affected.",
@@ -768,6 +792,7 @@ pub fn reset_template(app: AppHandle, state: State<'_, AppState>, key: String) -
         ))
         .title("Go back to Nest's original?")
         .kind(MessageDialogKind::Warning)
+        .parent(&window)
         .buttons(MessageDialogButtons::OkCancelCustom("Go back to original".into(), "Cancel".into()))
         .blocking_show();
     if !confirmed {
@@ -941,16 +966,17 @@ pub struct FolderDraft {
 /// it's saved or the editor closes; the UI only gets its key. `None` if cancelled.
 #[tauri::command(async)]
 pub fn template_from_folder(
-    app: AppHandle,
+    window: WebviewWindow,
     state: State<'_, AppState>,
     path: Option<String>,
 ) -> AppResult<Option<FolderDraft>> {
     let path = match path {
         Some(p) => PathBuf::from(p),
         None => {
-            let picked = app
+            let picked = window
                 .dialog()
                 .file()
+                .set_parent(&window)
                 .set_title("Make a template from a folder")
                 .blocking_pick_folder();
             let Some(picked) = picked else {
@@ -964,9 +990,11 @@ pub fn template_from_folder(
     // Always folders and files; only a folder over the 200 MB limit asks about folders only.
     let installed = lock(&state.templates)?.clone();
     let folders_only = || {
-        app.dialog()
+        window
+            .dialog()
             .message("That folder's files add up to more than 200 MB. Make the template from its folders only?")
             .title("Folder too big")
+            .parent(&window)
             .buttons(MessageDialogButtons::OkCancelCustom(
                 "Folders only".into(),
                 "Cancel".into(),
@@ -1044,7 +1072,7 @@ pub struct AddedFiles {
 /// cancelled.
 #[tauri::command(async)]
 pub fn editor_add_files(
-    app: AppHandle,
+    window: WebviewWindow,
     state: State<'_, AppState>,
     key: String,
     into: String,
@@ -1053,9 +1081,10 @@ pub fn editor_add_files(
     let paths: Vec<PathBuf> = match paths {
         Some(p) => p.into_iter().map(PathBuf::from).collect(),
         None => {
-            let Some(picked) = app
+            let Some(picked) = window
                 .dialog()
                 .file()
+                .set_parent(&window)
                 .set_title("Add files to the template")
                 .blocking_pick_files()
             else {
@@ -1237,8 +1266,16 @@ pub fn open_logs_folder(app: AppHandle) -> AppResult<()> {
 
 // ── First run ──
 
-pub(crate) fn pick_folder(app: &AppHandle, title: &str) -> AppResult<Option<PathBuf>> {
-    let Some(picked) = app.dialog().file().set_title(title).blocking_pick_folder() else {
+/// A folder picker on the window that asked (a sheet on a Mac; in front of, and blocking, its
+/// window on Windows).
+pub(crate) fn pick_folder(window: &WebviewWindow, title: &str) -> AppResult<Option<PathBuf>> {
+    let Some(picked) = window
+        .dialog()
+        .file()
+        .set_parent(window)
+        .set_title(title)
+        .blocking_pick_folder()
+    else {
         return Ok(None);
     };
     let path = picked
@@ -1263,8 +1300,8 @@ pub struct FolderInfo {
 
 /// First run: pick the jobs folder (nothing is saved yet).
 #[tauri::command(async)]
-pub fn first_run_pick_folder(app: AppHandle) -> AppResult<Option<FolderInfo>> {
-    Ok(pick_folder(&app, "Choose your jobs folder")?.map(folder_info))
+pub fn first_run_pick_folder(window: WebviewWindow) -> AppResult<Option<FolderInfo>> {
+    Ok(pick_folder(&window, "Choose your jobs folder")?.map(folder_info))
 }
 
 /// First run: create "Nest Jobs" (or "NestDev" in dev builds) in Documents, one level only.
@@ -1428,9 +1465,9 @@ fn save_first_template(
 
 /// First run: pick the folder you copy for every job (nothing is read until setup finishes).
 #[tauri::command(async)]
-pub fn first_run_pick_template_folder(app: AppHandle) -> AppResult<Option<String>> {
+pub fn first_run_pick_template_folder(window: WebviewWindow) -> AppResult<Option<String>> {
     Ok(
-        pick_folder(&app, "Choose the folder you copy for every job")?
+        pick_folder(&window, "Choose the folder you copy for every job")?
             .map(|p| p.to_string_lossy().into_owned()),
     )
 }
