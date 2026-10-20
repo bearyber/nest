@@ -24,6 +24,7 @@ const SUGGESTED_DAYS = 90;
 /** General: jobs folders, default space, menu bar icon, open at login. */
 export default function GeneralTab({ view, run }: TabProps) {
   const s = view.settings;
+  const login = view.loginItem;
   const roots = s.jobsRoots;
   // Said after changing / turning off the archive folder, so its address is never lost.
   const oldArchiveNote = s.archiveFolder
@@ -217,16 +218,20 @@ export default function GeneralTab({ view, run }: TabProps) {
         <label className={styles.check}>
           <input
             type="checkbox"
-            checked={s.launchAtLogin}
-            disabled={view.devBuild}
+            checked={login === "on" || login === "needsApproval"}
+            disabled={login === "devBuild" || login === "moveFirst"}
             onChange={(e) => run(setLaunchAtLogin(e.target.checked))}
           />
           Open Nest when you log in to this computer
         </label>
         <p className={styles.hint}>
-          {view.devBuild
+          {login === "devBuild"
             ? "Only available in the installed app."
-            : s.showInMenuBar
+            : login === "moveFirst"
+              ? "Move Nest to your Applications folder first."
+              : login === "needsApproval"
+                ? "Allow Nest in System Settings → General → Login Items."
+                : s.showInMenuBar
               ? isMac()
                 ? "Off unless you turn it on. Nest then waits in the menu bar, without opening a window."
                 : "Off unless you turn it on. Nest then waits in the notification area, without opening a window."

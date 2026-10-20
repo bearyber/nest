@@ -21,7 +21,7 @@ vi.mock("../../lib/commands", () => ({
 import GeneralTab from "./GeneralTab";
 import type { SettingsView } from "../../lib/types";
 
-function view(showInMenuBar: boolean): SettingsView {
+function view(showInMenuBar: boolean, loginItem: SettingsView["loginItem"] = "off"): SettingsView {
   return {
     settings: {
       jobsRoots: [],
@@ -41,6 +41,7 @@ function view(showInMenuBar: boolean): SettingsView {
     templatesFolder: "/t",
     devBuild: false,
     suggestedMarker: "M",
+    loginItem,
   } as unknown as SettingsView;
 }
 
@@ -70,5 +71,36 @@ describe("GeneralTab: menu bar icon", () => {
     expect(box.checked).toBe(false);
     expect(screen.getByText("Closing the window quits Nest.")).toBeTruthy();
     expect((screen.getByLabelText("Open Nest when you log in to this computer") as HTMLInputElement).checked).toBe(false);
+  });
+});
+
+describe("GeneralTab: open at login", () => {
+  const box = () => screen.getByLabelText("Open Nest when you log in to this computer") as HTMLInputElement;
+
+  it("shows what the system has, not the last click", () => {
+    render(<GeneralTab view={view(true, "on")} run={run} />);
+    expect(box().checked).toBe(true);
+    expect(box().disabled).toBe(false);
+  });
+
+  it("waiting for approval: ticked, with where to allow it", () => {
+    document.documentElement.dataset.platform = "mac";
+    render(<GeneralTab view={view(true, "needsApproval")} run={run} />);
+    expect(box().checked).toBe(true);
+    expect(screen.getByText("Allow Nest in System Settings → General → Login Items.")).toBeTruthy();
+  });
+
+  it("running from the disk image: off, can't be turned on, says why", () => {
+    document.documentElement.dataset.platform = "mac";
+    render(<GeneralTab view={view(true, "moveFirst")} run={run} />);
+    expect(box().checked).toBe(false);
+    expect(box().disabled).toBe(true);
+    expect(screen.getByText("Move Nest to your Applications folder first.")).toBeTruthy();
+  });
+
+  it("dev builds can't change it", () => {
+    render(<GeneralTab view={view(false, "devBuild")} run={run} />);
+    expect(box().disabled).toBe(true);
+    expect(screen.getByText("Only available in the installed app.")).toBeTruthy();
   });
 });

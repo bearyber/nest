@@ -392,7 +392,13 @@ export interface SettingsView {
   devBuild: boolean;
   /** First run suggests this job-code letter (W on Windows, M on a Mac). */
   suggestedMarker: string;
+  /** Opening at login as the system has it now (mirrors login_item.rs `LoginItem`). */
+  loginItem: LoginItem;
 }
+
+/** "on" / "off"; "needsApproval" = Mac, allow it in System Settings; "moveFirst" = Mac, Nest
+ *  runs from the disk image or Downloads; "devBuild" = only in the installed app. */
+export type LoginItem = "off" | "on" | "needsApproval" | "moveFirst" | "devBuild";
 
 export interface TemplateInfo {
   /** `user:<folder>` or `builtin:<folder>`. */

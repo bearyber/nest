@@ -132,6 +132,9 @@ pub fn project_folders(dirs: &[PathBuf], now: SystemTime) -> Vec<PathBuf> {
 pub fn start(app: &AppHandle, started: SystemTime) {
     let app = app.clone();
     std::thread::spawn(move || {
+        // Looks in the synced folder and project folders: not before a window shows after a
+        // hidden start on a Mac (folder_access.rs).
+        crate::folder_access::wait(&app);
         let state = app.state::<AppState>();
         let now = SystemTime::now();
         let mut removed = templates_folder(&state.user_templates, now);

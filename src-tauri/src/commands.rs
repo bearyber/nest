@@ -495,7 +495,7 @@ fn remember_template(state: &AppState, template_id: &str) {
 /// the OS picker's own "New folder" button is how a new one gets made.
 #[tauri::command(async)]
 pub fn choose_jobs_root(
-    app: tauri::AppHandle,
+    window: tauri::WebviewWindow,
     state: State<'_, AppState>,
 ) -> AppResult<Option<PathBuf>> {
     if let Some(e) = &state.settings_error {
@@ -504,7 +504,11 @@ pub fn choose_jobs_root(
         )));
     }
     let current = lock(&state.settings)?.jobs_roots.first().cloned();
-    let mut dialog = app.dialog().file().set_title("Choose your jobs folder");
+    let mut dialog = window
+        .dialog()
+        .file()
+        .set_parent(&window)
+        .set_title("Choose your jobs folder");
     if let Some(dir) = current.filter(|d| d.is_dir()) {
         dialog = dialog.set_directory(dir);
     }
@@ -596,6 +600,13 @@ pub fn rescan_projects(
     app: tauri::AppHandle,
     state: State<'_, AppState>,
 ) -> AppResult<RescanSummary> {
+    // macOS, hidden start: the (hidden) window's launch rescan waits; showing a window opens
+    // the gate and asks for a rescan (folder_access.rs).
+    if !crate::folder_access::is_open(&app) {
+        return Err(AppError::new(
+            "Nest reads your folders once its window shows",
+        ));
+    }
     if state.scanning.swap(true, Ordering::SeqCst) {
         return Err(AppError::new("A rescan is already running"));
     }
@@ -800,6 +811,7 @@ pub fn set_status(
 #[tauri::command(async)]
 pub fn archive_project(
     app: tauri::AppHandle,
+    window: tauri::WebviewWindow,
     state: State<'_, AppState>,
     key: String,
     unarchive: bool,
@@ -870,11 +882,12 @@ pub fn archive_project(
             "Archive",
         )
     };
-    let confirmed = app
+    let confirmed = window
         .dialog()
         .message(message)
         .title(title)
         .kind(MessageDialogKind::Info)
+        .parent(&window)
         .buttons(MessageDialogButtons::OkCancelCustom(
             button.into(),
             "Cancel".into(),

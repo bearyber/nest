@@ -84,6 +84,11 @@ pub fn sync_now(app: &AppHandle) {
     let Some(state) = app.try_state::<AppState>() else {
         return;
     };
+    // Reads the synced folder and your jobs folders: not before a window shows after a hidden
+    // start on a Mac (folder_access.rs). Opening the gate syncs.
+    if !crate::folder_access::is_open(app) {
+        return;
+    }
     let dev = &state.devices;
     if dev.syncing.swap(true, Ordering::SeqCst) {
         dev.again.store(true, Ordering::SeqCst);
@@ -437,11 +442,15 @@ pub fn sync_on_quit(app: &AppHandle) {
 /// Launch: sync now, then every minute.
 pub fn start(app: &AppHandle) {
     let app = app.clone();
-    thread::spawn(move || loop {
-        sync_now(&app);
-        // Resolve starter projects waiting: try again while Resolve runs.
-        crate::resolve_cmd::tick(&app);
-        thread::sleep(EVERY);
+    thread::spawn(move || {
+        // macOS, hidden start: not before a window shows (folder_access.rs).
+        crate::folder_access::wait(&app);
+        loop {
+            sync_now(&app);
+            // Resolve starter projects waiting: try again while Resolve runs.
+            crate::resolve_cmd::tick(&app);
+            thread::sleep(EVERY);
+        }
     });
 }
 
@@ -562,10 +571,11 @@ pub fn devices_detect() -> Vec<SyncedFolder> {
 
 /// "Choose another folder…": any folder your cloud app or NAS syncs.
 #[tauri::command(async)]
-pub fn devices_pick_folder(app: AppHandle) -> AppResult<Option<PathBuf>> {
-    let Some(picked) = app
+pub fn devices_pick_folder(window: tauri::WebviewWindow) -> AppResult<Option<PathBuf>> {
+    let Some(picked) = window
         .dialog()
         .file()
+        .set_parent(&window)
         .set_title("Choose a folder that syncs between your computers")
         .blocking_pick_folder()
     else {

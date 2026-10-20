@@ -504,6 +504,9 @@ pub fn start(app: &AppHandle) {
         {
             let _ = read_list(&state, &rs);
         }
+        // Adding to Resolve reads project folders: not before a window shows after a hidden
+        // start on a Mac (folder_access.rs).
+        crate::folder_access::wait(&app);
         let mut was_running = false;
         loop {
             if has_work(&app) {

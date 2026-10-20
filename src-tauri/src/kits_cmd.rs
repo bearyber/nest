@@ -7,7 +7,7 @@ use std::sync::atomic::AtomicBool;
 use std::sync::{Arc, Mutex};
 
 use serde::Serialize;
-use tauri::{AppHandle, State};
+use tauri::{AppHandle, State, WebviewWindow};
 
 use crate::commands::{lock, AppState, PlanRequest};
 use crate::error::{AppError, AppResult};
@@ -183,9 +183,11 @@ pub fn kits_view(state: State<'_, AppState>) -> AppResult<KitsView> {
 #[tauri::command(async)]
 pub fn choose_kits_folder(
     app: AppHandle,
+    window: WebviewWindow,
     kits: State<'_, Kits>,
 ) -> AppResult<Option<SettingsView>> {
-    let Some(path) = pick_folder(&app, "Choose your Kits folder (one folder per client)")? else {
+    let Some(path) = pick_folder(&window, "Choose your Kits folder (one folder per client)")?
+    else {
         return Ok(None);
     };
     let v = edit_settings(&app, |s| s.set_kits_folder(Some(path)))?;
@@ -206,6 +208,7 @@ pub fn clear_kits_folder(app: AppHandle, kits: State<'_, Kits>) -> AppResult<Set
 #[tauri::command(async)]
 pub fn choose_client_kit(
     app: AppHandle,
+    window: WebviewWindow,
     kits: State<'_, Kits>,
     code: String,
     name: String,
@@ -214,7 +217,7 @@ pub fn choose_client_kit(
         "" => "Choose the folder with the client's files".to_string(),
         name => format!("Choose the folder with {name}'s files"),
     };
-    let Some(path) = pick_folder(&app, &title)? else {
+    let Some(path) = pick_folder(&window, &title)? else {
         return Ok(None);
     };
     let v = edit_settings(&app, |s| s.set_client_kit(&code, Some(path)))?;

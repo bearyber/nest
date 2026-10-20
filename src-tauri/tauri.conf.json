@@ -33,12 +33,15 @@
       "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IEFERjhGNDE2RTYzMjM1NzUKUldSMU5UTG1GdlQ0cmZSTmpEZ3RsbmtDckNQWDY3bFBLdkgyS3JoZ0VPdm5iZlJQR1BUT2h4UEYK",
       "endpoints": ["https://github.com/bearyber/nest-releases/releases/latest/download/latest.json"],
       "windows": {
-        "installMode": "passive"
+        "installMode": "quiet"
       }
     }
   },
   "bundle": {
     "active": true,
+    "publisher": "INTRVL",
+    "copyright": "© 2026 INTRVL",
+    "category": "Productivity",
     "createUpdaterArtifacts": true,
     "targets": ["nsis", "app", "dmg"],
     "resources": {
@@ -50,7 +53,8 @@
       }
     },
     "macOS": {
-      "signingIdentity": "-"
+      "signingIdentity": "-",
+      "minimumSystemVersion": "13.0"
     },
     "icon": [
       "icons/32x32.png",
