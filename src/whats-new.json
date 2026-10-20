@@ -1,10 +1,10 @@
 {
   "0.7.1": [
     "Resolve: a project with no client goes into a folder named after its space (e.g. Personal), never loose at the top",
-    "New Project says plainly what happens in Resolve: Adds “…” to DaVinci Resolve, in Acme",
-    "The preview's fold button opens the folders again on the next press",
-    "Saving a template no longer asks for permission to control Finder",
-    "A calmer sidebar: hovering a row no longer looks like a second selection"
+    "Mac: Open at login now shows as Nest under Login Items, and Nest offers to move itself to Applications if you opened it from the download",
+    "Mac: folder access is explained, and no permission box pops up while Nest is hidden at login",
+    "Easier to read and to use with the keyboard: clearer grey text and buttons, Enter does what the focused button says, dialogs keep the cursor inside",
+    "Smaller fixes: the preview's fold button opens again, no \"control Finder\" request, a calmer sidebar, quiet updates on Windows"
   ],
   "0.7.0": [
     "Nest lives in the menu bar (Windows: by the clock): close the window and it keeps running, with New Project and your recent jobs one click away",
