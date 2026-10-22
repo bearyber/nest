@@ -32,6 +32,8 @@ function dev(extra: Partial<DevicesView> = {}): DevicesView {
     thisLetter: "W",
     letterClash: [pc],
     suggestedLetter: "P",
+    copiedNote: false,
+    systemName: "MacBook",
     ...extra,
   };
 }

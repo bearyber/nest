@@ -22,6 +22,12 @@ pub struct Settings {
     /// v0.7.4: letters this computer used before (newest last), so a changed letter continues
     /// the numbers (W05 → WL06). Published in the device file too.
     pub past_markers: Vec<String>,
+    /// v0.7.4: this computer's own earlier launch tokens (newest last), so its own earlier
+    /// writes of its device list are never taken for another install's (copied.rs).
+    pub past_tokens: Vec<String>,
+    /// v0.7.4: this computer was found to be a copy and got its own id; the note that asks
+    /// for a name is still to be answered.
+    pub copied_note: bool,
     pub last_template: Option<String>,
     /// Spaces whose projects have no client (the Client field is hidden there).
     pub no_client_spaces: Vec<String>,
@@ -122,6 +128,8 @@ impl Default for Settings {
             code_pattern: DEFAULT_CODE_PATTERN.into(),
             local_marker: "L".into(),
             past_markers: vec![],
+            past_tokens: vec![],
+            copied_note: false,
             last_template: None,
             no_client_spaces: vec!["Personal".into()],
             own_code: "OWN".into(),

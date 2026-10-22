@@ -546,6 +546,10 @@ export interface DevicesView {
   letterClash: ComputerLetter[];
   /** A free letter for this computer: never one in `letters`, and different from computer to computer. */
   suggestedLetter: string;
+  /** v0.7.4: this computer was a copy and has its own place in the list now; the note asking for a name is still to answer. */
+  copiedNote: boolean;
+  /** The computer's name as the system has it: where the note's name box starts. */
+  systemName: string;
 }
 
 /** One other computer and its job-code letter (Rust `markers::ComputerLetter`). */

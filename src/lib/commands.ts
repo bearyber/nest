@@ -200,6 +200,7 @@ export const devicesEnable = (name: string, folder: string) => s<DevicesView>("d
 export const devicesDisable = () => s<DevicesView>("devices_disable");
 export const devicesForget = (deviceId: string, forget: boolean) =>
   s<DevicesView>("devices_forget", { deviceId, forget });
+export const devicesNameCopied = (name: string) => s<DevicesView>("devices_name_copied", { name });
 export const devicesClaim = (deviceId: string) => s<DevicesView>("devices_claim", { deviceId });
 export const devicesRefresh = () => invoke<void>("devices_refresh");
 export const devicesSetSyncTemplates = (on: boolean) => s<DevicesView>("devices_set_sync_templates", { on });

@@ -16,6 +16,7 @@ use tauri::{AppHandle, Emitter, Manager, State};
 use tauri_plugin_dialog::DialogExt;
 
 use crate::commands::{lock, AppState};
+use crate::copied::{self, Verdict};
 use crate::devices::{self, DeviceFile, OtherDevice, SyncedFolder};
 use crate::error::{AppError, AppResult};
 use crate::index::ChangedBy;
@@ -48,6 +49,8 @@ pub struct DevicesRuntime {
     pub requests_paused: bool,
     /// v0.5 template sync: plain words when it couldn't run.
     pub template_problem: Option<String>,
+    /// v0.7.4: what has been seen of another install writing this computer's list.
+    pub watch: crate::copied::Watch,
 }
 
 #[derive(Default)]
@@ -134,19 +137,63 @@ fn sync_inner(state: &AppState, dev: &Devices) -> bool {
     let setup = (id.clone(), folder.clone());
     let dir = devices::devices_dir(&folder, cfg!(debug_assertions));
     // 1. Take a copy of what we remember (a different id or folder starts afresh).
-    let (mut last, mut cache, before) = {
+    let (mut last, mut cache, mut watch, before) = {
         let Ok(rt) = dev.runtime.lock() else {
             return false;
         };
         let before = (rt.others.clone(), rt.problem.clone());
         if rt.for_setup.as_ref() == Some(&setup) {
-            (rt.last_written.clone(), rt.cache.clone(), before)
+            (
+                rt.last_written.clone(),
+                rt.cache.clone(),
+                rt.watch.clone(),
+                before,
+            )
         } else {
-            (None, HashMap::new(), before)
+            (None, HashMap::new(), copied::Watch::default(), before)
         }
     };
     // 2. File work, no lock held.
     let online = folder.is_dir();
+
+    // 1b. Is another install writing this computer's list (a copied computer)? Before
+    // anything else uses the id: a copy that keeps the id would also send the original's old
+    // requests again. The token of this launch is remembered first, so this computer's own
+    // earlier writes are never taken for someone else's.
+    if online {
+        let token = copied::launch_token();
+        let mut past = settings.past_tokens.clone();
+        if copied::remember_token(&mut past, token) {
+            let kept = past.clone();
+            if let Err(e) = crate::settings_cmd::edit_settings_quietly(state, |s| {
+                s.past_tokens = kept;
+                Ok(())
+            }) {
+                log::warn!("couldn't remember this launch's token: {}", e.message);
+            }
+        }
+        match copied::step(&dir, &id, token, &past, &mut watch, &mut last) {
+            Verdict::Move => {
+                let new_id = uuid::Uuid::new_v4().hyphenated().to_string();
+                match crate::settings_cmd::edit_settings_quietly(state, |s| {
+                    copied::move_to_new_id(s, new_id);
+                    Ok(())
+                }) {
+                    Ok(()) => {
+                        log::info!("this computer was copied: it now has its own id");
+                        if let Ok(mut rt) = dev.runtime.lock() {
+                            *rt = DevicesRuntime::default();
+                        }
+                        // Start again at once under the new id.
+                        dev.again.store(true, Ordering::SeqCst);
+                        return true;
+                    }
+                    Err(e) => log::warn!("couldn't give this computer its own id: {}", e.message),
+                }
+            }
+            Verdict::Rewrite | Verdict::Stay | Verdict::Alone => {}
+        }
+    }
     let all: Vec<OtherDevice> = if online {
         devices::read_others(&dir, &id, &mut cache)
     } else {
@@ -358,6 +405,7 @@ fn sync_inner(state: &AppState, dev: &Devices) -> bool {
             // published: it can't be told apart from a typo on the other side.
             own.marker = crate::settings::check_marker(&s.local_marker).unwrap_or_default();
             own.past_markers = s.past_markers.clone();
+            own.token = copied::launch_token().to_string();
         }
         match devices::write_own(&dir, &own, &mut last) {
             Ok(true) => saved = Some(own.updated_at.clone()),
@@ -392,6 +440,7 @@ fn sync_inner(state: &AppState, dev: &Devices) -> bool {
     }
     rt.for_setup = Some(setup);
     rt.last_written = last;
+    rt.watch = watch;
     if saved.is_some() {
         rt.saved_at = saved;
     }
@@ -519,6 +568,11 @@ pub struct DevicesView {
     pub letter_clash: Vec<crate::markers::ComputerLetter>,
     /// A free letter for this computer (never one of `letters`; differs per computer).
     pub suggested_letter: String,
+    /// v0.7.4: this computer was a copy and has its own place in the list now; the note that
+    /// asks for a name is still to be answered.
+    pub copied_note: bool,
+    /// The computer's name as the system has it: what the note's name box starts with.
+    pub system_name: String,
 }
 
 #[derive(Debug, Serialize)]
@@ -606,6 +660,8 @@ fn view(state: &AppState) -> AppResult<DevicesView> {
         this_letter: s.local_marker.clone(),
         letter_clash,
         suggested_letter,
+        copied_note: s.copied_note && enabled(&s).is_some(),
+        system_name: default_name(),
     })
 }
 
@@ -644,15 +700,34 @@ fn change(app: &AppHandle, f: impl FnOnce(&mut Settings) -> Result<(), String>) 
     Ok(())
 }
 
-/// Turn Devices on (or change the folder / name). A device id is made once.
-#[tauri::command(async)]
-pub fn devices_enable(app: AppHandle, name: String, folder: PathBuf) -> AppResult<DevicesView> {
+fn clean_name(name: &str) -> AppResult<String> {
     let name = name.split_whitespace().collect::<Vec<_>>().join(" ");
     if name.is_empty() || name.chars().count() > 40 {
         return Err(AppError::new(
             "Give this computer a name (up to 40 letters)",
         ));
     }
+    Ok(name)
+}
+
+/// The note after a copied computer got its own id: save the name it was given.
+#[tauri::command(async)]
+pub fn devices_name_copied(app: AppHandle, name: String) -> AppResult<DevicesView> {
+    let name = clean_name(&name)?;
+    change(&app, |s| {
+        s.device_name = Some(name);
+        s.copied_note = false;
+        Ok(())
+    })?;
+    sync_now(&app);
+    let _ = app.emit(CHANGED_EVENT, ());
+    view(&app.state::<AppState>())
+}
+
+/// Turn Devices on (or change the folder / name). A device id is made once.
+#[tauri::command(async)]
+pub fn devices_enable(app: AppHandle, name: String, folder: PathBuf) -> AppResult<DevicesView> {
+    let name = clean_name(&name)?;
     if !folder.is_dir() {
         return Err(AppError::new(format!(
             "Folder not found: {}",
@@ -726,11 +801,12 @@ pub fn devices_claim(app: AppHandle, device_id: String) -> AppResult<DevicesView
         .lock()
         .ok()
         .and_then(|rt| {
-            rt.cache
-                .get(&id)
-                .map(|d| (d.name.clone(), d.updated_at.clone(), d.clone()))
+            rt.cache.get(&id).map(|d| {
+                let others: Vec<OtherDevice> = rt.cache.values().cloned().collect();
+                (d.name.clone(), d.updated_at.clone(), d.clone(), others)
+            })
         });
-    let Some((name, updated_at, old)) = found else {
+    let Some((name, updated_at, old, others)) = found else {
         return Err(AppError::new(
             "That computer isn't in the synced folder any more",
         ));
@@ -745,7 +821,7 @@ pub fn devices_claim(app: AppHandle, device_id: String) -> AppResult<DevicesView
         s.forgotten_devices.retain(|d| d != &id);
         // Take back what that computer had dealt with and was waiting on, as it is, so
         // requests are neither applied twice nor lost.
-        devices::take_back_requests(s, &old);
+        devices::take_back_requests(s, &old, &others);
         Ok(())
     })?;
     if let Ok(mut rt) = app.state::<AppState>().devices.runtime.lock() {

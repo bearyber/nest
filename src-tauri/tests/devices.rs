@@ -820,7 +820,7 @@ fn taking_a_list_back_keeps_its_waiting_requests() {
             seq: 3,
         },
     );
-    take_back_requests(&mut s, &back[0]);
+    take_back_requests(&mut s, &back[0], &[]);
     assert_eq!(s.handled_seq.get(PC), Some(&6));
     assert_eq!(s.handled_requests.len(), 1);
     assert!(s.waiting_since.is_empty());
@@ -1092,4 +1092,295 @@ fn two_computers_with_one_letter_are_noticed_and_a_free_one_is_suggested() {
     assert_eq!(mac_pick, "M");
     assert_ne!(mac_pick, pc_pick);
     assert_ne!(pc_pick, "W");
+}
+
+// ───────────────────────── v0.7.4: copied computer, request floor ─────────────────────────
+
+use nest_lib::copied::{move_to_new_id, remember_token, step, Verdict, Watch};
+use nest_lib::devices::request_floor;
+use nest_lib::settings::Settings;
+
+fn at(n: u32) -> String {
+    format!(
+        "2026-10-22T{:02}:{:02}:{:02}+08:00",
+        n / 3600,
+        n / 60 % 60,
+        n % 60
+    )
+}
+
+/// One install's view of the shared folder: what `devices_cmd::sync_inner` does about the id.
+struct Install {
+    token: String,
+    settings: Settings,
+    watch: Watch,
+    last: Option<DeviceFile>,
+    moved: u32,
+}
+
+impl Install {
+    fn new(token: &str, id: &str) -> Self {
+        let settings = Settings {
+            device_id: Some(id.into()),
+            ..Default::default()
+        };
+        Install {
+            token: token.into(),
+            settings,
+            watch: Watch::default(),
+            last: None,
+            moved: 0,
+        }
+    }
+
+    fn id(&self) -> String {
+        self.settings.device_id.clone().unwrap()
+    }
+
+    fn sync(&mut self, dir: &std::path::Path, clock: u32) -> Verdict {
+        remember_token(&mut self.settings.past_tokens, &self.token);
+        let past = self.settings.past_tokens.clone();
+        let v = step(
+            dir,
+            &self.id(),
+            &self.token,
+            &past,
+            &mut self.watch,
+            &mut self.last,
+        );
+        if v == Verdict::Move {
+            let n = self.moved + 1;
+            let new = format!("{:08}-3333-4333-8333-333333333333", n * 7 + clock);
+            move_to_new_id(&mut self.settings, new);
+            self.moved = n;
+            self.watch = Watch::default();
+            self.last = None;
+        }
+        let mut own = build_own(&self.id(), "Studio", &[], &at(clock));
+        own.token = self.token.clone();
+        write_own(dir, &own, &mut self.last).unwrap();
+        v
+    }
+}
+
+#[test]
+fn two_installs_sharing_one_id_writing_alternately_exactly_one_moves() {
+    let (tmp, dir) = shared();
+    let (a, b) = ("aaaa", "zzzz");
+    let mut x = Install::new(a, PC);
+    let mut y = Install::new(b, PC);
+    for round in 0..30u32 {
+        x.sync(&dir, round * 10 + 1);
+        y.sync(&dir, round * 10 + 2);
+    }
+    assert_eq!(x.moved + y.moved, 1, "exactly one moves, and never again");
+    assert_eq!((x.moved, y.moved), (0, 1), "the larger token moves");
+    assert_eq!(x.id(), PC, "the other keeps its id");
+    assert_ne!(y.id(), PC);
+    // The mover starts again as a new computer and writes its own list; the old file stays.
+    assert!(dir.join(format!("{PC}.json")).is_file());
+    assert!(dir.join(format!("{}.json", y.id())).is_file());
+    assert!(y.settings.copied_note && !x.settings.copied_note);
+    drop(tmp);
+}
+
+#[test]
+fn it_works_the_same_whichever_install_runs_first() {
+    let (_tmp, dir) = shared();
+    let mut x = Install::new("zzzz", PC);
+    let mut y = Install::new("aaaa", PC);
+    for round in 0..30u32 {
+        y.sync(&dir, round * 10 + 1);
+        x.sync(&dir, round * 10 + 2);
+    }
+    assert_eq!((x.moved, y.moved), (1, 0));
+}
+
+#[test]
+fn an_install_that_is_alone_never_moves() {
+    let (_tmp, dir) = shared();
+    let mut x = Install::new("aaaa", PC);
+    // Several launches: each makes a new token, the earlier ones are remembered.
+    for launch in 0..14u32 {
+        x.token = format!("launch{launch:02}");
+        for k in 0..5 {
+            assert_eq!(x.sync(&dir, launch * 100 + k * 10 + 1), Verdict::Alone);
+        }
+    }
+    assert_eq!(x.moved, 0);
+    assert_eq!(
+        x.settings.past_tokens.len(),
+        nest_lib::copied::MAX_PAST_TOKENS
+    );
+}
+
+fn foreign(dir: &std::path::Path, token: &str, clock: u32) {
+    let mut f = build_own(PC, "Other", &[], &at(clock));
+    f.token = token.into();
+    write_own(dir, &f, &mut None).unwrap();
+}
+
+#[test]
+fn a_stale_file_read_twice_is_no_move() {
+    let (_tmp, dir) = shared();
+    let mut x = Install::new("zzzz", PC);
+    x.sync(&dir, 100);
+    // A sync app brings back a foreign file written before ours.
+    foreign(&dir, "aaaa", 50);
+    for _ in 0..3 {
+        assert_eq!(x.sync(&dir, 101), Verdict::Alone);
+        foreign(&dir, "aaaa", 50);
+    }
+    assert_eq!(x.moved, 0);
+
+    // The same newer foreign write read twice is one write, not two.
+    let mut y = Install::new("zzzz", PC);
+    foreign(&dir, "aaaa", 200);
+    let past = vec![];
+    let mut last = None;
+    let mut w = Watch::default();
+    assert_eq!(
+        step(&dir, PC, "zzzz", &past, &mut w, &mut last),
+        Verdict::Rewrite
+    );
+    assert_eq!(
+        step(&dir, PC, "zzzz", &past, &mut w, &mut last),
+        Verdict::Alone
+    );
+    assert_eq!(y.moved, 0);
+    y.moved = 0;
+}
+
+#[test]
+fn a_file_without_a_token_is_never_evidence() {
+    let (_tmp, dir) = shared();
+    let mut x = Install::new("zzzz", PC);
+    x.sync(&dir, 100);
+    // Nest 0.7.3 on the other computer: keeps writing with no token, at new times.
+    for k in 0..6u32 {
+        let f = build_own(PC, "Old PC", &[], &at(200 + k * 10));
+        assert!(f.token.is_empty());
+        write_own(&dir, &f, &mut None).unwrap();
+        assert_eq!(x.sync(&dir, 205 + k * 10), Verdict::Alone);
+    }
+    assert_eq!(x.moved, 0);
+}
+
+#[test]
+fn a_move_clears_the_originals_requests_so_they_are_not_sent_again() {
+    let (_tmp, dir) = shared();
+    let mut x = Install::new("zzzz", PC);
+    x.settings
+        .outgoing_requests
+        .push(req("r1", 5, MAC, "p1", "done"));
+    x.settings.request_seq = 5;
+    x.settings.handled_seq.insert(MAC.into(), 9);
+    x.settings.handled_requests.push(Handled {
+        id: "h".into(),
+        from_device: MAC.into(),
+        seq: 11,
+        applied: true,
+        reason: None,
+    });
+    x.settings.local_marker = "W".into();
+    x.settings.device_name = Some("PC".into());
+    x.sync(&dir, 100);
+    foreign(&dir, "aaaa", 110);
+    assert_eq!(x.sync(&dir, 120), Verdict::Rewrite);
+    foreign(&dir, "aaaa", 130);
+    assert_eq!(x.sync(&dir, 140), Verdict::Move);
+    assert!(x.settings.outgoing_requests.is_empty());
+    assert!(x.settings.handled_requests.is_empty() && x.settings.handled_seq.is_empty());
+    assert_eq!(x.settings.request_seq, 0);
+    // Its new list carries none of them; letter and name are untouched.
+    let theirs = read_others(&dir, MAC, &mut HashMap::new());
+    let new = theirs.iter().find(|d| d.device_id == x.id()).unwrap();
+    assert!(new.requests.is_empty() && new.handled.is_empty());
+    assert_eq!(x.settings.local_marker, "W");
+    assert_eq!(x.settings.device_name.as_deref(), Some("PC"));
+}
+
+#[test]
+fn a_new_request_after_a_claim_is_numbered_above_everything_already_handled() {
+    // The old PC list is taken back after a reinstall on a computer whose clock is far in the
+    // past. It had sent requests up to 40; the Mac dealt with up to 38 (mark) and has notes for
+    // 50 and 52 from that PC; another computer (a NAS box) dealt with 61.
+    let (_tmp, dir) = shared();
+    let mut old = build_own(PC, "Studio PC", &[], &at(1));
+    old.requests = vec![req("q40", 40, MAC, "m1", "done")];
+    write_own(&dir, &old, &mut None).unwrap();
+    let mut mac = build_own(MAC, "MacBook", &[], &at(2));
+    mac.handled_upto = Some([(PC.to_string(), 38)].into());
+    mac.handled = vec![
+        Handled {
+            id: "a".into(),
+            from_device: PC.into(),
+            seq: 50,
+            applied: true,
+            reason: None,
+        },
+        Handled {
+            id: "b".into(),
+            from_device: PC.into(),
+            seq: 52,
+            applied: true,
+            reason: None,
+        },
+        Handled {
+            id: "c".into(),
+            from_device: "someone-else".into(),
+            seq: 999,
+            applied: true,
+            reason: None,
+        },
+    ];
+    write_own(&dir, &mac, &mut None).unwrap();
+    let nas_id = "33333333-3333-4333-8333-333333333333";
+    let mut nas = build_own(nas_id, "NAS", &[], &at(3));
+    nas.handled_upto = Some([(PC.to_string(), 61), (MAC.to_string(), 2000)].into());
+    write_own(&dir, &nas, &mut None).unwrap();
+
+    let all = read_others(
+        &dir,
+        "44444444-4444-4444-8444-444444444444",
+        &mut HashMap::new(),
+    );
+    let old = all.iter().find(|d| d.device_id == PC).unwrap();
+    assert_eq!(request_floor(old, &all), 61);
+
+    let mut s = Settings::default();
+    take_back_requests(&mut s, old, &all);
+    assert_eq!(s.request_seq, 61);
+    // The next request the way `request_status` numbers it (a clock in 1970 gives a tiny floor).
+    let next = (s.request_seq + 1).max(1_000);
+    assert!(next > 61 && next > 52 && next > 40);
+
+    // Without anyone's notes, the old list's own requests still count.
+    let mut s = Settings::default();
+    take_back_requests(&mut s, old, &all[..1]);
+    assert!(s.request_seq >= 40);
+    assert_eq!(request_floor(old, &[]), 40);
+}
+
+#[test]
+fn the_token_travels_in_the_list_and_a_bad_one_counts_as_none() {
+    let (_tmp, dir) = shared();
+    let mut f = build_own(PC, "PC", &[], &at(1));
+    f.token = "abc123-DEF".into();
+    write_own(&dir, &f, &mut None).unwrap();
+    assert_eq!(
+        nest_lib::devices::read_own(&dir, PC).unwrap().token,
+        "abc123-DEF"
+    );
+    f.token = "bad token/../".into();
+    fs::write(
+        dir.join(format!("{PC}.json")),
+        serde_json::to_string(&f).unwrap(),
+    )
+    .unwrap();
+    assert_eq!(nest_lib::devices::read_own(&dir, PC).unwrap().token, "");
+    // No token at all (Nest 0.7.3) reads fine.
+    let older = serde_json::json!({"schema":1,"deviceId":PC,"name":"PC","os":"windows","updatedAt":"t","projects":[]});
+    fs::write(dir.join(format!("{PC}.json")), older.to_string()).unwrap();
+    assert_eq!(nest_lib::devices::read_own(&dir, PC).unwrap().token, "");
 }

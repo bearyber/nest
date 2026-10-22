@@ -64,6 +64,11 @@ pub struct DeviceFile {
     /// v0.7.4: letters this computer used before (newest last, at most `MAX_PAST_MARKERS`).
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub past_markers: Vec<String>,
+    /// v0.7.4: a random token made fresh every time Nest starts (see copied.rs). If another
+    /// install keeps writing this file with a different token, this computer was copied.
+    /// Missing in older files (never evidence of anything).
+    #[serde(skip_serializing_if = "String::is_empty")]
+    pub token: String,
 }
 
 /// "Please mark this project done (or active)", from one computer to the one that has it.
@@ -176,6 +181,7 @@ pub fn build_own(device_id: &str, name: &str, rows: &[ProjectRow], updated_at: &
         handled_upto: None,
         marker: String::new(),
         past_markers: vec![],
+        token: String::new(),
     }
 }
 
@@ -364,6 +370,13 @@ pub fn read_others(
     out
 }
 
+/// This computer's own file as it is in the folder now (`None` if missing or unreadable).
+/// Used to notice another install writing it (copied.rs).
+pub fn read_own(dir: &Path, own_id: &str) -> Option<DeviceFile> {
+    let path = own_file(dir, own_id)?;
+    read_one(&path, &valid_device_id(own_id)?).ok()
+}
+
 fn read_one(path: &Path, id: &str) -> Result<DeviceFile, String> {
     let meta = fs::metadata(path).map_err(|e| format!("Its list can't be read ({e})."))?;
     if meta.len() > MAX_FILE_BYTES {
@@ -416,6 +429,15 @@ fn read_one(path: &Path, id: &str) -> Result<DeviceFile, String> {
     let extra = past.len().saturating_sub(crate::settings::MAX_PAST_MARKERS);
     past.drain(..extra);
     file.past_markers = past;
+    // A token is a short run of letters, digits and dashes; anything else counts as none.
+    if file.token.len() > 64
+        || !file
+            .token
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || c == '-')
+    {
+        file.token.clear();
+    }
     clamp(&mut file.name);
     clamp(&mut file.os);
     clamp(&mut file.updated_at);
@@ -1039,8 +1061,14 @@ pub fn taken_back_marks(
 /// "This is this computer": take the old list's request bookkeeping as it is. From now on
 /// only requests to the old id count, and its marks and notes say exactly which of those were
 /// dealt with; this install's own marks (for its short-lived id) would skip ones still waiting.
-/// This computer's own outgoing requests and their numbers are merged in.
-pub fn take_back_requests(s: &mut crate::settings::Settings, old: &OtherDevice) {
+/// This computer's own outgoing requests and their numbers are merged in. New requests are
+/// numbered above everything already sent under that id and everything the other computers
+/// already dealt with (`request_floor`), whatever this computer's clock says.
+pub fn take_back_requests(
+    s: &mut crate::settings::Settings,
+    old: &OtherDevice,
+    others: &[OtherDevice],
+) {
     s.handled_seq = taken_back_marks(&old.handled, old.handled_upto.as_ref());
     s.handled_requests = old.handled.clone();
     s.waiting_since.clear();
@@ -1050,6 +1078,36 @@ pub fn take_back_requests(s: &mut crate::settings::Settings, old: &OtherDevice) 
         }
         s.request_seq = s.request_seq.max(q.seq);
     }
+    s.request_seq = s.request_seq.max(request_floor(old, others));
+}
+
+/// The highest request number already used by the computer whose list is taken back: its own
+/// list's requests, and every other computer's record of what it dealt with from it
+/// (`handledUpto` and the notes above it). New requests must be numbered above this, or the
+/// owner would take them for ones it already dealt with.
+pub fn request_floor(old: &OtherDevice, others: &[OtherDevice]) -> u64 {
+    let id = &old.device_id;
+    let from_others = others
+        .iter()
+        .filter(|d| &d.device_id != id)
+        .flat_map(|d| {
+            let upto = d
+                .handled_upto
+                .as_ref()
+                .and_then(|m| m.get(id))
+                .copied()
+                .unwrap_or(0);
+            let notes = d
+                .handled
+                .iter()
+                .filter(|h| &h.from_device == id)
+                .map(|h| h.seq);
+            std::iter::once(upto).chain(notes)
+        })
+        .max()
+        .unwrap_or(0);
+    let own = old.requests.iter().map(|q| q.seq).max().unwrap_or(0);
+    own.max(from_others)
 }
 
 /// What showing a project needs to know about requests: the latest one this computer is still

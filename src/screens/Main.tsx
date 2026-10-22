@@ -6,6 +6,7 @@ import { getCurrentWindow } from "@tauri-apps/api/window";
 import { setNewProjectOpen } from "../lib/commands";
 import Icon from "../components/Icon";
 import FirstSteps, { FirstProjectNote } from "../components/FirstSteps";
+import CopiedNote from "../components/CopiedNote";
 import LetterNote from "../components/LetterNote";
 import Inspector from "../components/Inspector";
 import ProjectList from "../components/ProjectList";
@@ -17,6 +18,7 @@ import {
   archiveProject,
   checkForUpdates,
   copyText,
+  devicesNameCopied,
   devicesRefresh,
   devicesView,
   dismissArchiveSuggestion,
@@ -39,6 +41,7 @@ import {
   rescanProjects,
   revealProject,
   requestStatus,
+  setCodeSettings,
   setMenuState,
   setStatus,
   takeNotice,
@@ -827,7 +830,28 @@ export default function Main() {
           />
         )}
 
-        {letterClash.length > 0 && letterLater !== letterClashKey && (
+        {devices?.copiedNote && (
+          <CopiedNote
+            initialName={devices.systemName}
+            mac={isMac()}
+            clash={letterClash}
+            letter={devices.thisLetter}
+            suggested={devices.suggestedLetter}
+            onSave={(name) =>
+              void devicesNameCopied(name)
+                .then(setDevices)
+                .catch(fail)
+            }
+            onUseLetter={(letter) =>
+              void getSettings()
+                .then((v) => setCodeSettings(v.settings.codePattern, letter, v.settings.ownCode))
+                .then(() => devicesView().then(setDevices))
+                .catch(fail)
+            }
+          />
+        )}
+
+        {!devices?.copiedNote && letterClash.length > 0 && letterLater !== letterClashKey && (
           <LetterNote
             clash={letterClash}
             letter={devices?.thisLetter ?? ""}

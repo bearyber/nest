@@ -3,6 +3,7 @@ pub mod app_location;
 pub mod apply;
 pub mod archive;
 mod commands;
+pub mod copied;
 pub mod devices;
 mod devices_cmd;
 pub mod error;
@@ -201,6 +202,7 @@ pub fn run() {
             devices_cmd::devices_disable,
             devices_cmd::devices_forget,
             devices_cmd::devices_claim,
+            devices_cmd::devices_name_copied,
             devices_cmd::devices_refresh,
             devices_cmd::devices_set_sync_templates,
             devices_cmd::request_status,
