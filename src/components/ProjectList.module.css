@@ -201,3 +201,57 @@
   cursor: col-resize !important;
   user-select: none;
 }
+
+/* macOS: selection like Finder's list. No hover tint; the selected row is a solid accent fill with
+   white text; when the window isn't in front it turns grey with normal text. */
+:global(:root[data-platform="mac"]) .row:hover {
+  background: transparent;
+}
+
+:global(:root[data-platform="mac"]) .row[aria-selected="true"],
+:global(:root[data-platform="mac"]) .row[aria-selected="true"]:hover {
+  background: var(--accent-fill);
+  color: #fff;
+}
+
+:global(:root[data-platform="mac"]) .row[aria-selected="true"] :is(.muted, .pill, .code, .warn, .titleText) {
+  color: #fff;
+}
+
+:global(:root[data-platform="mac"]) .row[aria-selected="true"] .pill {
+  border-color: rgba(255, 255, 255, 0.6);
+}
+
+:global(:root[data-platform="mac"]) .row[aria-selected="true"] .dotActive {
+  background: #fff;
+}
+
+:global(:root[data-platform="mac"]) .row[aria-selected="true"] .dotDone {
+  border-color: #fff;
+}
+
+:global(:root[data-platform="mac"][data-window="inactive"]) .row[aria-selected="true"],
+:global(:root[data-platform="mac"][data-window="inactive"]) .row[aria-selected="true"]:hover {
+  background: color-mix(in srgb, var(--text) 14%, transparent);
+  color: var(--text);
+}
+
+:global(:root[data-platform="mac"][data-window="inactive"]) .row[aria-selected="true"] :is(.titleText, .code) {
+  color: var(--text);
+}
+
+:global(:root[data-platform="mac"][data-window="inactive"]) .row[aria-selected="true"] :is(.muted, .pill) {
+  color: var(--text-secondary);
+}
+
+:global(:root[data-platform="mac"][data-window="inactive"]) .row[aria-selected="true"] .pill {
+  border-color: var(--separator);
+}
+
+:global(:root[data-platform="mac"][data-window="inactive"]) .row[aria-selected="true"] .dotActive {
+  background: var(--accent);
+}
+
+:global(:root[data-platform="mac"][data-window="inactive"]) .row[aria-selected="true"] .dotDone {
+  border-color: var(--text-tertiary);
+}

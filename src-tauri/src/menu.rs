@@ -6,7 +6,9 @@
 //! `src/lib/shortcuts.ts` (the one list of Nest's shortcuts). `src/lib/shortcuts.test.ts`
 //! reads this file and fails if they drift apart.
 
-use tauri::menu::{Menu, MenuBuilder, MenuItemBuilder, PredefinedMenuItem, SubmenuBuilder};
+use tauri::menu::{
+    Menu, MenuBuilder, MenuItemBuilder, MenuItemKind, PredefinedMenuItem, SubmenuBuilder,
+};
 use tauri::{AppHandle, Runtime};
 
 /// Menu item ids, the same as the shortcut ids in `src/lib/shortcuts.ts`.
@@ -23,10 +25,24 @@ pub const CHECK_UPDATES: &str = "check-updates";
 /// text's undo, otherwise the editor's (see `src/lib/editMenu.ts`).
 pub const UNDO: &str = "undo";
 pub const REDO: &str = "redo";
+/// File → Open / Show in Finder / Copy Path: the selected project, on this computer. Enabled only
+/// then (`set_state`).
+pub const OPEN_PROJECT: &str = "open-project";
+pub const REVEAL_PROJECT: &str = "reveal-project";
+pub const COPY_PATH: &str = "copy-path";
 
 pub fn build<R: Runtime>(app: &AppHandle<R>) -> tauri::Result<Menu<R>> {
     let item = |id: &str, label: &str, accel: Option<&str>| {
         let b = MenuItemBuilder::with_id(id, label);
+        match accel {
+            Some(a) => b.accelerator(a).build(app),
+            None => b.build(app),
+        }
+    };
+
+    // Items that need a selected project start off; the page turns them on (`set_state`).
+    let disabled = |id: &str, label: &str, accel: Option<&str>| {
+        let b = MenuItemBuilder::with_id(id, label).enabled(false);
         match accel {
             Some(a) => b.accelerator(a).build(app),
             None => b.build(app),
@@ -51,6 +67,10 @@ pub fn build<R: Runtime>(app: &AppHandle<R>) -> tauri::Result<Menu<R>> {
     let file = SubmenuBuilder::new(app, "File")
         .item(&item(NEW_PROJECT, "New Project…", Some("CmdOrCtrl+N"))?)
         .separator()
+        .item(&disabled(OPEN_PROJECT, "Open", Some("CmdOrCtrl+O"))?)
+        .item(&disabled(REVEAL_PROJECT, "Show in Finder", None)?)
+        .item(&disabled(COPY_PATH, "Copy Path", Some("CmdOrCtrl+Alt+C"))?)
+        .separator()
         .item(&item(RESCAN, "Refresh List", Some("CmdOrCtrl+R"))?)
         .separator()
         .item(&PredefinedMenuItem::close_window(app, None)?)
@@ -71,26 +91,72 @@ pub fn build<R: Runtime>(app: &AppHandle<R>) -> tauri::Result<Menu<R>> {
         .build()?;
 
     let view = SubmenuBuilder::new(app, "View")
+        // "Show Sidebar" when it's hidden (`set_state`). ⌘B also works (a hidden extra).
         .item(&item(
             TOGGLE_SIDEBAR,
-            "Toggle Sidebar",
-            Some("CmdOrCtrl+B"),
+            "Hide Sidebar",
+            Some("Ctrl+CmdOrCtrl+S"),
         )?)
         .item(&item(
             TOGGLE_INSPECTOR,
             "Toggle Details",
             Some("CmdOrCtrl+Alt+I"),
         )?)
+        .separator()
+        .fullscreen()
         .build()?;
 
+    // The standard Window menu (macOS also lists the open windows in it), and an empty Help menu
+    // (macOS adds its search box to it).
     let window = SubmenuBuilder::new(app, "Window")
         .minimize()
         .maximize()
+        .separator()
+        .item(&PredefinedMenuItem::bring_all_to_front(app, None)?)
         .build()?;
+    let help = SubmenuBuilder::new(app, "Help").build()?;
+    #[cfg(target_os = "macos")]
+    {
+        window.set_as_windows_menu_for_nsapp()?;
+        help.set_as_help_menu_for_nsapp()?;
+    }
 
     MenuBuilder::new(app)
-        .items(&[&app_menu, &file, &edit, &view, &window])
+        .items(&[&app_menu, &file, &edit, &view, &window, &help])
         .build()
+}
+
+/// Make the menu say what's true now: "Hide Sidebar" / "Show Sidebar", and Open / Show in Finder /
+/// Copy Path on only while a project on this computer is selected. Called by the page when either
+/// changes. No menu bar (Windows): nothing to do.
+pub fn set_state<R: Runtime>(
+    app: &AppHandle<R>,
+    sidebar_shown: bool,
+    project_selected: bool,
+) -> tauri::Result<()> {
+    let Some(menu) = app.menu() else {
+        return Ok(());
+    };
+    for top in menu.items()? {
+        let MenuItemKind::Submenu(sub) = top else {
+            continue;
+        };
+        for entry in sub.items()? {
+            let MenuItemKind::MenuItem(it) = entry else {
+                continue;
+            };
+            match it.id().as_ref() {
+                TOGGLE_SIDEBAR => it.set_text(if sidebar_shown {
+                    "Hide Sidebar"
+                } else {
+                    "Show Sidebar"
+                })?,
+                OPEN_PROJECT | REVEAL_PROJECT | COPY_PATH => it.set_enabled(project_selected)?,
+                _ => {}
+            }
+        }
+    }
+    Ok(())
 }
 
 /// Where a menu bar command goes (lib.rs acts on it).
@@ -115,7 +181,8 @@ pub fn route(id: &str, first_run: bool) -> Route {
     match id {
         SETTINGS => Route::Settings,
         UNDO | REDO => Route::Focused,
-        NEW_PROJECT | RESCAN | SEARCH | TOGGLE_SIDEBAR | TOGGLE_INSPECTOR | CHECK_UPDATES => {
+        NEW_PROJECT | RESCAN | SEARCH | TOGGLE_SIDEBAR | TOGGLE_INSPECTOR | CHECK_UPDATES
+        | OPEN_PROJECT | REVEAL_PROJECT | COPY_PATH => {
             if first_run {
                 Route::ShowMainOnly
             } else {
@@ -139,6 +206,9 @@ mod tests {
             TOGGLE_SIDEBAR,
             TOGGLE_INSPECTOR,
             CHECK_UPDATES,
+            OPEN_PROJECT,
+            REVEAL_PROJECT,
+            COPY_PATH,
         ] {
             assert_eq!(route(id, false), Route::Main, "{id}");
             // During first run there's no list or New Project yet: only show the window.

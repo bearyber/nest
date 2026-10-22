@@ -122,7 +122,7 @@
   color: var(--text-secondary);
 }
 
-/* Size rows: the folder name opens that folder in Finder/Explorer. Looks like the label
+/* Size rows: the folder name opens that folder in Finder / File Explorer. Looks like the label
    until you point at it. */
 .folderLink {
   display: inline-flex;

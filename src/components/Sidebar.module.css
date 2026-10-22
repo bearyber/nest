@@ -203,3 +203,58 @@
 .dotStale {
   background: var(--folder);
 }
+
+/* macOS: selection like Finder's sidebar. No hover tint; the selected row is a solid accent fill
+   with white text (no side bar, no bold); when the window isn't in front it turns grey. */
+:global(:root[data-platform="mac"]) .item:not([aria-current="true"]):hover,
+:global(:root[data-platform="mac"]:not([data-window="inactive"])) .item:not([aria-current="true"]):hover,
+:global(:root[data-platform="mac"]) .settings:not(.settingsOn):hover,
+:global(:root[data-platform="mac"]:not([data-window="inactive"])) .settings:not(.settingsOn):hover {
+  background: transparent;
+}
+
+:global(:root[data-platform="mac"]) .item[aria-current="true"],
+:global(:root[data-platform="mac"]) .item[aria-current="true"]:hover,
+:global(:root[data-platform="mac"]) .settingsOn,
+:global(:root[data-platform="mac"]) .settingsOn:hover {
+  background: var(--accent-fill);
+  color: #fff;
+  font-weight: 400;
+}
+
+:global(:root[data-platform="mac"]) .item[aria-current="true"]::before,
+:global(:root[data-platform="mac"]) .settingsOn::before {
+  content: none;
+}
+
+:global(:root[data-platform="mac"]) .item[aria-current="true"] .count {
+  color: #fff;
+}
+
+:global(:root[data-platform="mac"]) .item[aria-current="true"] .dotActive {
+  background: #fff;
+}
+
+:global(:root[data-platform="mac"]) .item[aria-current="true"] .dotDone {
+  border-color: #fff;
+}
+
+:global(:root[data-platform="mac"][data-window="inactive"]) .item[aria-current="true"],
+:global(:root[data-platform="mac"][data-window="inactive"]) .item[aria-current="true"]:hover,
+:global(:root[data-platform="mac"][data-window="inactive"]) .settingsOn,
+:global(:root[data-platform="mac"][data-window="inactive"]) .settingsOn:hover {
+  background: color-mix(in srgb, var(--text) 14%, transparent);
+  color: var(--text);
+}
+
+:global(:root[data-platform="mac"][data-window="inactive"]) .item[aria-current="true"] .count {
+  color: var(--text-tertiary);
+}
+
+:global(:root[data-platform="mac"][data-window="inactive"]) .item[aria-current="true"] .dotActive {
+  background: var(--accent);
+}
+
+:global(:root[data-platform="mac"][data-window="inactive"]) .item[aria-current="true"] .dotDone {
+  border-color: var(--text-tertiary);
+}

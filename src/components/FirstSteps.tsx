@@ -1,4 +1,4 @@
-import { isMac } from "../lib/platform";
+import { fileManager } from "../lib/platform";
 import { Button } from "./ui";
 import styles from "./FirstSteps.module.css";
 
@@ -57,7 +57,7 @@ export function FirstProjectNote({ code, folder, fullPath, onReveal, onDone }: N
         <b>{code} is ready</b>
         <span title={fullPath}>It's a normal folder in {folder}. Put your files in it, Nest keeps track.</span>
       </div>
-      <Button onClick={onReveal}>{isMac() ? "Show in Finder" : "Show in Explorer"}</Button>
+      <Button onClick={onReveal}>{`Show in ${fileManager()}`}</Button>
       <Button variant="primary" onClick={onDone}>
         Got it
       </Button>

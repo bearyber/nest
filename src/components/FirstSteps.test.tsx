@@ -84,6 +84,7 @@ vi.mock("../lib/commands", () => ({
   getSettings: vi.fn(async () => ({
     settings: { spaces: ["Work", "Personal"], archiveAfterDays: null, archiveFolder: null, firstProjectTipSeen: tipSeen },
   })),
+  setMenuState: vi.fn(async () => {}),
   takeNotice: vi.fn(async () => null),
   whatsNew: vi.fn(async () => null),
   whatsNewSeen: vi.fn(async () => {}),
@@ -184,7 +185,7 @@ describe("FirstSteps", () => {
     expect(text).toContain("ACME-L01 is ready");
     expect(text).toContain("It's a normal folder in /…/Clients/Jobs. Put your files in it, Nest keeps track.");
     expect(text).not.toMatch(/successfully|!/i);
-    fireEvent.click(screen.getByRole("button", { name: /^Show in (Finder|Explorer)$/ }));
+    fireEvent.click(screen.getByRole("button", { name: /^Show in (Finder|File Explorer)$/ }));
     fireEvent.click(screen.getByRole("button", { name: "Got it" }));
     expect(reveal).toHaveBeenCalledOnce();
     expect(done).toHaveBeenCalledOnce();
@@ -273,7 +274,7 @@ describe("Main: first steps", () => {
     expect(document.body.textContent).toContain("It's a normal folder in /…/Clients/Jobs.");
     expect(commands.createProject).toHaveBeenCalledOnce();
     expect(commands.firstProjectTipSeen).toHaveBeenCalledOnce();
-    fireEvent.click(screen.getByRole("button", { name: /^Show in (Finder|Explorer)$/ }));
+    fireEvent.click(screen.getByRole("button", { name: /^Show in (Finder|File Explorer)$/ }));
     expect(commands.revealProject).toHaveBeenCalledWith("id-ACME-L01");
     fireEvent.click(screen.getByRole("button", { name: "Got it" }));
     expect(screen.queryByText("ACME-L01 is ready")).toBeNull();

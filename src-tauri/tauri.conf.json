@@ -43,6 +43,7 @@
     "publisher": "INTRVL",
     "copyright": "© 2026 INTRVL",
     "category": "Productivity",
+    "shortDescription": "Project folders, starter files and job codes from templates",
     "createUpdaterArtifacts": true,
     "targets": ["nsis", "app", "dmg"],
     "resources": {

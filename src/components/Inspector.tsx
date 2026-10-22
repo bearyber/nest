@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { isMac } from "../lib/platform";
+import { fileManager } from "../lib/platform";
 import { ago, formatBytes, formatDate, isDone } from "../lib/search";
 import { projectLine } from "../lib/resolve";
 import type { FolderSize, ProjectResolve, ProjectRow, Sizes } from "../lib/types";
@@ -26,7 +26,7 @@ interface Props {
   sizes: Sizes | null;
   measuring: boolean;
   onMeasure: () => void;
-  /** Open a folder inside the project in Finder/Explorer ([] = the project folder). */
+  /** Open a folder inside the project in Finder / File Explorer ([] = the project folder). */
   onOpenFolder: (path: string[]) => void;
   /** What's inside one folder, one level down (the ▸ under Size). */
   onMeasureFolder: (path: string[]) => Promise<Sizes>;
@@ -77,7 +77,7 @@ function ResolveLine({
   );
 }
 
-/** Size rows: each folder opens in Finder/Explorer, and ▸ shows what's inside it, as deep as
+/** Size rows: each folder opens in Finder / File Explorer, and ▸ shows what's inside it, as deep as
  *  you like. "Loose files" opens the folder they're in. */
 function FolderRows({
   folders,
@@ -96,7 +96,7 @@ function FolderRows({
   onToggle: (path: string[]) => void;
   onOpen: (path: string[]) => void;
 }) {
-  const app = isMac() ? "Finder" : "Explorer";
+  const app = fileManager();
   return (
     <ul className={styles.folderList}>
       {folders
@@ -281,7 +281,7 @@ export default function Inspector({
           ? "Mark it done first"
           : null;
   const fields = Object.entries(p.fields ?? {}).filter(([, v]) => display(v) !== "");
-  const openLabel = isMac() ? "Open in Finder" : "Open in Explorer";
+  const openLabel = "Open";
 
   return (
     <aside className={styles.inspector} aria-label="Details">
@@ -477,7 +477,7 @@ export default function Inspector({
         ))}
       </div>
 
-      {/* One main button; "Show in parent folder" is in the right-click menu. Archive… sits
+      {/* One main button; "Show in Finder / File Explorer" is in the right-click menu. Archive… sits
           beside it when an archive folder is set. */}
       <div className={archiveOn && !p.device ? styles.actions : styles.actionsOne}>
         <Button variant="primary" onClick={onOpen} disabled={p.offline || !!p.device}>

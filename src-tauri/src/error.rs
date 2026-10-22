@@ -38,12 +38,12 @@ pub type AppResult<T> = Result<T, AppError>;
 
 // ── Words that differ between the two OSes, for messages (locked #1). ──
 
-/// "Finder" on a Mac, "Explorer" on Windows.
+/// "Finder" on a Mac, "File Explorer" on Windows (never "Explorer" alone).
 pub fn file_manager() -> &'static str {
     if cfg!(target_os = "macos") {
         "Finder"
     } else {
-        "Explorer"
+        "File Explorer"
     }
 }
 

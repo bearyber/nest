@@ -4,14 +4,18 @@
   /* Native controls (dropdown popups, date pickers, scrollbars) follow the OS theme. */
   color-scheme: light dark;
 
-  /* Accent: fallback until the OS accent is read (M3). Use it for shapes (dots, rings, outlines);
-     text and filled buttons use the variants below, which keep WCAG AA contrast (4.5:1). */
-  --accent: #0a84ff;
+  /* Accent: the OS accent colour (src/lib/accent.ts sets --accent-light / -dark, and the
+     --accent-text-light / -dark, --accent-fill-value, --accent-fill-hover-value and
+     --accent-soft-light / -dark values used below, on <html>); Nest blue until it arrives, and wherever a shade of the OS
+     colour would be unreadable. Use --accent for shapes (dots, rings, outlines); text and filled
+     buttons use the variants below, which keep WCAG AA contrast (4.5:1). The values after the
+     commas are Nest blue's. */
+  --accent: var(--accent-light, #0a84ff);
   /* Accent as text (links, pressed segments): darker in light, lighter in dark. */
-  --accent-text: #075cb2; /* = --accent mixed with 30% black */
+  --accent-text: var(--accent-text-light, #075cb2); /* = --accent mixed with 30% black */
   /* Fill behind white text (primary buttons, highlighted menu items): 5.9:1 with white. */
-  --accent-fill: #0863bf; /* = --accent mixed with 25% black */
-  --accent-fill-hover: #075aad; /* = --accent mixed with 32% black: a touch darker on hover, 6.8:1 */
+  --accent-fill: var(--accent-fill-value, #0863bf); /* = --accent mixed with 25% black */
+  --accent-fill-hover: var(--accent-fill-hover-value, #075aad); /* = --accent mixed with 32% black: a touch darker on hover, 6.8:1 */
 
   --space-1: 4px;
   --space-2: 8px;
@@ -41,7 +45,7 @@
   --control-bg: #ffffff;
   --control-hover: #f2f4f7;
   --control-border: #cfd4db;
-  --accent-soft: rgba(10, 132, 255, 0.12);
+  --accent-soft: var(--accent-soft-light, rgba(10, 132, 255, 0.12));
   --folder: #d9a33b;
   --shadow-sheet: 0 24px 60px rgba(20, 24, 32, 0.22), 0 2px 6px rgba(20, 24, 32, 0.08);
   --shadow-popover: 0 8px 28px rgba(20, 24, 32, 0.2);
@@ -57,7 +61,8 @@
     --text: rgba(255, 255, 255, 0.88);
     --text-secondary: rgba(255, 255, 255, 0.6);
     --text-tertiary: rgba(255, 255, 255, 0.58);
-    --accent-text: #6cb5ff; /* = --accent mixed with 40% white */
+    --accent: var(--accent-dark, #0a84ff);
+    --accent-text: var(--accent-text-dark, #6cb5ff); /* = --accent mixed with 40% white */
     --separator: rgba(255, 255, 255, 0.12);
     --bg-solid: #202020;
     --pane-bg: rgba(30, 30, 30, 0.55);
@@ -70,7 +75,7 @@
     --control-bg: #323438;
     --control-hover: #3a3c41;
     --control-border: #484b51;
-    --accent-soft: rgba(10, 132, 255, 0.2);
+    --accent-soft: var(--accent-soft-dark, rgba(10, 132, 255, 0.2));
     --shadow-sheet: 0 24px 60px rgba(0, 0, 0, 0.55), 0 2px 6px rgba(0, 0, 0, 0.3);
     --shadow-popover: 0 8px 28px rgba(0, 0, 0, 0.5);
     --error: #ff8a80;
@@ -83,7 +88,8 @@
   --text: rgba(255, 255, 255, 0.88);
   --text-secondary: rgba(255, 255, 255, 0.6);
   --text-tertiary: rgba(255, 255, 255, 0.58);
-  --accent-text: #6cb5ff; /* = --accent mixed with 40% white */
+  --accent: var(--accent-dark, #0a84ff);
+  --accent-text: var(--accent-text-dark, #6cb5ff); /* = --accent mixed with 40% white */
   --separator: rgba(255, 255, 255, 0.12);
   --bg-solid: #202020;
   --pane-bg: rgba(30, 30, 30, 0.55);
@@ -96,7 +102,7 @@
   --control-bg: #323438;
   --control-hover: #3a3c41;
   --control-border: #484b51;
-  --accent-soft: rgba(10, 132, 255, 0.2);
+  --accent-soft: var(--accent-soft-dark, rgba(10, 132, 255, 0.2));
   --shadow-sheet: 0 24px 60px rgba(0, 0, 0, 0.55), 0 2px 6px rgba(0, 0, 0, 0.3);
   --shadow-popover: 0 8px 28px rgba(0, 0, 0, 0.5);
   --error: #ff8a80;
@@ -105,24 +111,6 @@
 
 :root[data-theme="light"] {
   color-scheme: light;
-}
-
-/* Where color-mix works (WebView2, WebKit on macOS 13.1+), the accent variants follow --accent,
-   so the system accent can replace the fallback later. Same values as above for the fallback. */
-@supports (color: color-mix(in srgb, red, blue)) {
-  :root {
-    --accent-text: color-mix(in srgb, var(--accent), black 30%);
-    --accent-fill: color-mix(in srgb, var(--accent), black 25%);
-    --accent-fill-hover: color-mix(in srgb, var(--accent), black 32%);
-  }
-  @media (prefers-color-scheme: dark) {
-    :root:not([data-theme="light"]) {
-      --accent-text: color-mix(in srgb, var(--accent), white 40%);
-    }
-  }
-  :root[data-theme="dark"] {
-    --accent-text: color-mix(in srgb, var(--accent), white 40%);
-  }
 }
 
 :root[data-platform="mac"] {

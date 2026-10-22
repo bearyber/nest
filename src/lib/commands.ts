@@ -36,6 +36,13 @@ import type {
 
 export const materialApplied = () => invoke<boolean>("material_applied");
 
+/** The OS accent colour as "#rrggbb", or null (see lib/accent.ts). */
+/** Tell the macOS menu bar the sidebar state and whether a project on this computer is selected. */
+export const setMenuState = (sidebarShown: boolean, projectSelected: boolean) =>
+  invoke<void>("set_menu_state", { sidebarShown, projectSelected });
+
+export const systemAccent = () => invoke<string | null>("system_accent");
+
 export const newProjectContext = () => invoke<NewProjectContext>("new_project_context");
 
 export const planProject = (request: PlanRequest) => invoke<Plan>("plan_project", { request });
@@ -118,7 +125,7 @@ export const setArchiveAfterDays = (days: number | null) => s<SettingsView>("set
 export const setPersonalRoot = (path: string | null) => s<SettingsView>("set_personal_root", { path });
 /** New Project's Change… while it shows the Personal folder. Null when cancelled. */
 export const choosePersonalRoot = () => s<SettingsView | null>("choose_personal_root");
-/** Open a folder inside a project in Finder/Explorer. `path` = folder names from the project
+/** Open a folder inside a project in Finder / File Explorer. `path` = folder names from the project
  *  down ([] = the project folder). */
 export const openProjectSubfolder = (key: string, path: string[]) =>
   invoke<void>("open_project_subfolder", { key, path });

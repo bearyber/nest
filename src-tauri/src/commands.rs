@@ -126,6 +126,25 @@ pub fn material_applied(
     }
 }
 
+/// The system accent colour as `"#rrggbb"`, or null if the OS gives none (the UI keeps Nest blue).
+/// Changes arrive as the `accent-changed` event.
+#[tauri::command]
+pub fn system_accent(accent: State<'_, crate::accent::Accent>) -> Result<Option<String>, AppError> {
+    Ok(accent.get())
+}
+
+/// Tell the macOS menu bar what's true in the main window: whether the sidebar is shown, and
+/// whether a project on this computer is selected (File → Open / Show in Finder / Copy Path).
+#[tauri::command]
+pub fn set_menu_state(
+    app: tauri::AppHandle,
+    sidebar_shown: bool,
+    project_selected: bool,
+) -> Result<(), AppError> {
+    crate::menu::set_state(&app, sidebar_shown, project_selected)
+        .map_err(|e| AppError::new(format!("Couldn't update the menu: {e}")))
+}
+
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct NewProjectContext {

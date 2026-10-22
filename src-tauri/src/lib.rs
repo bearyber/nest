@@ -1,3 +1,4 @@
+mod accent;
 pub mod app_location;
 pub mod apply;
 pub mod archive;
@@ -112,6 +113,8 @@ pub fn run() {
         })
         .invoke_handler(tauri::generate_handler![
             commands::material_applied,
+            commands::system_accent,
+            commands::set_menu_state,
             commands::new_project_context,
             commands::plan_project,
             commands::create_project,
@@ -262,6 +265,7 @@ fn setup(app: &mut tauri::App, started_at: std::time::SystemTime) -> Result<(), 
         .get_webview_window("main")
         .ok_or_else(|| StartupError::new(Step::Window, "the main window is missing"))?;
     app.manage(window::SettingsMaterial::default());
+    app.manage(accent::Accent::read_now());
     app.manage(window::Material {
         applied: window::apply_appearance(&main, &theme),
     });

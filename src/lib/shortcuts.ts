@@ -16,6 +16,8 @@ export type ShortcutId =
   | "search"
   | "toggle-sidebar"
   | "toggle-inspector"
+  | "open-project"
+  | "copy-path"
   | "undo"
   | "redo"
   | "create"
@@ -30,6 +32,8 @@ export interface Combo {
   shift?: boolean;
   /** ⌥ on macOS, Alt on Windows. */
   alt?: boolean;
+  /** ⌃ on macOS (a key of its own there). Not used on Windows, where Ctrl is `mod`. */
+  ctrl?: boolean;
   /** macOS: the menu bar item's own accelerator. The menu runs it (lib.rs sends it to the right
    *  window as a `menu` event), so the page only stops the key from doing anything else. */
   menu?: boolean;
@@ -73,7 +77,8 @@ export const SHORTCUTS: readonly Shortcut[] = [
   {
     id: "toggle-sidebar",
     label: "Toggle Sidebar",
-    mac: [{ key: "b", mod: true, menu: true }],
+    // Menu: Hide Sidebar / Show Sidebar. ⌘B is a hidden extra on a Mac (as in other apps).
+    mac: [{ key: "s", mod: true, ctrl: true, menu: true }, { key: "b", mod: true }],
     win: [{ key: "b", mod: true }],
   },
   {
@@ -81,6 +86,22 @@ export const SHORTCUTS: readonly Shortcut[] = [
     label: "Toggle Details",
     mac: [{ key: "i", mod: true, alt: true, menu: true }],
     win: [{ key: "i", mod: true, alt: true }],
+    whileTyping: false,
+  },
+  {
+    // The selected project's folder. Windows: Ctrl+O; no Alt/AltGr combos there.
+    id: "open-project",
+    label: "Open",
+    mac: [{ key: "o", mod: true, menu: true }],
+    win: [{ key: "o", mod: true }],
+    whileTyping: false,
+  },
+  {
+    // Ctrl+Shift+C on Windows: Ctrl+Alt+C is AltGr on many keyboards.
+    id: "copy-path",
+    label: "Copy Path",
+    mac: [{ key: "c", mod: true, alt: true, menu: true }],
+    win: [{ key: "c", mod: true, shift: true }],
     whileTyping: false,
   },
   {
@@ -132,7 +153,8 @@ function keyOf(e: KeyLike): string {
 export function matchesCombo(e: KeyLike, c: Combo, platform: Platform = currentPlatform()): boolean {
   if (platform === "win" && altGr(e)) return false;
   const mod = platform === "mac" ? e.metaKey : e.ctrlKey;
-  const other = platform === "mac" ? e.ctrlKey : e.metaKey;
+  // The other OS's modifier must be up; on a Mac ⌃ counts only for combos that ask for it.
+  const other = platform === "mac" ? e.ctrlKey !== !!c.ctrl : e.metaKey;
   if (other || mod !== !!c.mod || e.shiftKey !== !!c.shift || e.altKey !== !!c.alt) return false;
   return keyOf(e) === c.key;
 }
@@ -187,6 +209,7 @@ const BROWSER_LETTERS = new Set([
   "p", // print
   "f", // find bar (Nest's Ctrl+F focuses its own search instead)
   "g", // find next / previous
+  "o", // open a file in the browser (Nest's Ctrl+O opens the project folder instead)
 ]);
 const ZOOM_KEYS = new Set(["=", "+", "-", "_", "0"]);
 const ZOOM_CODES = new Set(["NumpadAdd", "NumpadSubtract", "Numpad0"]);

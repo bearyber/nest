@@ -49,6 +49,12 @@ tauri-plugin-autostart = "2"
 smappservice-rs = "0.1.3"
 objc2 = "0.6"
 libc = "0.2"
+# The accent colour from AppKit (NSColor.controlAccentColor). Already in the build (via Tauri).
+objc2-app-kit = { version = "0.3", default-features = false, features = ["NSColor", "NSColorSpace"] }
+
+# Windows: the accent colour from Settings (UISettings). Already in the build (via Tauri's webview).
+[target.'cfg(target_os = "windows")'.dependencies]
+windows = { version = "0.61", features = ["UI_ViewManagement"] }
 
 [dev-dependencies]
 tempfile = "3"

@@ -114,7 +114,7 @@ pub fn move_error(e: &io::Error, unarchive: bool) -> String {
     // Windows refuses to move a folder while a file in it is open; macOS never does, so there
     // "permission denied" really means permission.
     if windows_code(32) || (cfg!(windows) && e.kind() == io::ErrorKind::PermissionDenied) {
-        return "Something has a file in this project open (DaVinci Resolve? an Explorer window?). Close it and try again. Nothing was moved.".into();
+        return "Something has a file in this project open (DaVinci Resolve? a File Explorer window?). Close it and try again. Nothing was moved.".into();
     }
     if e.kind() == io::ErrorKind::PermissionDenied {
         return "Nest isn't allowed to move this folder. Check that the folder or drive isn't locked or read-only, and that Nest has access to it (System Settings → Privacy & Security → Files and Folders). Nothing was moved.".into();

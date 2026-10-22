@@ -6,6 +6,7 @@ import Main from "./screens/Main";
 import Settings from "./screens/Settings";
 import { getSettings, materialApplied } from "./lib/commands";
 import { listenEditMenu } from "./lib/editMenu";
+import { followSystemAccent } from "./lib/accent";
 import { applyTheme } from "./lib/theme";
 
 /** The same page serves two windows; the Settings window is the one labelled "settings". */
@@ -48,6 +49,9 @@ export default function App() {
       .catch(() => {});
     return () => unlisten?.();
   }, [syncSettings]);
+
+  // The OS accent colour, live (locked #7).
+  useEffect(() => followSystemAccent(), []);
 
   // Edit → Undo / Redo in the macOS menu bar, for whichever window has focus.
   useEffect(() => listenEditMenu(), []);

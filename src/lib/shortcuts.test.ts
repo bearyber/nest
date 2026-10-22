@@ -60,6 +60,24 @@ describe("shortcut matching", () => {
     expect(id(key("r", { ctrlKey: true, altKey: true, altGr: true }), "win")).toBeNull();
   });
 
+  it("Open, Copy Path and the sidebar have their keys on each OS", () => {
+    expect(id(key("o", { metaKey: true }), "mac")).toBe("open-project");
+    expect(id(key("o", { ctrlKey: true }), "win")).toBe("open-project");
+    // ⌥⌘C on a Mac (⌥ turns C into ç: the physical key says which letter it is).
+    expect(id({ ...key("ç", { metaKey: true, altKey: true }), code: "KeyC" }, "mac")).toBe("copy-path");
+    expect(id(key("c", { ctrlKey: true, shiftKey: true }), "win")).toBe("copy-path");
+    // Plain Ctrl+C is copy, and Ctrl+Alt+C (AltGr on many keyboards) is nothing.
+    expect(id(key("c", { ctrlKey: true }), "win")).toBeNull();
+    expect(id(key("c", { ctrlKey: true, altKey: true, altGr: true }), "win")).toBeNull();
+    expect(id(key("c", { metaKey: true }), "mac")).toBeNull();
+    // ⌃⌘S hides / shows the sidebar on a Mac; ⌘S alone is not it, and ⌘B still works.
+    expect(id(key("s", { metaKey: true, ctrlKey: true }), "mac")).toBe("toggle-sidebar");
+    expect(id(key("s", { metaKey: true }), "mac")).toBeNull();
+    expect(id(key("b", { metaKey: true }), "mac")).toBe("toggle-sidebar");
+    expect(id(key("b", { ctrlKey: true }), "win")).toBe("toggle-sidebar");
+    expect(id(key("s", { ctrlKey: true }), "win")).toBeNull();
+  });
+
   it("knows ⌘K / Ctrl+K as a second way to Find, and Undo / Redo per OS", () => {
     expect(id(key("k", { metaKey: true }), "mac")).toBe("search");
     expect(findShortcut(key("k", { metaKey: true }), undefined, "mac")?.combo.menu).toBeFalsy();
@@ -83,10 +101,10 @@ describe("the macOS menu bar uses the same keys (src-tauri/src/menu.rs)", () => 
   )[0];
   const ids = Object.fromEntries([...menu.matchAll(/pub const (\w+): &str = "([^"]+)";/g)].map((m) => [m[1], m[2]]));
   const accelerators = new Map(
-    [...menu.matchAll(/item\(\s*(\w+),\s*"[^"]*",\s*Some\("([^"]+)"\)/g)].map((m) => [ids[m[1]], m[2]]),
+    [...menu.matchAll(/(?:item|disabled)\(\s*(\w+),\s*"[^"]*",\s*Some\("([^"]+)"\)/g)].map((m) => [ids[m[1]], m[2]]),
   );
   const accelerator = (c: Combo) =>
-    [c.mod && "CmdOrCtrl", c.shift && "Shift", c.alt && "Alt", c.key.length === 1 ? c.key.toUpperCase() : c.key]
+    [c.ctrl && "Ctrl", c.mod && "CmdOrCtrl", c.shift && "Shift", c.alt && "Alt", c.key.length === 1 ? c.key.toUpperCase() : c.key]
       .filter(Boolean)
       .join("+");
 
@@ -115,6 +133,7 @@ describe("Windows: the webview's own keys are blocked", () => {
       key("p", { ctrlKey: true }),
       key("f", { ctrlKey: true }),
       key("g", { ctrlKey: true }),
+      key("o", { ctrlKey: true }),
       key("F3"),
       key("F7"),
       key("=", { ctrlKey: true }),

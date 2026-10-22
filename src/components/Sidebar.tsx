@@ -78,7 +78,7 @@ export default function Sidebar({
   return (
     <nav className={styles.sidebar} aria-label="Filters">
       <div className={styles.top}>
-        <IconButton icon="sidebar" label={`Hide sidebar (${isMac() ? "⌘B" : "Ctrl+B"})`} onClick={onHide} />
+        <IconButton icon="sidebar" label={`Hide sidebar (${isMac() ? "⌃⌘S" : "Ctrl+B"})`} onClick={onHide} />
       </div>
       <Section id="spaces" title="Spaces" collapsed={collapsed} onToggle={toggle}>
         {(open) => (

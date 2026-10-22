@@ -8,5 +8,8 @@ export function detectPlatform(userAgent: string): Platform {
 /** Cmd on macOS, Ctrl elsewhere. Reads the platform set on <html> at startup. */
 export const isMac = () => document.documentElement.dataset.platform === "mac";
 
+/** What the OS calls its file manager. Always this word, never "Explorer" alone. */
+export const fileManager = () => (isMac() ? "Finder" : "File Explorer");
+
 /** Whether the OS "command" modifier (Cmd / Ctrl) is held. */
 export const hasCommandKey = (e: KeyboardEvent) => (isMac() ? e.metaKey : e.ctrlKey);

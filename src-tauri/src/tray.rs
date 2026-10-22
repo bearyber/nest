@@ -773,6 +773,8 @@ pub fn on_window_event(window: &Window, event: &WindowEvent) {
             // Using any Nest window counts as activity (an update waits for quiet).
             note_activity(app);
             if *focused {
+                // The accent colour is changed in the OS's settings: look again on coming back.
+                crate::accent::refresh(app);
                 set_dock(app, true);
                 crate::folder_access::window_shown(app);
             }

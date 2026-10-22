@@ -414,7 +414,7 @@ export default function TemplateEditor({ sourceKey, mode, start, note, onClose, 
           { text: "Your own file…", action: () => void addFiles(into, null) },
           { text: "Project info (job code, client, project, dates)", action: () => void addProjectInfo(into) },
           { item: "Separator" },
-          { text: "Tip: you can also drag files here from Finder or Explorer", enabled: false },
+          { text: "Tip: you can also drag files here from Finder or File Explorer", enabled: false },
         ],
       });
       await m.popup();

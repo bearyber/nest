@@ -38,10 +38,11 @@ import {
   rescanProjects,
   revealProject,
   requestStatus,
+  setMenuState,
   setStatus,
   takeNotice,
 } from "../lib/commands";
-import { isMac } from "../lib/platform";
+import { fileManager, isMac } from "../lib/platform";
 import { hasOpenDialog } from "../lib/dialogStack";
 import { findShortcut, listenHere, type ShortcutId } from "../lib/shortcuts";
 import { isListKey } from "../lib/listKeys";
@@ -85,6 +86,8 @@ const MAIN_SHORTCUTS: readonly ShortcutId[] = [
   "search",
   "toggle-sidebar",
   "toggle-inspector",
+  "open-project",
+  "copy-path",
 ];
 /** Commands that still act with a dialog open (see runMenu). */
 const OVER_DIALOGS = new Set(["new-project", "open-settings", "check-updates"]);
@@ -456,10 +459,10 @@ export default function Main() {
       try {
         const menu = await Menu.new({
           items: [
-            { id: "open", text: isMac() ? "Open in Finder" : "Open in Explorer", enabled: here, action: () => void open(r) },
+            { id: "open", text: "Open", enabled: here, action: () => void open(r) },
             {
               id: "reveal",
-              text: "Show in parent folder",
+              text: `Show in ${fileManager()}`,
               enabled: here,
               action: () => void reveal(r),
             },
@@ -550,9 +553,24 @@ export default function Main() {
       else if (id === "toggle-sidebar") toggleSidebar();
       else if (id === "toggle-inspector") setShowInspector((v) => !v);
       else if (id === "check-updates") checkUpdates();
+      // File → Open / Show in Finder / Copy Path, and Ctrl+O / Ctrl+Shift+C: the selected project
+      // (this computer's), only in the project list.
+      else if (id === "open-project" || id === "reveal-project" || id === "copy-path") {
+        if (view !== "projects" || !selectedRow || selectedRow.offline || selectedRow.device) return;
+        if (id === "open-project") void open(selectedRow);
+        else if (id === "reveal-project") void reveal(selectedRow);
+        else if (selectedRow.paths[0]) void copy(selectedRow.paths[0], "path");
+      }
     },
-    [rescan, checkUpdates, toggleSidebar, fail],
+    [rescan, checkUpdates, toggleSidebar, fail, view, selectedRow, open, reveal, copy],
   );
+
+  // The menu bar says what's true: "Hide / Show Sidebar", and Open / Show in Finder / Copy Path
+  // only with one of this computer's projects selected (menu.rs; Windows has no menu bar).
+  const canActOnSelected = view === "projects" && !!selectedRow && !selectedRow.offline && !selectedRow.device;
+  useEffect(() => {
+    setMenuState(showSidebar, canActOnSelected).catch(() => {});
+  }, [showSidebar, canActOnSelected]);
 
   // Menu bar commands, sent to this window only (lib.rs brings it forward first).
   useEffect(() => {
@@ -710,7 +728,7 @@ export default function Main() {
             {!showSidebar && (
               <IconButton
                 icon="sidebar"
-                label={`Show sidebar (${isMac() ? "⌘B" : "Ctrl+B"})`}
+                label={`Show sidebar (${isMac() ? "⌃⌘S" : "Ctrl+B"})`}
                 onClick={toggleSidebar}
               />
             )}
@@ -736,7 +754,7 @@ export default function Main() {
           {!showSidebar && (
             <IconButton
               icon="sidebar"
-              label={`Show sidebar (${isMac() ? "⌘B" : "Ctrl+B"})`}
+              label={`Show sidebar (${isMac() ? "⌃⌘S" : "Ctrl+B"})`}
               onClick={toggleSidebar}
             />
           )}
