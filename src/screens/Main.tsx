@@ -575,18 +575,24 @@ export default function Main() {
   // Which area has the selection's blue (list or sidebar): see lib/focusArea.ts.
   useEffect(() => trackFocusArea(), []);
 
-  // Menu bar commands, sent to this window only (lib.rs brings it forward first).
+  // Menu bar commands, sent to this window only (lib.rs brings it forward first). Listened to
+  // once, through a ref: re-listening whenever runMenu changed (a refresh when the window comes
+  // forward gives a new selected row) left a gap where a menu click was lost.
+  const runMenuRef = useRef(runMenu);
+  useEffect(() => {
+    runMenuRef.current = runMenu;
+  }, [runMenu]);
   useEffect(() => {
     let unlisten: (() => void) | undefined;
     let gone = false;
-    listenHere<string>("menu", (e) => runMenu(e.payload))
+    listenHere<string>("menu", (e) => runMenuRef.current(e.payload))
       .then((u) => (gone ? u() : (unlisten = u)))
       .catch(() => {});
     return () => {
       gone = true;
       unlisten?.();
     };
-  }, [runMenu]);
+  }, []);
 
   // Menu bar / notification area icon (tray.rs): "New Project…" and "New from ›".
   useEffect(() => {
