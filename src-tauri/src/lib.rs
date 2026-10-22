@@ -19,6 +19,7 @@ pub mod resolve;
 mod resolve_cmd;
 pub mod settings;
 mod settings_cmd;
+pub mod shortcut_keys;
 pub mod sizes;
 pub mod staged;
 mod startup;
@@ -158,6 +159,8 @@ pub fn run() {
             settings_cmd::set_space_no_client,
             settings_cmd::spaces_in_use,
             settings_cmd::set_theme,
+            settings_cmd::set_shortcuts,
+            settings_cmd::shortcut_recording,
             settings_cmd::list_templates,
             settings_cmd::import_template,
             settings_cmd::import_template_from,
@@ -301,7 +304,14 @@ fn setup(app: &mut tauri::App, started_at: std::time::SystemTime) -> Result<(), 
     // macOS gets the native menu bar (spec §8). Windows 11 apps don't have one;
     // there every action is on shortcuts, buttons and right-click menus.
     if cfg!(target_os = "macos") {
-        let bar = menu::build(app.handle()).map_err(|e| StartupError::new(Step::MenuBar, e))?;
+        let custom = app
+            .state::<AppState>()
+            .settings
+            .lock()
+            .map(|s| s.shortcuts.clone())
+            .unwrap_or_default();
+        let bar =
+            menu::build(app.handle(), &custom).map_err(|e| StartupError::new(Step::MenuBar, e))?;
         app.set_menu(bar)
             .map_err(|e| StartupError::new(Step::MenuBar, e))?;
     }
@@ -321,6 +331,26 @@ fn setup(app: &mut tauri::App, started_at: std::time::SystemTime) -> Result<(), 
                 if let Err(e) = settings_cmd::open_settings_window(app) {
                     log::warn!("couldn't open Settings: {e}");
                 }
+                Ok(())
+            }
+            menu::Route::SettingsShortcuts => {
+                if let Err(e) = settings_cmd::open_settings_window_on(app, Some("shortcuts")) {
+                    log::warn!("couldn't open Settings: {e}");
+                }
+                Ok(())
+            }
+            menu::Route::CloseWindow => {
+                if let Some(w) = app
+                    .webview_windows()
+                    .into_values()
+                    .find(|w| w.is_focused().unwrap_or(false))
+                {
+                    let _ = w.close();
+                }
+                Ok(())
+            }
+            menu::Route::Quit => {
+                tray::quit(app);
                 Ok(())
             }
             menu::Route::Main => {

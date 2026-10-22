@@ -93,6 +93,9 @@ pub struct Settings {
     /// v0.7.2 (macOS): the misplaced Nest (disk image, translocated copy) whose "Move to
     /// Applications?" got "Not now". Not asked again while Nest runs from that same place.
     pub move_declined: Option<PathBuf>,
+    /// v0.7.2: keys you changed in Settings → Shortcuts, per shortcut id (this computer only).
+    /// Missing = the default keys (`src/lib/shortcuts.ts`).
+    pub shortcuts: std::collections::BTreeMap<String, crate::shortcut_keys::Combo>,
     /// Keys this version doesn't know (an older `resolveLibrary`, from before the library moved
     /// into each template, included) (e.g. written by a newer Nest): kept on every save.
     #[serde(flatten)]
@@ -147,6 +150,7 @@ impl Default for Settings {
             client_kits: Default::default(),
             first_project_tip_seen: false,
             move_declined: None,
+            shortcuts: Default::default(),
             other: serde_json::Map::new(),
         }
     }
@@ -508,6 +512,27 @@ impl Settings {
         Ok(())
     }
 
+    /// Replace the changed shortcut keys (empty = all back to the defaults). Each key must be
+    /// safe (`shortcut_keys::check`) and no two shortcuts may share one. Ids this version doesn't
+    /// know are dropped.
+    pub fn set_shortcuts(
+        &mut self,
+        mut next: std::collections::BTreeMap<String, crate::shortcut_keys::Combo>,
+    ) -> Result<(), String> {
+        next.retain(|id, _| crate::shortcut_keys::SHORTCUT_IDS.contains(&id.as_str()));
+        for (id, combo) in &next {
+            crate::shortcut_keys::check(id, combo)?;
+        }
+        let mut seen = std::collections::BTreeSet::new();
+        for combo in next.values() {
+            if !seen.insert(combo.clone()) {
+                return Err("Two shortcuts can't use the same keys".into());
+            }
+        }
+        self.shortcuts = next;
+        Ok(())
+    }
+
     pub fn set_template_hidden(&mut self, id: &str, hidden: bool) {
         self.hidden_templates.retain(|t| t != id);
         if hidden {
@@ -590,6 +615,51 @@ mod tests {
         s.last_template = Some("grading-mv".into());
         save(dir.path(), &s).unwrap();
         assert_eq!(load(dir.path()).unwrap(), Some(s));
+    }
+
+    #[test]
+    fn custom_shortcuts_are_checked_stored_and_optional() {
+        use crate::shortcut_keys::Combo;
+        let combo = |key: &str| Combo {
+            key: key.into(),
+            cmd: true,
+            ..Default::default()
+        };
+        let mut s = Settings::default();
+        // Older files (no key) read as "no changes".
+        let old: Settings = serde_json::from_str(r#"{"jobsRoots":["/Jobs"]}"#).unwrap();
+        assert!(old.shortcuts.is_empty());
+        // Stored as {"mod":true,"key":"g"}; false flags aren't written.
+        s.set_shortcuts([("search".to_string(), combo("g"))].into())
+            .unwrap();
+        let json = serde_json::to_string(&s).unwrap();
+        assert!(
+            json.contains(r#""shortcuts":{"search":{"key":"g","mod":true}}"#),
+            "{json}"
+        );
+        let back: Settings = serde_json::from_str(&json).unwrap();
+        assert_eq!(back.shortcuts, s.shortcuts);
+        // Same keys twice or a key with no modifier: refused, nothing changes.
+        let twice = [
+            ("search".to_string(), combo("g")),
+            ("rescan".to_string(), combo("g")),
+        ];
+        assert!(s.set_shortcuts(twice.into()).is_err());
+        let bare = Combo {
+            key: "g".into(),
+            ..Default::default()
+        };
+        assert!(s
+            .set_shortcuts([("search".to_string(), bare)].into())
+            .is_err());
+        assert_eq!(s.shortcuts.len(), 1);
+        // An id this version doesn't know is left out.
+        s.set_shortcuts([("nope".to_string(), combo("g"))].into())
+            .unwrap();
+        assert!(s.shortcuts.is_empty());
+        // Reset all.
+        s.set_shortcuts(Default::default()).unwrap();
+        assert!(s.shortcuts.is_empty());
     }
 
     #[test]

@@ -453,3 +453,40 @@
   background: var(--control-hover);
   color: var(--text);
 }
+
+/* Shortcuts tab */
+.rowWrap {
+  flex-wrap: wrap;
+}
+
+.row .keys,
+.row .keysWaiting {
+  min-width: 150px;
+  font-family: var(--font-mono);
+  font-size: 13px;
+}
+
+.row .keysWaiting {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 2px var(--accent-soft);
+  font-family: inherit;
+}
+
+.problem {
+  font-size: var(--text-small);
+  color: var(--error);
+}
+
+.ask {
+  flex: 0 0 100%;
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding: var(--space-2) var(--space-3);
+  border-radius: var(--radius-control);
+  background: var(--accent-soft);
+}
+
+.ask span {
+  flex: 1;
+}

@@ -21,6 +21,7 @@ import type {
   FolderInfo,
   Settings,
   SettingsView,
+  StoredCombo,
   Sizes,
   DevicesView,
   EditorOpened,
@@ -104,7 +105,8 @@ export const installUpdate = () => invoke<void>("install_update");
 const s = <T,>(cmd: string, args?: Record<string, unknown>) => invoke<T>(cmd, args);
 
 export const getSettings = () => s<SettingsView>("get_settings");
-export const openSettings = () => s<void>("open_settings");
+/** `tab: "shortcuts"` opens Settings on the Shortcuts tab. */
+export const openSettings = (tab?: "shortcuts") => s<void>("open_settings", { tab });
 export const addJobsRoot = () => s<SettingsView | null>("add_jobs_root");
 export const removeJobsRoot = (path: string) => s<SettingsView>("remove_jobs_root", { path });
 export const moveJobsRoot = (path: string, to: number) => s<SettingsView>("move_jobs_root", { path, to });
@@ -145,6 +147,10 @@ export const deleteSpace = (name: string) => s<SettingsView>("delete_space", { n
 export const moveSpace = (name: string, to: number) => s<SettingsView>("move_space", { name, to });
 export const setSpaceNoClient = (name: string, on: boolean) => s<SettingsView>("set_space_no_client", { name, on });
 export const spacesInUse = () => s<string[]>("spaces_in_use");
+/** Save the changed shortcut keys (the whole set; {} = all back to the defaults). */
+export const setShortcuts = (shortcuts: Record<string, StoredCombo>) => s<SettingsView>("set_shortcuts", { shortcuts });
+/** Shortcuts tab: waiting for a key (the Mac menu bar goes quiet meanwhile) or done. */
+export const shortcutRecording = (on: boolean) => s<void>("shortcut_recording", { on });
 export const setTheme = (theme: Settings["theme"]) => s<SettingsView>("set_theme", { theme });
 export const listTemplates = () => s<TemplateInfo[]>("list_templates");
 export const importTemplate = () => s<TemplateInfo | null>("import_template");

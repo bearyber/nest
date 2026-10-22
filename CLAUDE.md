@@ -66,7 +66,8 @@ src-tauri/
     tidy.rs          start-up tidy of Nest's own leftovers (exact-pattern temp files, extras/)
     archive.rs       Archive / Unarchive: one rename, same drive only (moves project folders)
     error.rs         AppError (user-facing message)
-    menu.rs          macOS menu bar (Windows has none: shortcuts + context menus)
+    menu.rs          macOS menu bar (Windows has none: shortcuts + context menus); accelerators follow settings
+    shortcut_keys.rs custom shortcut keys: what may be stored, menu accelerator text
     window.rs        window appearance (Mica / vibrancy, theme)
   templates/         bundled templates
   tests/             integration tests (temp dirs only)

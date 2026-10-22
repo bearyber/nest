@@ -6,10 +6,16 @@
 //! `src/lib/shortcuts.ts` (the one list of Nest's shortcuts). `src/lib/shortcuts.test.ts`
 //! reads this file and fails if they drift apart.
 
+use std::collections::BTreeMap;
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::Mutex;
+
 use tauri::menu::{
     Menu, MenuBuilder, MenuItemBuilder, MenuItemKind, PredefinedMenuItem, SubmenuBuilder,
 };
-use tauri::{AppHandle, Runtime};
+use tauri::{AppHandle, Manager, Runtime};
+
+use crate::shortcut_keys::{self, Combo};
 
 /// Menu item ids, the same as the shortcut ids in `src/lib/shortcuts.ts`.
 pub const NEW_PROJECT: &str = "new-project";
@@ -30,11 +36,34 @@ pub const REDO: &str = "redo";
 pub const OPEN_PROJECT: &str = "open-project";
 pub const REVEAL_PROJECT: &str = "reveal-project";
 pub const COPY_PATH: &str = "copy-path";
+/// Our own Close Window and Quit items (not the predefined ones, whose keys can't be changed).
+/// Handled in Rust: close the window you're in / quit for real.
+pub const CLOSE_WINDOW: &str = "close-window";
+pub const QUIT: &str = "quit";
+/// Help → Keyboard Shortcuts: opens Settings on the Shortcuts tab (Rust does it).
+pub const KEYBOARD_SHORTCUTS: &str = "keyboard-shortcuts";
 
-pub fn build<R: Runtime>(app: &AppHandle<R>) -> tauri::Result<Menu<R>> {
+/// While Settings → Shortcuts is recording a new key, the menu bar is empty so no menu key
+/// (⌘N, ⌘Q…) runs; the page gets the key press instead.
+static SUSPENDED: AtomicBool = AtomicBool::new(false);
+/// What `set_state` last said, so a rebuilt menu says the same.
+static LAST_STATE: Mutex<(bool, bool)> = Mutex::new((true, false));
+
+/// `custom`: the keys changed in Settings → Shortcuts; they replace the default accelerator
+/// written at each item below.
+pub fn build<R: Runtime>(
+    app: &AppHandle<R>,
+    custom: &BTreeMap<String, Combo>,
+) -> tauri::Result<Menu<R>> {
+    let accel_of = |id: &str, default: Option<&str>| -> Option<String> {
+        custom
+            .get(id)
+            .map(shortcut_keys::accelerator)
+            .or_else(|| default.map(str::to_string))
+    };
     let item = |id: &str, label: &str, accel: Option<&str>| {
         let b = MenuItemBuilder::with_id(id, label);
-        match accel {
+        match accel_of(id, accel) {
             Some(a) => b.accelerator(a).build(app),
             None => b.build(app),
         }
@@ -43,7 +72,7 @@ pub fn build<R: Runtime>(app: &AppHandle<R>) -> tauri::Result<Menu<R>> {
     // Items that need a selected project start off; the page turns them on (`set_state`).
     let disabled = |id: &str, label: &str, accel: Option<&str>| {
         let b = MenuItemBuilder::with_id(id, label).enabled(false);
-        match accel {
+        match accel_of(id, accel) {
             Some(a) => b.accelerator(a).build(app),
             None => b.build(app),
         }
@@ -61,7 +90,7 @@ pub fn build<R: Runtime>(app: &AppHandle<R>) -> tauri::Result<Menu<R>> {
         .hide_others()
         .show_all()
         .separator()
-        .quit()
+        .item(&item(QUIT, "Quit Nest", Some("CmdOrCtrl+Q"))?)
         .build()?;
 
     let file = SubmenuBuilder::new(app, "File")
@@ -73,7 +102,7 @@ pub fn build<R: Runtime>(app: &AppHandle<R>) -> tauri::Result<Menu<R>> {
         .separator()
         .item(&item(RESCAN, "Refresh List", Some("CmdOrCtrl+R"))?)
         .separator()
-        .item(&PredefinedMenuItem::close_window(app, None)?)
+        .item(&item(CLOSE_WINDOW, "Close Window", Some("CmdOrCtrl+W"))?)
         .build()?;
 
     // The standard Edit items keep Cmd+C / Cmd+V working in text fields on macOS.
@@ -106,7 +135,7 @@ pub fn build<R: Runtime>(app: &AppHandle<R>) -> tauri::Result<Menu<R>> {
         .fullscreen()
         .build()?;
 
-    // The standard Window menu (macOS also lists the open windows in it), and an empty Help menu
+    // The standard Window menu (macOS also lists the open windows in it), and the Help menu
     // (macOS adds its search box to it).
     let window = SubmenuBuilder::new(app, "Window")
         .minimize()
@@ -114,7 +143,9 @@ pub fn build<R: Runtime>(app: &AppHandle<R>) -> tauri::Result<Menu<R>> {
         .separator()
         .item(&PredefinedMenuItem::bring_all_to_front(app, None)?)
         .build()?;
-    let help = SubmenuBuilder::new(app, "Help").build()?;
+    let help = SubmenuBuilder::new(app, "Help")
+        .item(&item(KEYBOARD_SHORTCUTS, "Keyboard Shortcuts", None)?)
+        .build()?;
     #[cfg(target_os = "macos")]
     {
         window.set_as_windows_menu_for_nsapp()?;
@@ -134,6 +165,9 @@ pub fn set_state<R: Runtime>(
     sidebar_shown: bool,
     project_selected: bool,
 ) -> tauri::Result<()> {
+    if let Ok(mut last) = LAST_STATE.lock() {
+        *last = (sidebar_shown, project_selected);
+    }
     let Some(menu) = app.menu() else {
         return Ok(());
     };
@@ -159,11 +193,47 @@ pub fn set_state<R: Runtime>(
     Ok(())
 }
 
+/// Install the menu bar again with the keys now in settings (macOS; a no-op elsewhere, and while
+/// a new key is being recorded: it is installed when that ends).
+pub fn rebuild(app: &AppHandle) -> tauri::Result<()> {
+    if !cfg!(target_os = "macos") || SUSPENDED.load(Ordering::SeqCst) {
+        return Ok(());
+    }
+    let custom = app
+        .try_state::<crate::commands::AppState>()
+        .and_then(|s| s.settings.lock().ok().map(|s| s.shortcuts.clone()))
+        .unwrap_or_default();
+    app.set_menu(build(app, &custom)?)?;
+    let (sidebar, selected) = LAST_STATE.lock().map(|l| *l).unwrap_or((true, false));
+    set_state(app, sidebar, selected)
+}
+
+/// Settings → Shortcuts is recording a key (`true`): empty the menu bar so its keys don't run.
+/// Recording ended (`false`): put it back.
+pub fn suspend(app: &AppHandle, on: bool) -> tauri::Result<()> {
+    if !cfg!(target_os = "macos") {
+        return Ok(());
+    }
+    let was = SUSPENDED.swap(on, Ordering::SeqCst);
+    if on && !was {
+        app.set_menu(Menu::new(app)?)?;
+    } else if !on && was {
+        rebuild(app)?;
+    }
+    Ok(())
+}
+
 /// Where a menu bar command goes (lib.rs acts on it).
 #[derive(Debug, PartialEq, Eq)]
 pub enum Route {
     /// Opens the Settings window (Rust does it).
     Settings,
+    /// Opens the Settings window on the Shortcuts tab.
+    SettingsShortcuts,
+    /// Closes the window you're in (Close Window).
+    CloseWindow,
+    /// Quits for real.
+    Quit,
     /// The main window's commands: bring the main window forward (shown, focused), then send
     /// the command to it alone, so ⌘N with Settings in front or Nest hidden opens New Project
     /// where you can see it.
@@ -180,6 +250,9 @@ pub enum Route {
 pub fn route(id: &str, first_run: bool) -> Route {
     match id {
         SETTINGS => Route::Settings,
+        KEYBOARD_SHORTCUTS => Route::SettingsShortcuts,
+        CLOSE_WINDOW => Route::CloseWindow,
+        QUIT => Route::Quit,
         UNDO | REDO => Route::Focused,
         NEW_PROJECT | RESCAN | SEARCH | TOGGLE_SIDEBAR | TOGGLE_INSPECTOR | CHECK_UPDATES
         | OPEN_PROJECT | REVEAL_PROJECT | COPY_PATH => {
@@ -222,6 +295,9 @@ mod tests {
         assert_eq!(route(REDO, true), Route::Focused);
         assert_eq!(route(SETTINGS, false), Route::Settings);
         assert_eq!(route(SETTINGS, true), Route::Settings);
+        assert_eq!(route(KEYBOARD_SHORTCUTS, true), Route::SettingsShortcuts);
+        assert_eq!(route(CLOSE_WINDOW, false), Route::CloseWindow);
+        assert_eq!(route(QUIT, false), Route::Quit);
         assert_eq!(route("something-else", false), Route::Ignore);
     }
 }

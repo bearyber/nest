@@ -382,6 +382,19 @@ export interface Settings {
   clientKits: Record<string, string>;
   /** v0.7: the note after your very first project was shown (once). */
   firstProjectTipSeen: boolean;
+  /** v0.7.2: keys changed in Settings → Shortcuts, by shortcut id (this computer only). */
+  shortcuts: Record<string, StoredCombo>;
+}
+
+/** A key combination as saved (mirrors shortcut_keys.rs `Combo`). `key` is a lower-case letter,
+ *  a digit, a punctuation key, "F1".."F12" or "Enter"; `mod` is ⌘ on macOS, Ctrl on Windows. */
+export interface StoredCombo {
+  key: string;
+  mod?: boolean;
+  shift?: boolean;
+  alt?: boolean;
+  /** ⌃ on macOS only. */
+  ctrl?: boolean;
 }
 
 export interface SettingsView {

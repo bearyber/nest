@@ -1,9 +1,17 @@
 // @vitest-environment jsdom
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it } from "vitest";
 import {
   SHORTCUTS,
+  checkCombo,
   closesSettings,
+  effectiveCombos,
   findShortcut,
+  formatCombo,
+  listedShortcuts,
+  planChange,
+  planReset,
+  recordedCombo,
+  setCustomKeys,
   installBrowserKeyGuard,
   isBrowserKey,
   matchesCombo,
@@ -91,20 +99,32 @@ describe("shortcut matching", () => {
   it("only looks at the shortcuts asked for", () => {
     expect(findShortcut(key("z", { ctrlKey: true }), ["new-project"], "win")).toBeNull();
     expect(matchesCombo(key("Enter", { ctrlKey: true }), { key: "Enter", mod: true }, "win")).toBe(true);
-    expect(matchesCombo(key("Enter", { ctrlKey: true, shiftKey: true }), { key: "Enter", mod: true }, "win")).toBe(false);
+    expect(matchesCombo(key("Enter", { ctrlKey: true, shiftKey: true }), { key: "Enter", mod: true }, "win")).toBe(
+      false,
+    );
   });
 });
 
 describe("the macOS menu bar uses the same keys (src-tauri/src/menu.rs)", () => {
   const menu = Object.values(
-    import.meta.glob<string>("../../src-tauri/src/menu.rs", { eager: true, query: "?raw", import: "default" }),
+    import.meta.glob<string>("../../src-tauri/src/menu.rs", {
+      eager: true,
+      query: "?raw",
+      import: "default",
+    }),
   )[0];
   const ids = Object.fromEntries([...menu.matchAll(/pub const (\w+): &str = "([^"]+)";/g)].map((m) => [m[1], m[2]]));
   const accelerators = new Map(
     [...menu.matchAll(/(?:item|disabled)\(\s*(\w+),\s*"[^"]*",\s*Some\("([^"]+)"\)/g)].map((m) => [ids[m[1]], m[2]]),
   );
   const accelerator = (c: Combo) =>
-    [c.ctrl && "Ctrl", c.mod && "CmdOrCtrl", c.shift && "Shift", c.alt && "Alt", c.key.length === 1 ? c.key.toUpperCase() : c.key]
+    [
+      c.ctrl && "Ctrl",
+      c.mod && "CmdOrCtrl",
+      c.shift && "Shift",
+      c.alt && "Alt",
+      c.key.length === 1 ? c.key.toUpperCase() : c.key,
+    ]
       .filter(Boolean)
       .join("+");
 
@@ -115,8 +135,7 @@ describe("the macOS menu bar uses the same keys (src-tauri/src/menu.rs)", () => 
       expect(s, menuId).toBeTruthy();
       expect(s!.mac.filter((c) => c.menu).map(accelerator), menuId).toEqual([acc]);
     }
-    // Close Window is the menu's predefined item (⌘W), not one of ours.
-    for (const s of SHORTCUTS.filter((x) => x.id !== "close-window" && x.mac.some((c) => c.menu))) {
+    for (const s of SHORTCUTS.filter((x) => x.mac.some((c) => c.menu))) {
       expect(accelerators.has(s.id), s.id).toBe(true);
     }
     expect(accelerators.get("search")).toBe("CmdOrCtrl+F");
@@ -185,7 +204,12 @@ describe("Windows: the webview's own keys are blocked", () => {
 });
 
 describe("Windows: closing the Settings window from the keyboard", () => {
-  const ev = (k: string, mods: Partial<KeyLike> = {}, target: EventTarget | null = document.body, defaultPrevented = false) => ({
+  const ev = (
+    k: string,
+    mods: Partial<KeyLike> = {},
+    target: EventTarget | null = document.body,
+    defaultPrevented = false,
+  ) => ({
     ...key(k, mods),
     target,
     defaultPrevented,
@@ -206,5 +230,169 @@ describe("Windows: closing the Settings window from the keyboard", () => {
     expect(closesSettings(ev("W", { ctrlKey: true, shiftKey: true }), "win")).toBe(false);
     expect(closesSettings(ev("Escape"), "mac")).toBe(false);
     expect(closesSettings(ev("w", { metaKey: true }), "mac")).toBe(false);
+  });
+});
+
+describe("the ids Rust may save (src-tauri/src/shortcut_keys.rs) are the shortcut ids", () => {
+  const rust = Object.values(
+    import.meta.glob<string>("../../src-tauri/src/shortcut_keys.rs", {
+      eager: true,
+      query: "?raw",
+      import: "default",
+    }),
+  )[0];
+  it("match, in the same order", () => {
+    const list = rust.match(/SHORTCUT_IDS: \[&str; \d+\] = \[([^\]]+)\]/)![1];
+    const ids = [...list.matchAll(/"([^"]+)"/g)].map((m) => m[1]);
+    expect(ids).toEqual(SHORTCUTS.map((s) => s.id));
+  });
+});
+
+describe("changed keys", () => {
+  afterEach(() => setCustomKeys({}));
+  const n = { key: "n", mod: true };
+
+  it("a changed key replaces the first key; the extras and the menu flag stay", () => {
+    setCustomKeys({ search: { key: "g", mod: true }, rescan: { key: "F6" } });
+    expect(id(key("g", { metaKey: true }), "mac")).toBe("search");
+    expect(id(key("f", { metaKey: true }), "mac")).toBeNull();
+    expect(id(key("k", { metaKey: true }), "mac")).toBe("search");
+    expect(findShortcut(key("g", { metaKey: true }), undefined, "mac")?.combo.menu).toBe(true);
+    // Refresh keeps F5 as an extra on both OSes.
+    expect(id(key("F6"), "win")).toBe("rescan");
+    expect(id(key("F5"), "win")).toBe("rescan");
+    expect(id(key("r", { ctrlKey: true }), "win")).toBeNull();
+    expect(
+      effectiveCombos(
+        SHORTCUTS.find((s) => s.id === "search")!,
+        "win",
+      ).map((c) => formatCombo(c, "win")),
+    ).toEqual(["Ctrl+G", "Ctrl+K"]);
+  });
+
+  it("ignores ids it doesn't know, and no changes means the defaults", () => {
+    setCustomKeys({ "from-the-future": { key: "j", mod: true } });
+    expect(id(key("j", { ctrlKey: true }), "win")).toBeNull();
+    expect(id(key("n", { ctrlKey: true }), "win")).toBe("new-project");
+    setCustomKeys(undefined);
+    expect(id(key("n", { metaKey: true }), "mac")).toBe("new-project");
+  });
+
+  it("shows keys the way each OS writes them", () => {
+    expect(formatCombo({ key: "n", mod: true, shift: true }, "mac")).toBe("⇧⌘N");
+    expect(formatCombo({ key: "s", mod: true, ctrl: true }, "mac")).toBe("⌃⌘S");
+    expect(formatCombo({ key: "c", mod: true, alt: true }, "mac")).toBe("⌥⌘C");
+    expect(formatCombo({ key: "Enter", mod: true }, "mac")).toBe("⌘↩");
+    expect(formatCombo({ key: "n", mod: true, shift: true }, "win")).toBe("Ctrl+Shift+N");
+    expect(formatCombo({ key: "F5" }, "win")).toBe("F5");
+    expect(formatCombo({ key: "?", shift: true }, "win")).toBe("Shift+?");
+  });
+
+  it("Quit is listed on a Mac only; Show Keyboard Shortcuts has F1 and ? on Windows and no key on a Mac", () => {
+    expect(listedShortcuts("mac").some((s) => s.id === "quit")).toBe(true);
+    expect(listedShortcuts("win").some((s) => s.id === "quit")).toBe(false);
+    expect(id(key("F1"), "win")).toBe("keyboard-shortcuts");
+    expect(id(key("?", { shiftKey: true }), "win")).toBe("keyboard-shortcuts");
+    expect(id(key("?", { shiftKey: true }), "mac")).toBeNull();
+    setCustomKeys({ "keyboard-shortcuts": { key: "/", mod: true } });
+    const hit = findShortcut(key("/", { metaKey: true }), undefined, "mac");
+    expect(hit?.shortcut.id).toBe("keyboard-shortcuts");
+    expect(hit?.combo.menu).toBe(true);
+  });
+
+  it("AltGr never runs a changed key either", () => {
+    setCustomKeys({ search: { key: "g", mod: true } });
+    expect(id(key("g", { ctrlKey: true, altKey: true, altGr: true }), "win")).toBeNull();
+  });
+
+  describe("what can be recorded", () => {
+    it("refuses what would type, what the OS owns, and Alt on Windows", () => {
+      expect(checkCombo("search", { key: "g", mod: true }, "mac")).toBeNull();
+      expect(checkCombo("search", { key: "F6" }, "win")).toBeNull();
+      expect(checkCombo("search", { key: "g" }, "win")).toMatch(/Ctrl/);
+      expect(checkCombo("search", { key: "g", shift: true }, "mac")).toMatch(/⌘/);
+      expect(checkCombo("search", { key: "g", mod: true, alt: true }, "win")).toMatch(/Alt/);
+      expect(checkCombo("search", { key: "Escape", mod: true }, "mac")).toMatch(/letter/);
+      expect(checkCombo("search", { key: "1", mod: true, shift: true }, "mac")).toMatch(/Shift/);
+      expect(checkCombo("search", { key: "q", mod: true }, "mac")).toMatch(/quits/);
+      expect(checkCombo("quit", { key: "q", mod: true }, "mac")).toBeNull();
+      expect(checkCombo("search", { key: "h", mod: true }, "mac")).toMatch(/hides/);
+      expect(checkCombo("search", { key: "c", mod: true }, "win")).toMatch(/copies/);
+      expect(checkCombo("search", { key: "c", mod: true }, "mac")).toMatch(/copies/);
+    });
+
+    it("turns key presses into combinations; a modifier alone is not one", () => {
+      expect(recordedCombo(key("Meta", { metaKey: true }), "mac")).toBeNull();
+      expect(recordedCombo(key("g", { metaKey: true, shiftKey: true }), "mac")).toEqual({
+        combo: { key: "g", mod: true, shift: true },
+      });
+      expect(recordedCombo(key("s", { metaKey: true, ctrlKey: true }), "mac")).toEqual({
+        combo: { key: "s", mod: true, ctrl: true },
+      });
+      expect(recordedCombo(key("g", { ctrlKey: true }), "win")).toEqual({
+        combo: { key: "g", mod: true },
+      });
+      expect(recordedCombo(key("g", { ctrlKey: true, altKey: true, altGr: true }), "win")).toHaveProperty("error");
+      expect(recordedCombo(key("g", { metaKey: true }), "win")).toHaveProperty("error");
+    });
+  });
+
+  describe("giving a shortcut new keys", () => {
+    it("saves free keys, and a key equal to the default stores nothing", () => {
+      const c = planChange("search", { key: "g", mod: true }, "mac", {});
+      expect(c).toEqual({
+        kind: "save",
+        overrides: { search: { key: "g", mod: true } },
+      });
+      const back = planChange("search", { key: "f", mod: true }, "mac", {
+        search: { key: "g", mod: true },
+      });
+      expect(back).toEqual({ kind: "save", overrides: {} });
+      expect(planChange("search", { key: "f", mod: true }, "mac", {}).kind).toBe("same");
+    });
+
+    it("asks to swap when another shortcut has the keys, and swaps both", () => {
+      const c = planChange("search", n, "mac", {});
+      expect(c.kind).toBe("swap");
+      if (c.kind !== "swap") return;
+      expect(c.message).toBe("Already used by New Project. Swap them?");
+      expect(c.with.id).toBe("new-project");
+      expect(c.overrides).toEqual({
+        search: { key: "n", mod: true },
+        "new-project": { key: "f", mod: true },
+      });
+    });
+
+    it("never saves a silent duplicate: an extra key, or a swap the other can't take, is refused", () => {
+      const extra = planChange("rescan", { key: "k", mod: true }, "mac", {});
+      expect(extra.kind).toBe("error");
+      // ⌘Q is the Mac's own Quit key: nothing else can have it.
+      expect(planChange("new-project", { key: "q", mod: true }, "mac", {}).kind).toBe("error");
+      // A shortcut with no keys has nothing to give in exchange.
+      expect(planChange("keyboard-shortcuts", n, "mac", {}).kind).toBe("error");
+      // ...and the other way round: Quit can't take ⌘N's place, so ⌘N can't be swapped with it.
+      expect(planChange("quit", { key: "n", mod: true }, "mac", {}).kind).toBe("error");
+    });
+
+    it("Reset puts the default back, asking first when someone else took it", () => {
+      const own = { search: { key: "g", mod: true } };
+      expect(planReset("search", "mac", own)).toEqual({
+        kind: "save",
+        overrides: {},
+      });
+      const taken = {
+        search: { key: "g", mod: true },
+        rescan: { key: "f", mod: true },
+      };
+      const c = planReset("search", "mac", taken);
+      expect(c.kind).toBe("swap");
+      if (c.kind === "swap") expect(c.overrides).toEqual({ rescan: { key: "g", mod: true } });
+      // No default key (Mac Show Keyboard Shortcuts): the entry is just removed.
+      expect(
+        planReset("keyboard-shortcuts", "mac", {
+          "keyboard-shortcuts": { key: "j", mod: true },
+        }),
+      ).toEqual({ kind: "save", overrides: {} });
+    });
   });
 });

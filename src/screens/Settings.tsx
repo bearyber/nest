@@ -11,10 +11,11 @@ import CodesTab from "./settings/CodesTab";
 import DevicesTab from "./settings/DevicesTab";
 import GeneralTab from "./settings/GeneralTab";
 import KitsTab from "./settings/KitsTab";
+import ShortcutsTab from "./settings/ShortcutsTab";
 import SpacesTab from "./settings/SpacesTab";
 import styles from "./settings/settings.module.css";
 
-type Tab = "general" | "codes" | "spaces" | "kits" | "devices" | "appearance" | "about";
+type Tab = "general" | "codes" | "spaces" | "kits" | "devices" | "appearance" | "shortcuts" | "about";
 
 const TABS: { id: Tab; label: string }[] = [
   { id: "general", label: "General" },
@@ -23,6 +24,7 @@ const TABS: { id: Tab; label: string }[] = [
   { id: "kits", label: "Client files" },
   { id: "devices", label: "Devices" },
   { id: "appearance", label: "Appearance" },
+  { id: "shortcuts", label: "Shortcuts" },
   { id: "about", label: "About" },
 ];
 
@@ -36,8 +38,14 @@ export interface TabProps {
 /** The Settings window (build spec §3.3): native preferences style, tabs on the left. */
 export default function Settings() {
   const [view, setView] = useState<SettingsView | null>(null);
-  const [tab, setTab] = useState<Tab>("general");
-  const [message, setMessage] = useState<{ text: string; error: boolean } | null>(null);
+  // Help → Keyboard Shortcuts / F1 open the window on the Shortcuts tab (?tab=shortcuts).
+  const [tab, setTab] = useState<Tab>(() =>
+    new URLSearchParams(window.location.search).get("tab") === "shortcuts" ? "shortcuts" : "general",
+  );
+  const [message, setMessage] = useState<{
+    text: string;
+    error: boolean;
+  } | null>(null);
 
   const refresh = useCallback(
     () =>
@@ -66,6 +74,20 @@ export default function Settings() {
       .catch(() => {});
     return () => unlisten?.();
   }, [refresh]);
+
+  // Already open: the same request arrives as an event.
+  useEffect(() => {
+    let unlisten: (() => void) | undefined;
+    listen<string>("settings-tab", (e) => {
+      if (e.payload === "shortcuts") {
+        setTab("shortcuts");
+        setMessage(null);
+      }
+    })
+      .then((u) => (unlisten = u))
+      .catch(() => {});
+    return () => unlisten?.();
+  }, []);
 
   // Windows: Escape (when you're not typing) and Ctrl+W close the window, like other Windows
   // settings windows. macOS has ⌘W in the menu bar; Escape doesn't close a Mac settings window.
@@ -131,6 +153,7 @@ export default function Settings() {
         {view && tab === "kits" && <KitsTab view={view} run={run} />}
         {view && tab === "devices" && <DevicesTab view={view} run={run} />}
         {view && tab === "appearance" && <AppearanceTab view={view} run={run} />}
+        {view && tab === "shortcuts" && <ShortcutsTab view={view} run={run} />}
         {view && tab === "about" && <AboutTab view={view} run={run} />}
       </main>
     </div>

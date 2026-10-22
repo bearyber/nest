@@ -92,12 +92,23 @@ pub fn get_settings(app: AppHandle, state: State<'_, AppState>) -> AppResult<Set
 /// Must be `async`: building a window from a synchronous command deadlocks on Windows
 /// (the window appears empty and the whole app freezes). Shipped broken in 0.1.3.
 #[tauri::command(async)]
-pub fn open_settings(app: AppHandle) -> AppResult<()> {
-    open_settings_window(&app).map_err(|e| AppError::new(format!("Couldn't open Settings: {e}")))
+pub fn open_settings(app: AppHandle, tab: Option<String>) -> AppResult<()> {
+    open_settings_window_on(&app, tab.as_deref())
+        .map_err(|e| AppError::new(format!("Couldn't open Settings: {e}")))
 }
 
 pub fn open_settings_window(app: &AppHandle) -> tauri::Result<()> {
+    open_settings_window_on(app, None)
+}
+
+/// Open (or focus) Settings, on a tab: "shortcuts" (Help → Keyboard Shortcuts, F1). Only
+/// "shortcuts" is known; anything else opens as usual.
+pub fn open_settings_window_on(app: &AppHandle, tab: Option<&str>) -> tauri::Result<()> {
+    let tab = tab.filter(|t| *t == "shortcuts");
     if let Some(w) = app.get_webview_window(SETTINGS_WINDOW) {
+        if let Some(t) = tab {
+            let _ = app.emit_to(SETTINGS_WINDOW, "settings-tab", t);
+        }
         w.unminimize()?;
         w.show()?;
         // A Nest window shows: folder work may start (folder_access.rs), even if it never
@@ -105,18 +116,24 @@ pub fn open_settings_window(app: &AppHandle) -> tauri::Result<()> {
         crate::folder_access::window_shown(app);
         return w.set_focus();
     }
-    let mut builder =
-        WebviewWindowBuilder::new(app, SETTINGS_WINDOW, WebviewUrl::App("index.html".into()))
-            .title("Nest Settings")
-            .inner_size(860.0, 600.0)
-            .min_inner_size(660.0, 460.0)
-            .transparent(true)
-            .center()
-            // No webview zoom (Ctrl+wheel, Ctrl+= / Ctrl+-), as in the main window's config.
-            .zoom_hotkeys_enabled(false)
-            // Hidden until its page has drawn (see `settings_ready`), so it appears in one go
-            // instead of flashing an empty frame.
-            .visible(false);
+    let mut builder = WebviewWindowBuilder::new(
+        app,
+        SETTINGS_WINDOW,
+        WebviewUrl::App(match tab {
+            Some(t) => format!("index.html?tab={t}").into(),
+            None => "index.html".into(),
+        }),
+    )
+    .title("Nest Settings")
+    .inner_size(860.0, 600.0)
+    .min_inner_size(660.0, 460.0)
+    .transparent(true)
+    .center()
+    // No webview zoom (Ctrl+wheel, Ctrl+= / Ctrl+-), as in the main window's config.
+    .zoom_hotkeys_enabled(false)
+    // Hidden until its page has drawn (see `settings_ready`), so it appears in one go
+    // instead of flashing an empty frame.
+    .visible(false);
     // Dev builds keep their webview data apart from the installed app (see tauri.dev.conf.json):
     // on Windows two webviews with different settings can't share one data folder.
     if cfg!(debug_assertions) {
@@ -128,6 +145,13 @@ pub fn open_settings_window(app: &AppHandle) -> tauri::Result<()> {
         );
     }
     let w = builder.build()?;
+    // Closed while a new key was being recorded: the menu bar comes back.
+    let closing = app.clone();
+    w.on_window_event(move |e| {
+        if matches!(e, tauri::WindowEvent::Destroyed) {
+            let _ = crate::menu::suspend(&closing, false);
+        }
+    });
     // Safety net: if the page never says it's ready, show the window anyway.
     let fallback = w.clone();
     std::thread::spawn(move || {
@@ -526,6 +550,31 @@ pub fn set_theme(
         window::apply_appearance_on_main(&app, w, &theme, |_| {});
     }
     Ok(v)
+}
+
+// ── Shortcuts ──
+
+/// Replace the keys changed in Settings → Shortcuts (empty = all defaults). The page checks
+/// conflicts and keys the OS owns; Rust refuses unsafe keys and duplicates. The macOS menu bar
+/// is rebuilt with the new keys.
+#[tauri::command(async)]
+pub fn set_shortcuts(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    shortcuts: std::collections::BTreeMap<String, crate::shortcut_keys::Combo>,
+) -> AppResult<SettingsView> {
+    let v = edit(&app, &state, |s| s.set_shortcuts(shortcuts))?;
+    crate::menu::rebuild(&app)
+        .map_err(|e| AppError::new(format!("Couldn't update the menu: {e}")))?;
+    Ok(v)
+}
+
+/// The Shortcuts tab is waiting for a key (`on`), or stopped: on a Mac the menu bar is empty
+/// meanwhile, so ⌘N, ⌘Q… arrive as key presses instead of running.
+#[tauri::command(async)]
+pub fn shortcut_recording(app: AppHandle, on: bool) -> AppResult<()> {
+    crate::menu::suspend(&app, on)
+        .map_err(|e| AppError::new(format!("Couldn't update the menu: {e}")))
 }
 
 // ── Templates ──

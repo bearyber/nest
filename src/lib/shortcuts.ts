@@ -5,9 +5,16 @@
 //
 // Matching is exact: Ctrl+Shift+R is not Ctrl+R, ⌃⌘F (full screen) is not ⌘F, and AltGr (which
 // Windows reports as Ctrl+Alt) never counts as a shortcut, since it types characters.
+//
+// Keys can be changed per computer (Settings → Shortcuts, saved in settings as `shortcuts`). A
+// changed key replaces a shortcut's first key; its extra keys (⌘K for Find…) stay. Everything
+// reads the effective keys (`effectiveCombos`): the page's key handlers, the Settings list, and
+// on macOS the menu bar (menu.rs rebuilds its accelerators from the same saved keys).
 import { listen, type EventCallback, type UnlistenFn } from "@tauri-apps/api/event";
 import { getCurrentWindow } from "@tauri-apps/api/window";
+import { getSettings, openSettings } from "./commands";
 import { isMac, type Platform } from "./platform";
+import type { StoredCombo } from "./types";
 
 export type ShortcutId =
   | "new-project"
@@ -21,7 +28,9 @@ export type ShortcutId =
   | "undo"
   | "redo"
   | "create"
-  | "close-window";
+  | "close-window"
+  | "quit"
+  | "keyboard-shortcuts";
 
 /** One key combination. */
 export interface Combo {
@@ -46,6 +55,10 @@ export interface Shortcut {
   win: Combo[];
   /** False: does nothing while you're typing in a text box. */
   whileTyping?: boolean;
+  /** Only exists on this OS (Quit has no key on Windows): not listed on the other. */
+  onlyOn?: Platform;
+  /** macOS: has a menu bar item even with no default key, so a key you give it is its accelerator. */
+  menuItem?: boolean;
 }
 
 export const SHORTCUTS: readonly Shortcut[] = [
@@ -71,14 +84,23 @@ export const SHORTCUTS: readonly Shortcut[] = [
     id: "search",
     label: "Find",
     // ⌘K / Ctrl+K: a hidden extra, as in many apps.
-    mac: [{ key: "f", mod: true, menu: true }, { key: "k", mod: true }],
-    win: [{ key: "f", mod: true }, { key: "k", mod: true }],
+    mac: [
+      { key: "f", mod: true, menu: true },
+      { key: "k", mod: true },
+    ],
+    win: [
+      { key: "f", mod: true },
+      { key: "k", mod: true },
+    ],
   },
   {
     id: "toggle-sidebar",
     label: "Toggle Sidebar",
     // Menu: Hide Sidebar / Show Sidebar. ⌘B is a hidden extra on a Mac (as in other apps).
-    mac: [{ key: "s", mod: true, ctrl: true, menu: true }, { key: "b", mod: true }],
+    mac: [
+      { key: "s", mod: true, ctrl: true, menu: true },
+      { key: "b", mod: true },
+    ],
     win: [{ key: "b", mod: true }],
   },
   {
@@ -114,7 +136,10 @@ export const SHORTCUTS: readonly Shortcut[] = [
     id: "redo",
     label: "Redo",
     mac: [{ key: "z", mod: true, shift: true, menu: true }],
-    win: [{ key: "y", mod: true }, { key: "z", mod: true, shift: true }],
+    win: [
+      { key: "y", mod: true },
+      { key: "z", mod: true, shift: true },
+    ],
   },
   {
     id: "create",
@@ -125,11 +150,252 @@ export const SHORTCUTS: readonly Shortcut[] = [
   {
     id: "close-window",
     label: "Close Window",
-    // macOS: the menu bar's own Close Window item (predefined in menu.rs).
+    // macOS: the menu bar's own Close Window item (menu.rs closes the window you're in).
     mac: [{ key: "w", mod: true, menu: true }],
     win: [{ key: "w", mod: true }],
   },
+  {
+    // The menu bar's Quit Nest. Windows has none: quit from the notification area icon.
+    id: "quit",
+    label: "Quit Nest",
+    mac: [{ key: "q", mod: true, menu: true }],
+    win: [],
+    onlyOn: "mac",
+  },
+  {
+    // Opens Settings on the Shortcuts tab. Mac: Help → Keyboard Shortcuts (no key until you give
+    // it one). Windows: F1 anywhere, and ? when you're not typing.
+    id: "keyboard-shortcuts",
+    label: "Show Keyboard Shortcuts",
+    mac: [],
+    win: [{ key: "F1" }, { key: "?", shift: true }],
+    menuItem: true,
+  },
 ];
+
+/** Is this the shortcut's key list that Settings shows on this OS? */
+export const listedShortcuts = (platform: Platform = currentPlatform()): readonly Shortcut[] =>
+  SHORTCUTS.filter((s) => !s.onlyOn || s.onlyOn === platform);
+
+// ── Changed keys ──
+
+export type Overrides = Record<string, StoredCombo>;
+let custom: Overrides = {};
+
+/** Use these changed keys (from settings; an id this version doesn't know is ignored). */
+export function setCustomKeys(next: Overrides | null | undefined) {
+  custom = next ?? {};
+}
+
+/** The shortcut's keys on this OS now: its first key (the one you can change) then the extras. */
+export function effectiveCombos(
+  s: Shortcut,
+  platform: Platform = currentPlatform(),
+  overrides: Overrides = custom,
+): Combo[] {
+  const base = s[platform];
+  const o = overrides[s.id];
+  if (!o?.key) return base;
+  const menu = platform === "mac" && (base[0]?.menu === true || s.menuItem === true);
+  return [{ ...o, ...(menu ? { menu: true } : {}) }, ...base.slice(1)];
+}
+
+const sameCombo = (a: Combo, b: Combo) =>
+  a.key === b.key && !!a.mod === !!b.mod && !!a.shift === !!b.shift && !!a.alt === !!b.alt && !!a.ctrl === !!b.ctrl;
+
+/** How a key shows: ⇧⌘N on a Mac, Ctrl+Shift+N on Windows. */
+export function formatCombo(c: Combo, platform: Platform = currentPlatform()): string {
+  if (platform === "mac") {
+    const key = c.key === "Enter" ? "↩" : c.key.length === 1 ? c.key.toUpperCase() : c.key;
+    return `${c.ctrl ? "⌃" : ""}${c.alt ? "⌥" : ""}${c.shift ? "⇧" : ""}${c.mod ? "⌘" : ""}${key}`;
+  }
+  const key = c.key.length === 1 ? c.key.toUpperCase() : c.key;
+  return [c.mod && "Ctrl", c.alt && "Alt", c.shift && "Shift", key].filter(Boolean).join("+");
+}
+
+/** A key that would type something (no ⌘ / Ctrl / ⌥, not an F key), like ?: it must not run
+ *  while you're typing in a text box. */
+export const typesText = (c: Combo) => !c.mod && !c.ctrl && !c.alt && !/^F\d+$/.test(c.key);
+
+const isFKey = (key: string) => /^F([1-9]|1[0-2])$/.test(key);
+const isLetter = (key: string) => /^[a-z]$/.test(key);
+
+/** Keys the OS owns, by modifiers + key (c = ⌃, m = ⌘ / Ctrl, a = ⌥, s = ⇧). Each says why. */
+const OS_OWNED: Record<Platform, Record<string, string>> = {
+  mac: {
+    "m+q": "⌘Q quits an app on every Mac",
+    "m+h": "⌘H hides the app on every Mac",
+    "ma+h": "⌥⌘H hides all other apps on every Mac",
+    "m+m": "⌘M minimises the window on every Mac",
+    "m+`": "⌘` switches between an app's windows",
+    "cm+f": "⌃⌘F is full screen on every Mac",
+    "cm+q": "⌃⌘Q locks the screen",
+    "ms+q": "⇧⌘Q logs you out",
+    "ma+d": "⌥⌘D shows or hides the Dock",
+    "m+c": "⌘C copies in a text box",
+    "m+v": "⌘V pastes in a text box",
+    "m+x": "⌘X cuts in a text box",
+    "m+a": "⌘A selects all in a text box",
+  },
+  win: {
+    "m+c": "Ctrl+C copies in a text box",
+    "m+v": "Ctrl+V pastes in a text box",
+    "m+x": "Ctrl+X cuts in a text box",
+    "m+a": "Ctrl+A selects all in a text box",
+    "ms+v": "Ctrl+Shift+V pastes without formatting in a text box",
+  },
+};
+// Quit keeps ⌘Q: it is the Mac's own key for it.
+const OWNED_BY_SHORTCUT: Record<string, string> = { "mac:m+q": "quit" };
+
+const sig = (c: Combo) => `${c.ctrl ? "c" : ""}${c.mod ? "m" : ""}${c.alt ? "a" : ""}${c.shift ? "s" : ""}+${c.key}`;
+
+/** Why this key can't be used for shortcut `id`, in plain words, or null when it can. The same
+ *  rules as shortcut_keys.rs (which refuses unsafe keys when saving), plus keys the OS owns. */
+export function checkCombo(id: ShortcutId, c: Combo, platform: Platform = currentPlatform()): string | null {
+  const named = c.key === "Enter" || isFKey(c.key);
+  const plainKey = c.key.length === 1 && (isLetter(c.key) || /[0-9]/.test(c.key) || ",./;'[]\\-=`".includes(c.key));
+  if (!named && !plainKey) {
+    return (c.shift || c.alt) && c.key.length === 1
+      ? "Shift and Option only go with letters, Enter and F keys. Try other keys."
+      : "Use a letter, a number, a punctuation key, Enter or an F key.";
+  }
+  if ((c.shift || c.alt) && !(isLetter(c.key) || named)) {
+    return "Shift and Option only go with letters, Enter and F keys. Try other keys.";
+  }
+  if (platform === "win" && c.alt) {
+    return "Alt keys belong to Windows, and some keyboards type letters with them. Use Ctrl, or Ctrl+Shift.";
+  }
+  if (!c.mod && !(platform === "mac" && c.ctrl) && !isFKey(c.key)) {
+    return platform === "mac"
+      ? "Hold ⌘ (or ⌃) as well, so it doesn't type a letter."
+      : "Hold Ctrl as well, so it doesn't type a letter.";
+  }
+  const owned = OS_OWNED[platform][sig(c)];
+  if (owned && OWNED_BY_SHORTCUT[`${platform}:${sig(c)}`] !== id) return `${owned}. Try other keys.`;
+  return null;
+}
+
+/** What a key press means for the recorder: a combination, a message, or nothing yet (a modifier
+ *  key on its own: the rest of the combination is still to come). */
+export type Recorded = { combo: Combo } | { error: string } | null;
+
+export function recordedCombo(e: KeyLike, platform: Platform = currentPlatform()): Recorded {
+  if (["Meta", "Control", "Shift", "Alt", "AltGraph", "CapsLock", "OS", "Fn"].includes(e.key)) return null;
+  if (platform === "win" && altGr(e))
+    return {
+      error: "AltGr types characters on this keyboard. Use Ctrl, or Ctrl+Shift.",
+    };
+  if (platform === "win" && e.metaKey)
+    return {
+      error: "Windows key shortcuts belong to Windows. Use Ctrl, or Ctrl+Shift.",
+    };
+  const combo: Combo = { key: keyOf(e) };
+  if (platform === "mac" ? e.metaKey : e.ctrlKey) combo.mod = true;
+  if (platform === "mac" && e.ctrlKey) combo.ctrl = true;
+  if (e.shiftKey) combo.shift = true;
+  if (e.altKey) combo.alt = true;
+  return { combo };
+}
+
+/** The outcome of giving shortcut `id` a new key. */
+export type Change =
+  | { kind: "error"; message: string }
+  /** It already has those keys. */
+  | { kind: "same" }
+  | { kind: "save"; overrides: Overrides }
+  /** Another shortcut has those keys: ask, then save `overrides` (both change places). */
+  | { kind: "swap"; with: Shortcut; overrides: Overrides; message: string };
+
+const stored = (c: Combo): StoredCombo => ({
+  key: c.key,
+  ...(c.mod ? { mod: true } : {}),
+  ...(c.shift ? { shift: true } : {}),
+  ...(c.alt ? { alt: true } : {}),
+  ...(c.ctrl ? { ctrl: true } : {}),
+});
+
+/** `overrides` with shortcut `s` set to `c` (or back to its default when `c` is its default key). */
+function withKey(overrides: Overrides, s: Shortcut, c: Combo, platform: Platform): Overrides {
+  const next = { ...overrides };
+  const base = s[platform][0];
+  if (base && sameCombo(base, c)) delete next[s.id];
+  else next[s.id] = stored(c);
+  return next;
+}
+
+/** Work out what giving shortcut `id` the key `combo` does. Pure: the Shortcuts tab asks, shows
+ *  the message or the swap question, and only then saves. Two shortcuts never share a key. */
+export function planChange(id: ShortcutId, combo: Combo, platform: Platform, overrides: Overrides): Change {
+  const s = SHORTCUTS.find((x) => x.id === id);
+  if (!s) return { kind: "error", message: "That isn't a shortcut Nest knows." };
+  const bad = checkCombo(id, combo, platform);
+  if (bad) return { kind: "error", message: bad };
+  const cur = effectiveCombos(s, platform, overrides)[0];
+  if (cur && sameCombo(cur, combo)) return { kind: "same" };
+  const others = listedShortcuts(platform).filter((x) => x.id !== id);
+  const holder = (c: Combo, skip: ShortcutId[]) => {
+    for (const o of others) {
+      if (skip.includes(o.id)) continue;
+      const at = effectiveCombos(o, platform, overrides).findIndex((x) => sameCombo(x, c));
+      if (at >= 0) return { shortcut: o, at };
+    }
+    return null;
+  };
+  const hit = holder(combo, []);
+  if (!hit) return { kind: "save", overrides: withKey(overrides, s, combo, platform) };
+  const keys = formatCombo(combo, platform);
+  if (hit.at > 0) {
+    return {
+      kind: "error",
+      message: `${keys} is also used by ${hit.shortcut.label}, as an extra key. Try other keys.`,
+    };
+  }
+  if (!cur) {
+    return {
+      kind: "error",
+      message: `${keys} is used by ${hit.shortcut.label}, and ${s.label} has no keys to swap. Try other keys.`,
+    };
+  }
+  const theirs = checkCombo(hit.shortcut.id, cur, platform);
+  if (theirs) {
+    return {
+      kind: "error",
+      message: `${keys} is used by ${hit.shortcut.label}, which can't take ${formatCombo(cur, platform)} in exchange. Try other keys.`,
+    };
+  }
+  const third = holder(cur, [hit.shortcut.id]);
+  if (third) {
+    return {
+      kind: "error",
+      message: `${keys} is used by ${hit.shortcut.label}, which can't take ${formatCombo(cur, platform)} in exchange (${third.shortcut.label} has it). Try other keys.`,
+    };
+  }
+  const swapped = withKey(withKey(overrides, s, combo, platform), hit.shortcut, cur, platform);
+  return {
+    kind: "swap",
+    with: hit.shortcut,
+    overrides: swapped,
+    message: `Already used by ${hit.shortcut.label}. Swap them?`,
+  };
+}
+
+/** Put shortcut `id` back to its default key: a change like any other (its default may be in use
+ *  now, which asks to swap). Nothing to ask when it has no default key. */
+export function planReset(id: ShortcutId, platform: Platform, overrides: Overrides): Change {
+  const s = SHORTCUTS.find((x) => x.id === id);
+  const base = s?.[platform][0];
+  if (!s || !base) {
+    const next = { ...overrides };
+    delete next[id];
+    return { kind: "save", overrides: next };
+  }
+  const without = { ...overrides };
+  delete without[id];
+  const change = planChange(id, base, platform, overrides);
+  // Back to default means no entry at all.
+  return change.kind === "same" ? { kind: "save", overrides: without } : change;
+}
 
 /** The keyboard event fields the matcher reads (a real KeyboardEvent has them all). */
 export type KeyLike = Pick<KeyboardEvent, "key" | "code" | "metaKey" | "ctrlKey" | "altKey" | "shiftKey"> & {
@@ -165,10 +431,14 @@ export interface Hit {
 }
 
 /** The shortcut this key press is, among `ids` (default: all), or null. */
-export function findShortcut(e: KeyLike, ids?: readonly ShortcutId[], platform: Platform = currentPlatform()): Hit | null {
+export function findShortcut(
+  e: KeyLike,
+  ids?: readonly ShortcutId[],
+  platform: Platform = currentPlatform(),
+): Hit | null {
   for (const shortcut of SHORTCUTS) {
     if (ids && !ids.includes(shortcut.id)) continue;
-    const combo = shortcut[platform].find((c) => matchesCombo(e, c, platform));
+    const combo = effectiveCombos(shortcut, platform).find((c) => matchesCombo(e, c, platform));
     if (combo) return { shortcut, combo };
   }
   return null;
@@ -180,7 +450,8 @@ export const isShortcut = (e: KeyLike, id: ShortcutId, platform: Platform = curr
 
 /** Somewhere you type, or a control that uses Escape itself (a dropdown). */
 const ownsEscape = (t: EventTarget | null) =>
-  t instanceof Element && t.closest("input, textarea, select, [contenteditable]:not([contenteditable='false'])") !== null;
+  t instanceof Element &&
+  t.closest("input, textarea, select, [contenteditable]:not([contenteditable='false'])") !== null;
 
 /** Windows: does this key close the Settings window? Ctrl+W always; Escape when you're not typing
  *  and nothing inside (a dropdown, a name being edited) used it. macOS: never (⌘W is the menu
@@ -260,4 +531,44 @@ export function listenHere<T>(event: string, handler: EventCallback<T>): Promise
   return typeof label === "string"
     ? listen<T>(event, handler, { target: { kind: "WebviewWindow", label } })
     : listen<T>(event, handler);
+}
+
+// ── Loading the changed keys, and the Show Keyboard Shortcuts key ──
+
+/** Use the saved changed keys in this window now, and again whenever settings change. */
+export function installCustomKeys(): () => void {
+  const load = () =>
+    getSettings()
+      .then((v) => setCustomKeys(v.settings.shortcuts))
+      .catch(() => {});
+  void load();
+  let unlisten: UnlistenFn | undefined;
+  let stopped = false;
+  listen("settings-changed", () => void load())
+    .then((u) => (stopped ? u() : (unlisten = u)))
+    .catch(() => {});
+  return () => {
+    stopped = true;
+    unlisten?.();
+  };
+}
+
+const isTypingTarget = (t: EventTarget | null) =>
+  t instanceof Element &&
+  t.closest("input, textarea, select, [contenteditable]:not([contenteditable='false'])") !== null;
+
+/** Windows: F1 (and ? when you're not typing) opens Settings → Shortcuts, from any window. On a
+ *  Mac the Help menu item has the key (menu.rs), so the page only keeps the key from doing
+ *  anything else. */
+export function installHelpKey(target: Window = window, platform: Platform = currentPlatform()): () => void {
+  const onKey = (e: KeyboardEvent) => {
+    const hit = findShortcut(e, ["keyboard-shortcuts"], platform);
+    if (!hit || e.repeat) return;
+    if (typesText(hit.combo) && isTypingTarget(e.target)) return;
+    e.preventDefault();
+    if (platform === "mac" && hit.combo.menu) return;
+    void openSettings("shortcuts").catch(() => {});
+  };
+  target.addEventListener("keydown", onKey);
+  return () => target.removeEventListener("keydown", onKey);
 }
