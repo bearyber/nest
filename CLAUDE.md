@@ -69,6 +69,7 @@ src-tauri/
     menu.rs          macOS menu bar (Windows has none: shortcuts + context menus); accelerators follow settings
     shortcut_keys.rs custom shortcut keys: what may be stored, menu accelerator text
     window.rs        window appearance (Mica / vibrancy, theme)
+    accent.rs        system accent colour (read on start + window focus, `accent-changed` event)
   templates/         bundled templates
   tests/             integration tests (temp dirs only)
 docs/                V1-BUILD-SPEC.md
