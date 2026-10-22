@@ -1,4 +1,9 @@
 {
+  "0.7.3": [
+    "Fixed: on a Mac, shortcuts like ⌘N and ⌘, now work, and File → Open and Show in Finder always respond",
+    "Fixed: right-click menus work every time (Open, Mark done, Copy job code, and the template menus)",
+    "Mac: right-click a project to Open it; hold ⌥ while right-clicking for Show in Finder"
+  ],
   "0.7.2": [
     "Nest now uses your system's accent colour, and switches to blue wherever your colour would be hard to read",
     "Settings → Shortcuts: see every shortcut, click to change it, and Nest asks before swapping keys that are already used",
