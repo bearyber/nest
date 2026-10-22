@@ -458,26 +458,26 @@ export default function Main() {
       const here = !r.offline && !r.device;
       const path = r.device?.path ?? r.paths[0] ?? "";
       try {
+        // No ids on right-click items: Tauri makes each one unique. A fixed id ("open") was shared with
+        // the last right-click menu, whose clean-up then took this menu's actions away (they did nothing),
+        // and one matching a menu bar item ("copy-path") ran the menu bar's command instead.
         const menu = await Menu.new({
           items: [
-            { id: "open", text: "Open", enabled: here, action: () => void open(r) },
+            { text: "Open", enabled: here, action: () => void open(r) },
             {
-              id: "reveal",
               text: `Show in ${fileManager()}`,
               enabled: here,
               action: () => void reveal(r),
             },
             { item: "Separator" },
-            { id: "copy-path", text: "Copy path", enabled: path !== "", action: () => void copy(path, "path") },
+            { text: "Copy path", enabled: path !== "", action: () => void copy(path, "path") },
             {
-              id: "copy-code",
               text: "Copy job code",
               enabled: r.jobCode !== "",
               action: () => void copy(r.jobCode, r.jobCode),
             },
             { item: "Separator" },
             {
-              id: "status",
               text: shownStatus === "done" ? "Mark active" : "Mark done",
               enabled: canStatus,
               action: () => void changeStatus(r, shownStatus === "done" ? "active" : "done"),
@@ -485,7 +485,6 @@ export default function Main() {
             ...(archiveOn
               ? [
                   {
-                    id: "archive",
                     text: r.archived ? "Unarchive…" : "Archive…",
                     enabled: canArchive,
                     action: () => void archive(r),

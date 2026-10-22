@@ -215,17 +215,18 @@ export default function Templates({ run, onNewProject }: Props) {
 
   const templateMenu = async (t: TemplateInfo) => {
     try {
+      // No ids on right-click items: Tauri makes each one unique. A fixed id ("open") was shared with
+      // the last right-click menu, whose clean-up then took this menu's actions away (they did nothing),
+      // and one matching a menu bar item ("copy-path") ran the menu bar's command instead.
       const menu = await Menu.new({
         items: [
           {
-            id: "new-project",
             text: "New project from this",
             enabled: !!onNewProject && !t.hidden,
             action: () => onNewProject?.(t.id),
           },
-          { id: "duplicate", text: "Duplicate", action: () => void open("new", t.key) },
+          { text: "Duplicate", action: () => void open("new", t.key) },
           {
-            id: "export",
             text: "Export…",
             action: async () => {
               if (await run(exportTemplate(t.key)))
@@ -236,14 +237,13 @@ export default function Templates({ run, onNewProject }: Props) {
           ...(!t.builtIn && t.hidden
             ? [
                 {
-                  id: "show",
                   text: "Show in New Project",
                   action: () => void run(setTemplateHidden(t.id, false)),
                 },
               ]
             : []),
           { item: "Separator" as const },
-          { id: "remove", text: t.builtIn ? "Remove" : "Remove…", action: () => void remove(t) },
+          { text: t.builtIn ? "Remove" : "Remove…", action: () => void remove(t) },
         ],
       });
       await menu.popup();
@@ -260,17 +260,14 @@ export default function Templates({ run, onNewProject }: Props) {
       const menu = await Menu.new({
         items: [
           {
-            id: "empty",
             text: "Start empty",
             enabled: !!blank,
             action: () => blank && void open("new", blank.key, true),
           },
           {
-            id: "copy",
             text: "From a copy of…",
             enabled: copies.length > 0,
             items: copies.map((t) => ({
-              id: `copy:${t.key}`,
               text: menuText(t.name),
               action: () => void open("new", t.key),
             })),

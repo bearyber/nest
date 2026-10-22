@@ -144,13 +144,15 @@ describe("Templates", () => {
     await waitFor(() => expect(menuItems.length).toBeGreaterThan(0));
     const items = menuItems.map((i) => i.text);
     expect(items).toEqual(expect.arrayContaining(["New project from this", "Duplicate", "Export…", "Remove…"]));
-    await act(async () => menuItems.find((i) => i.id === "remove")?.action?.());
+    // No fixed ids: a shared id let an old right-click menu's clean-up take this one's actions away.
+    expect(menuItems.some((i) => "id" in i)).toBe(false);
+    await act(async () => menuItems.find((i) => i.text?.startsWith("Remove"))?.action?.());
     expect(removeTemplate).toHaveBeenCalledWith("user:acme-film");
 
     menuItems = [];
     fireEvent.contextMenu(screen.getByText("Video"));
     await waitFor(() => expect(menuItems.length).toBeGreaterThan(0));
-    await act(async () => menuItems.find((i) => i.id === "remove")?.action?.());
+    await act(async () => menuItems.find((i) => i.text?.startsWith("Remove"))?.action?.());
     expect(removeTemplate).toHaveBeenCalledWith("builtin:video");
   });
 
