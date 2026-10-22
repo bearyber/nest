@@ -10,7 +10,7 @@ use std::sync::atomic::Ordering;
 
 use chrono::{Datelike, Local};
 use serde::Serialize;
-use tauri::{AppHandle, Emitter, Manager, State, WebviewUrl, WebviewWindow, WebviewWindowBuilder};
+use tauri::{AppHandle, Emitter, Manager, State, WebviewWindow};
 use tauri_plugin_dialog::{DialogExt, MessageDialogButtons, MessageDialogKind};
 use tauri_plugin_opener::OpenerExt;
 
@@ -101,84 +101,9 @@ pub fn open_settings_window(app: &AppHandle) -> tauri::Result<()> {
     open_settings_window_on(app, None)
 }
 
-/// Open (or focus) Settings, on a tab: "shortcuts" (Help → Keyboard Shortcuts, F1) or "codes"
-/// (the note about two computers sharing a letter). Anything else opens as usual.
+/// Open (or focus) Settings, on a tab (see settings_window.rs).
 pub fn open_settings_window_on(app: &AppHandle, tab: Option<&str>) -> tauri::Result<()> {
-    let tab = tab.filter(|t| matches!(*t, "shortcuts" | "codes"));
-    if let Some(w) = app.get_webview_window(SETTINGS_WINDOW) {
-        if let Some(t) = tab {
-            let _ = app.emit_to(SETTINGS_WINDOW, "settings-tab", t);
-        }
-        w.unminimize()?;
-        w.show()?;
-        // A Nest window shows: folder work may start (folder_access.rs), even if it never
-        // gets focus.
-        crate::folder_access::window_shown(app);
-        return w.set_focus();
-    }
-    let mut builder = WebviewWindowBuilder::new(
-        app,
-        SETTINGS_WINDOW,
-        WebviewUrl::App(match tab {
-            Some(t) => format!("index.html?tab={t}").into(),
-            None => "index.html".into(),
-        }),
-    )
-    .title("Nest Settings")
-    .inner_size(860.0, 600.0)
-    .min_inner_size(660.0, 460.0)
-    .transparent(true)
-    .center()
-    // No webview zoom (Ctrl+wheel, Ctrl+= / Ctrl+-), as in the main window's config.
-    .zoom_hotkeys_enabled(false)
-    // Hidden until its page has drawn (see `settings_ready`), so it appears in one go
-    // instead of flashing an empty frame.
-    .visible(false);
-    // Dev builds keep their webview data apart from the installed app (see tauri.dev.conf.json):
-    // on Windows two webviews with different settings can't share one data folder.
-    if cfg!(debug_assertions) {
-        builder = builder.data_directory(
-            app.path()
-                .app_local_data_dir()?
-                .join("dev-webview")
-                .join(SETTINGS_WINDOW),
-        );
-    }
-    let w = builder.build()?;
-    // Closed, or left (another window, the About panel…), while a new key was being recorded:
-    // the menu bar's keys come back.
-    let closing = app.clone();
-    w.on_window_event(move |e| {
-        if matches!(
-            e,
-            tauri::WindowEvent::Destroyed | tauri::WindowEvent::Focused(false)
-        ) {
-            let _ = crate::menu::suspend(&closing, false);
-        }
-    });
-    // Safety net: if the page never says it's ready, show the window anyway.
-    let fallback = w.clone();
-    std::thread::spawn(move || {
-        std::thread::sleep(std::time::Duration::from_millis(1500));
-        if !fallback.is_visible().unwrap_or(true) {
-            let _ = fallback.show();
-            let _ = fallback.set_focus();
-            crate::folder_access::window_shown(fallback.app_handle());
-        }
-    });
-    let theme = app
-        .state::<AppState>()
-        .settings
-        .lock()
-        .map(|s| s.theme.clone())
-        .unwrap_or_default();
-    let app2 = app.clone();
-    window::apply_appearance_on_main(app, &w, &theme, move |ok| {
-        if let Some(m) = app2.try_state::<window::SettingsMaterial>() {
-            m.0.store(ok, Ordering::SeqCst);
-        }
-    });
-    Ok(())
+    crate::settings_window::open(app, tab)
 }
 
 // ── General ──
@@ -1583,20 +1508,12 @@ pub(crate) fn edit_settings(
     edit(app, &state, change)
 }
 
-/// The Settings page has drawn: show its window (it's created hidden to avoid a blank flash).
+/// The Settings page has drawn: show its window if it was asked for (it's created hidden to
+/// avoid a blank flash, and pre-warmed hidden after launch).
 #[tauri::command(async)]
 pub fn settings_ready(app: AppHandle) -> AppResult<()> {
-    // A fresh page (first load or reload) is never recording: give the menu bar its keys back.
-    let _ = crate::menu::suspend(&app, false);
-    if let Some(w) = app.get_webview_window(SETTINGS_WINDOW) {
-        if !w.is_visible().unwrap_or(false) {
-            w.show()
-                .and_then(|_| w.set_focus())
-                .map_err(|e| AppError::new(format!("Couldn't show Settings: {e}")))?;
-        }
-        crate::folder_access::window_shown(&app);
-    }
-    Ok(())
+    crate::settings_window::ready(&app)
+        .map_err(|e| AppError::new(format!("Couldn't show Settings: {e}")))
 }
 
 /// Like `edit_settings`, but without telling the windows: for Devices' own bookkeeping

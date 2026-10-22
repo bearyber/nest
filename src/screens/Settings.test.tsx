@@ -1,13 +1,19 @@
 // @vitest-environment jsdom
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen } from "@testing-library/react";
 import type { SettingsView } from "../lib/types";
 
 vi.mock("../lib/commands", () => ({
   getSettings: vi.fn(async () => ({ settings: { theme: "system" }, settingsError: null }) as unknown as SettingsView),
   settingsReady: vi.fn(async () => {}),
 }));
-vi.mock("@tauri-apps/api/event", () => ({ listen: vi.fn(async () => () => {}) }));
+const handlers = new Map<string, (e: { payload?: unknown }) => void>();
+vi.mock("@tauri-apps/api/event", () => ({
+  listen: vi.fn(async (name: string, cb: (e: { payload?: unknown }) => void) => {
+    handlers.set(name, cb);
+    return () => {};
+  }),
+}));
 const closeWindow = vi.fn(async () => {});
 vi.mock("@tauri-apps/api/window", () => ({ getCurrentWindow: () => ({ label: "settings", close: closeWindow }) }));
 vi.mock("../lib/theme", () => ({ applyTheme: vi.fn() }));
@@ -29,6 +35,16 @@ afterEach(() => {
 });
 
 describe("Settings", () => {
+  it("opens on the asked-for tab, and a close (hide) sends it back to General", async () => {
+    render(<Settings />);
+    await screen.findByRole("button", { name: "General" });
+    await vi.waitFor(() => expect(handlers.has("settings-reset")).toBe(true));
+    act(() => handlers.get("settings-tab")?.({ payload: "shortcuts" }));
+    expect(screen.getByRole("button", { name: "Shortcuts" }).getAttribute("aria-current")).toBe("page");
+    act(() => handlers.get("settings-reset")?.({}));
+    expect(screen.getByRole("button", { name: "General" }).getAttribute("aria-current")).toBe("page");
+  });
+
   it("has no DaVinci Resolve tab: Resolve is set up in each template", async () => {
     render(<Settings />);
     expect(await screen.findByRole("button", { name: "General" })).toBeTruthy();

@@ -38,6 +38,7 @@ src-tauri/
     template.rs      template parsing + validation
     template_io.rs   installed templates: load, import/export (.nesttemplate), duplicate, delete to bin
     settings_cmd.rs  Settings window + first-run commands (one `edit` path, `settings-changed` event)
+    settings_window.rs  Settings window life: pre-warmed hidden after launch, close = hide, reset on hide
     update.rs        auto-update (release builds)
     plan.rs          plan_project (pure)
     apply.rs         apply_plan + rollback

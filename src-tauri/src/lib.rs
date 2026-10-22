@@ -21,6 +21,7 @@ pub mod resolve;
 mod resolve_cmd;
 pub mod settings;
 mod settings_cmd;
+mod settings_window;
 pub mod shortcut_keys;
 pub mod sizes;
 pub mod staged;
@@ -272,6 +273,7 @@ fn setup(app: &mut tauri::App, started_at: std::time::SystemTime) -> Result<(), 
         .get_webview_window("main")
         .ok_or_else(|| StartupError::new(Step::Window, "the main window is missing"))?;
     app.manage(window::SettingsMaterial::default());
+    app.manage(settings_window::SettingsWin::default());
     app.manage(accent::Accent::read_now());
     app.manage(window::Material {
         applied: window::apply_appearance(&main, &theme),
@@ -295,6 +297,8 @@ fn setup(app: &mut tauri::App, started_at: std::time::SystemTime) -> Result<(), 
         main.show()
             .map_err(|e| StartupError::new(Step::Window, e))?;
     }
+    // Settings opens at once: its window is built hidden in the background (not in first run).
+    settings_window::prewarm(app.handle());
     // Open-at-login entries from older versions: macOS moves to a real Login Item, Windows
     // rewrites its Run entry with `--hidden` (only if still on).
     login_item::migrate(app.handle(), at_login);

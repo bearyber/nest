@@ -16,6 +16,9 @@ import ShortcutsTab from "./settings/ShortcutsTab";
 import SpacesTab from "./settings/SpacesTab";
 import styles from "./settings/settings.module.css";
 
+/** Sent by Rust when the window is closed (hidden). */
+const RESET_EVENT = "settings-reset";
+
 type Tab = "general" | "codes" | "spaces" | "kits" | "devices" | "appearance" | "shortcuts" | "about";
 
 const TABS: { id: Tab; label: string }[] = [
@@ -46,6 +49,8 @@ export default function Settings() {
   const [view, setView] = useState<SettingsView | null>(null);
   // Help → Keyboard Shortcuts / F1 open the window on the Shortcuts tab (?tab=shortcuts).
   const [tab, setTab] = useState<Tab>(() => startTab(new URLSearchParams(window.location.search).get("tab")));
+  // Bumped when the window is closed (hidden): everything inside starts fresh next time.
+  const [epoch, setEpoch] = useState(0);
   const [message, setMessage] = useState<{
     text: string;
     error: boolean;
@@ -67,7 +72,15 @@ export default function Settings() {
   useEffect(() => {
     if (!view || shown.current) return;
     shown.current = true;
-    requestAnimationFrame(() => void settingsReady().catch(() => {}));
+    // A hidden (pre-warmed) window may not run animation frames: don't wait for one forever.
+    let sent = false;
+    const send = () => {
+      if (sent) return;
+      sent = true;
+      void settingsReady().catch(() => {});
+    };
+    requestAnimationFrame(send);
+    setTimeout(send, 150);
   }, [view]);
 
   useEffect(() => {
@@ -86,6 +99,16 @@ export default function Settings() {
         setTab(e.payload);
         setMessage(null);
       }
+    },
+  );
+
+  // The window was closed, which only hides it: forget the tab, messages, dialogs and scroll.
+  useTauriListener(
+    (cb) => listen(RESET_EVENT, cb),
+    () => {
+      setTab("general");
+      setMessage(null);
+      setEpoch((n) => n + 1);
     },
   );
 
@@ -135,7 +158,7 @@ export default function Settings() {
           </button>
         ))}
       </nav>
-      <main className={styles.content}>
+      <main className={styles.content} key={epoch}>
         <h2 className={styles.title}>{TABS.find((t) => t.id === tab)?.label}</h2>
         {view?.settingsError && (
           <div className={styles.banner} role="alert">

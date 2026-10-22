@@ -769,6 +769,18 @@ pub fn on_window_event(window: &Window, event: &WindowEvent) {
                 still_running_note(app, window);
             }
         }
+        // Settings: closing hides it (it opens at once next time), unless Nest is quitting.
+        WindowEvent::CloseRequested { api, .. }
+            if window.label() == crate::settings_cmd::SETTINGS_WINDOW =>
+        {
+            let quitting = tray_state(app).is_some_and(|t| t.quitting.load(Ordering::SeqCst));
+            let main_exists = app.get_webview_window("main").is_some();
+            if crate::settings_window::close_hides(quitting, icon_up(app), main_exists) {
+                api.prevent_close();
+                crate::settings_window::hide(app);
+                update_dock(app, Some(window.label()));
+            }
+        }
         WindowEvent::Focused(focused) => {
             // Using any Nest window counts as activity (an update waits for quiet).
             note_activity(app);
@@ -781,6 +793,9 @@ pub fn on_window_event(window: &Window, event: &WindowEvent) {
         }
         WindowEvent::Destroyed => {
             note_activity(app);
+            if window.label() == "main" {
+                crate::settings_window::destroy_if_hidden(app);
+            }
             update_dock(app, Some(window.label()));
         }
         _ => {}
