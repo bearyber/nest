@@ -353,6 +353,11 @@ fn sync_inner(state: &AppState, dev: &Devices) -> bool {
             own.requests = s.outgoing_requests.clone();
             own.handled = s.handled_requests.clone();
             own.handled_upto = Some(s.handled_seq.clone());
+            // The letter(s) this computer makes job codes with, so the others can warn about a
+            // shared one. A letter that isn't valid (a 3-letter one from long ago) isn't
+            // published: it can't be told apart from a typo on the other side.
+            own.marker = crate::settings::check_marker(&s.local_marker).unwrap_or_default();
+            own.past_markers = s.past_markers.clone();
         }
         match devices::write_own(&dir, &own, &mut last) {
             Ok(true) => saved = Some(own.updated_at.clone()),
@@ -470,6 +475,24 @@ pub fn remote_codes(app_devices: &Devices) -> Vec<String> {
         .unwrap_or_default()
 }
 
+/// Your other computers' job-code letters (name, letter), published or guessed from their
+/// newest codes. Hidden ("removed") computers aren't in `others`, so they don't count.
+pub fn other_letters(app_devices: &Devices, code_pattern: &str) -> Vec<(String, String)> {
+    let Ok(pattern) = crate::names::CodePattern::parse(code_pattern) else {
+        return vec![];
+    };
+    app_devices
+        .runtime
+        .lock()
+        .map(|rt| {
+            crate::markers::letters_of(&rt.others, &pattern)
+                .into_iter()
+                .map(|l| (l.name, l.letter))
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
 // ───────────────────────── Commands (Settings → Devices) ─────────────────────────
 
 #[derive(Debug, Serialize)]
@@ -487,6 +510,15 @@ pub struct DevicesView {
     /// v0.5: keep my templates the same on all my computers.
     pub sync_templates: bool,
     pub template_problem: Option<String>,
+    /// v0.7.4: the letter each other computer makes job codes with (published, or guessed from
+    /// its newest codes).
+    pub letters: Vec<crate::markers::ComputerLetter>,
+    /// This computer's own letter, as saved.
+    pub this_letter: String,
+    /// The computers that share this computer's letter (a subset of `letters`).
+    pub letter_clash: Vec<crate::markers::ComputerLetter>,
+    /// A free letter for this computer (never one of `letters`; differs per computer).
+    pub suggested_letter: String,
 }
 
 #[derive(Debug, Serialize)]
@@ -539,10 +571,25 @@ fn view(state: &AppState) -> AppResult<DevicesView> {
         .map(|d| summary(d))
         .collect();
     forgotten.sort_by(|a, b| a.name.cmp(&b.name));
+    let letters = crate::names::CodePattern::parse(&s.code_pattern)
+        .map(|p| crate::markers::letters_of(&rt.others, &p))
+        .unwrap_or_default();
+    let letter_clash = crate::markers::clashing(&s.local_marker, &letters)
+        .into_iter()
+        .cloned()
+        .collect();
+    let name = s.device_name.clone().unwrap_or_else(default_name);
+    let taken: Vec<String> = letters.iter().map(|l| l.letter.clone()).collect();
+    let suggested_letter = crate::markers::suggest(
+        &name,
+        std::env::consts::OS,
+        s.device_id.as_deref().unwrap_or_default(),
+        &taken,
+    );
     Ok(DevicesView {
         enabled: enabled(&s).is_some(),
         device_id: s.device_id.clone(),
-        name: s.device_name.clone().unwrap_or_else(default_name),
+        name,
         folder: s.shared_folder.clone(),
         saved_at: rt.saved_at.clone(),
         problem: rt.problem.clone(),
@@ -555,6 +602,10 @@ fn view(state: &AppState) -> AppResult<DevicesView> {
         forgotten,
         sync_templates: s.sync_templates,
         template_problem: rt.template_problem.clone(),
+        letters,
+        this_letter: s.local_marker.clone(),
+        letter_clash,
+        suggested_letter,
     })
 }
 

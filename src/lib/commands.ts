@@ -107,7 +107,7 @@ const s = <T,>(cmd: string, args?: Record<string, unknown>) => invoke<T>(cmd, ar
 
 export const getSettings = () => s<SettingsView>("get_settings");
 /** `tab: "shortcuts"` opens Settings on the Shortcuts tab. */
-export const openSettings = (tab?: "shortcuts") => s<void>("open_settings", { tab });
+export const openSettings = (tab?: "shortcuts" | "codes") => s<void>("open_settings", { tab });
 export const addJobsRoot = () => s<SettingsView | null>("add_jobs_root");
 export const removeJobsRoot = (path: string) => s<SettingsView>("remove_jobs_root", { path });
 export const moveJobsRoot = (path: string, to: number) => s<SettingsView>("move_jobs_root", { path, to });

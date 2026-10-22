@@ -326,10 +326,13 @@ fn build_plan(
                     index_problem = true;
                 }
             }
-            // Devices: codes your other computers use, so a code never repeats across them.
-            codes.extend(crate::devices_cmd::remote_codes(&state.devices));
             codes
         },
+        // Devices: codes your other computers use, so a code never repeats across them (kept
+        // apart from this computer's own: a changed letter only continues THIS computer's numbers).
+        remote_codes: crate::devices_cmd::remote_codes(&state.devices),
+        past_markers: settings.past_markers.clone(),
+        other_letters: crate::devices_cmd::other_letters(&state.devices, &settings.code_pattern),
         existing_folders: scan.folders.clone(),
         code_override: request.code_override.clone(),
         own_code: (request.no_client || settings.no_client_spaces.contains(&request.space))
@@ -491,6 +494,13 @@ pub fn create_project(
             }
             // Someone made that folder meanwhile: rescan and take the next code.
             Err(e) if e.root_exists && request.code_override.is_none() => continue,
+            // A typed code is never changed behind your back: say what happened, and the way out.
+            Err(e) if e.root_exists => {
+                return Err(AppError::new(format!(
+                    "A folder for {} appeared a moment ago (maybe from your other computer). Type a different job code, or clear the box and Nest picks the next free one.",
+                    plan.job_code
+                )))
+            }
             Err(e) => return Err(AppError::new(e.message)),
         }
     }

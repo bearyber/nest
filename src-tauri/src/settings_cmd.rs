@@ -101,10 +101,10 @@ pub fn open_settings_window(app: &AppHandle) -> tauri::Result<()> {
     open_settings_window_on(app, None)
 }
 
-/// Open (or focus) Settings, on a tab: "shortcuts" (Help → Keyboard Shortcuts, F1). Only
-/// "shortcuts" is known; anything else opens as usual.
+/// Open (or focus) Settings, on a tab: "shortcuts" (Help → Keyboard Shortcuts, F1) or "codes"
+/// (the note about two computers sharing a letter). Anything else opens as usual.
 pub fn open_settings_window_on(app: &AppHandle, tab: Option<&str>) -> tauri::Result<()> {
-    let tab = tab.filter(|t| *t == "shortcuts");
+    let tab = tab.filter(|t| matches!(*t, "shortcuts" | "codes"));
     if let Some(w) = app.get_webview_window(SETTINGS_WINDOW) {
         if let Some(t) = tab {
             let _ = app.emit_to(SETTINGS_WINDOW, "settings-tab", t);

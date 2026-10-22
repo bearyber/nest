@@ -68,8 +68,17 @@ pub struct PlanContext {
     pub space: String,
     pub code_pattern: String,
     pub marker: String,
-    /// Job codes already in use (index + disk). The next seq counts up from these.
+    /// Job codes already in use on THIS computer (index + disk). The next seq counts up from
+    /// these, for the current letter and for `past_markers`.
     pub existing_codes: Vec<String>,
+    /// Job codes your other computers use. They are never repeated, and count toward the next
+    /// number for the current letter only (never for a past letter).
+    pub remote_codes: Vec<String>,
+    /// Letters this computer used before (newest last): a changed letter continues the numbers.
+    pub past_markers: Vec<String>,
+    /// Your other computers: (name, letter). A typed code with one of those letters gets a
+    /// warning (never a block).
+    pub other_letters: Vec<(String, String)>,
     /// Folder names already in the jobs root.
     pub existing_folders: Vec<String>,
     /// Job code typed by the user instead of the generated one.
@@ -329,8 +338,8 @@ pub fn plan_project(loaded: &LoadedTemplate, input: &Values, ctx: &PlanContext) 
         let b = folder_name_for(&pattern.format(&client_code, &ctx.marker, 2));
         matches!((a, b), (Ok(a), Ok(b)) if a != b)
     };
-    let taken_codes = lowercase_set(&ctx.existing_codes);
-    let taken_folders = lowercase_set(&ctx.existing_folders);
+    let taken_codes = lowercase_set(ctx.existing_codes.iter().chain(&ctx.remote_codes));
+    let taken_folders = lowercase_set(ctx.existing_folders.iter());
     let is_taken = |code: &str| {
         taken_codes.contains(&code.to_lowercase())
             || (name_has_code
@@ -344,7 +353,15 @@ pub fn plan_project(loaded: &LoadedTemplate, input: &Values, ctx: &PlanContext) 
                 if is_taken(&code) {
                     issues.error(
                         Some("jobCode"),
-                        format!("Job code \"{code}\" is already used"),
+                        format!("Job code \"{code}\" is already used. Type a different one, or clear the box and Nest picks the next free one."),
+                    );
+                } else if let Some((name, letter)) =
+                    other_computers_letter(&pattern, &client_code, &code, ctx)
+                {
+                    issues.push(
+                        Level::Warning,
+                        Some("jobCode"),
+                        format!("{code} uses the letter {letter}, which your computer \"{name}\" uses, so it could clash with a code made there. You can still use it."),
                     );
                 }
                 code
@@ -358,7 +375,8 @@ pub fn plan_project(loaded: &LoadedTemplate, input: &Values, ctx: &PlanContext) 
             &pattern,
             &client_code,
             &ctx.marker,
-            &ctx.existing_codes,
+            &ctx.past_markers,
+            (&ctx.existing_codes, &ctx.remote_codes),
             is_taken,
         )
         .unwrap_or_else(|| {
@@ -1173,8 +1191,27 @@ impl FolderSet {
     }
 }
 
-fn lowercase_set(items: &[String]) -> HashSet<String> {
-    items.iter().map(|s| s.to_lowercase()).collect()
+fn lowercase_set<'a>(items: impl Iterator<Item = &'a String>) -> HashSet<String> {
+    items.map(|s| s.to_lowercase()).collect()
+}
+
+/// A typed job code that carries another of your computers' letter (by this pattern): that
+/// computer's name and the letter. `None` for this computer's own letter, a code that doesn't
+/// fit the pattern, or a letter nobody uses.
+fn other_computers_letter(
+    pattern: &CodePattern,
+    client: &str,
+    code: &str,
+    ctx: &PlanContext,
+) -> Option<(String, String)> {
+    let letter = pattern.marker_of(code, client)?;
+    if letter.eq_ignore_ascii_case(&ctx.marker) {
+        return None;
+    }
+    ctx.other_letters
+        .iter()
+        .find(|(_, l)| l.eq_ignore_ascii_case(&letter))
+        .map(|(name, _)| (name.clone(), letter))
 }
 
 /// Render a `/`-separated template path and sanitise each segment.
@@ -1488,6 +1525,9 @@ mod tests {
             code_pattern: DEFAULT_CODE_PATTERN.into(),
             marker: "L".into(),
             existing_codes: vec![],
+            remote_codes: vec![],
+            past_markers: vec![],
+            other_letters: vec![],
             existing_folders: vec![],
             code_override: None,
             own_code: None,
@@ -1622,6 +1662,89 @@ mod tests {
         let plan = plan_project(&mv(), &values("KIRA", "Song"), &c);
         assert!(plan.can_create());
         assert_eq!(plan.job_code, "VX-L09");
+    }
+
+    #[test]
+    fn a_clashing_typed_code_explains_how_to_get_out() {
+        let mut c = ctx();
+        c.remote_codes = vec!["VX-W02".into()];
+        c.code_override = Some("VX-W02".into());
+        let plan = plan_project(&mv(), &values("KIRA", "Song"), &c);
+        assert!(!plan.can_create());
+        let e = &errors(&plan)[0];
+        assert!(
+            e.contains("already used") && e.contains("clear the box"),
+            "{e}"
+        );
+    }
+
+    #[test]
+    fn a_typed_code_with_another_computers_letter_warns_but_never_blocks() {
+        let mut c = ctx();
+        c.other_letters = vec![("Studio PC".into(), "W".into())];
+        c.code_override = Some("VX-W07".into());
+        let plan = plan_project(&mv(), &values("KIRA", "Song"), &c);
+        assert!(plan.can_create(), "a warning never blocks");
+        let w: Vec<_> = plan
+            .issues
+            .iter()
+            .filter(|i| i.level == Level::Warning && i.field.as_deref() == Some("jobCode"))
+            .collect();
+        assert_eq!(w.len(), 1);
+        assert!(w[0].message.contains("VX-W07") && w[0].message.contains("Studio PC"));
+        assert_eq!(plan.job_code, "VX-W07", "the code is never changed");
+        // Lower case, and a two-letter code that only starts with W: W alone is not WL.
+        c.code_override = Some("vx-w07".into());
+        assert!(plan_project(&mv(), &values("KIRA", "Song"), &c)
+            .issues
+            .iter()
+            .any(|i| i.level == Level::Warning));
+        c.code_override = Some("VX-WL07".into());
+        assert!(!plan_project(&mv(), &values("KIRA", "Song"), &c)
+            .issues
+            .iter()
+            .any(|i| i.level == Level::Warning));
+        // This computer's own letter, a letter nobody uses, a code that isn't in the pattern.
+        for ok in ["VX-L07", "VX-Q07", "ANYTHING", "VX-W"] {
+            c.code_override = Some(ok.into());
+            let plan = plan_project(&mv(), &values("KIRA", "Song"), &c);
+            assert!(
+                !plan.issues.iter().any(|i| i.level == Level::Warning),
+                "{ok} should be quiet"
+            );
+        }
+        // The other computer has the same letter as this one: that's the main-window note's job.
+        c.other_letters = vec![("Studio PC".into(), "L".into())];
+        c.code_override = Some("VX-L07".into());
+        assert!(!plan_project(&mv(), &values("KIRA", "Song"), &c)
+            .issues
+            .iter()
+            .any(|i| i.level == Level::Warning));
+    }
+
+    #[test]
+    fn a_changed_letter_continues_this_computers_numbers_only() {
+        let mut c = ctx();
+        c.marker = "WL".into();
+        c.past_markers = vec!["W".into()];
+        c.existing_codes = vec!["VX-W05".into()];
+        // The PC's W07 is another computer's: it neither counts nor is repeated.
+        c.remote_codes = vec!["VX-W07".into()];
+        let plan = plan_project(&mv(), &values("KIRA", "Song"), &c);
+        assert_eq!(plan.job_code, "VX-WL06");
+        // Without the past letter it would have started over.
+        c.past_markers = vec![];
+        assert_eq!(
+            plan_project(&mv(), &values("KIRA", "Song"), &c).job_code,
+            "VX-WL01"
+        );
+        // Another computer's code is still never repeated.
+        c.past_markers = vec!["W".into()];
+        c.remote_codes = vec!["VX-WL06".into()];
+        assert_eq!(
+            plan_project(&mv(), &values("KIRA", "Song"), &c).job_code,
+            "VX-WL07"
+        );
     }
 
     #[test]

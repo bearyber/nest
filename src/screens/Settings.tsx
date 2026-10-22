@@ -29,6 +29,11 @@ const TABS: { id: Tab; label: string }[] = [
   { id: "about", label: "About" },
 ];
 
+/** The tab a window opens on: Help → Keyboard Shortcuts, or the "same letter" note's button. */
+export function startTab(name: string | null): Tab {
+  return name === "shortcuts" || name === "codes" ? name : "general";
+}
+
 /** What each tab gets: the current settings and a way to run a change. */
 export interface TabProps {
   view: SettingsView;
@@ -40,9 +45,7 @@ export interface TabProps {
 export default function Settings() {
   const [view, setView] = useState<SettingsView | null>(null);
   // Help → Keyboard Shortcuts / F1 open the window on the Shortcuts tab (?tab=shortcuts).
-  const [tab, setTab] = useState<Tab>(() =>
-    new URLSearchParams(window.location.search).get("tab") === "shortcuts" ? "shortcuts" : "general",
-  );
+  const [tab, setTab] = useState<Tab>(() => startTab(new URLSearchParams(window.location.search).get("tab")));
   const [message, setMessage] = useState<{
     text: string;
     error: boolean;
@@ -79,8 +82,8 @@ export default function Settings() {
   useTauriListener<Event<string>>(
     (cb) => listen<string>("settings-tab", cb),
     (e) => {
-      if (e.payload === "shortcuts") {
-        setTab("shortcuts");
+      if (e.payload === "shortcuts" || e.payload === "codes") {
+        setTab(e.payload);
         setMessage(null);
       }
     },

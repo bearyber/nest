@@ -20,7 +20,7 @@ vi.mock("./settings/GeneralTab", () => ({ default: () => null }));
 vi.mock("./settings/KitsTab", () => ({ default: () => null }));
 vi.mock("./settings/SpacesTab", () => ({ default: () => null }));
 
-import Settings from "./Settings";
+import Settings, { startTab } from "./Settings";
 
 afterEach(() => {
   cleanup();
@@ -57,5 +57,14 @@ describe("Settings", () => {
     await screen.findByRole("button", { name: "General" });
     fireEvent.keyDown(window, { key: "Escape" });
     expect(closeWindow).not.toHaveBeenCalled();
+  });
+});
+
+describe("startTab", () => {
+  it("opens on Job codes for the same-letter note's button, on Shortcuts for the help menu", () => {
+    expect(startTab("codes")).toBe("codes");
+    expect(startTab("shortcuts")).toBe("shortcuts");
+    expect(startTab(null)).toBe("general");
+    expect(startTab("anything else")).toBe("general");
   });
 });

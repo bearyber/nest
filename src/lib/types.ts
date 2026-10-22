@@ -356,6 +356,8 @@ export interface Settings {
   defaultSpace: string;
   codePattern: string;
   localMarker: string;
+  /** v0.7.4: letters this computer used before (newest last); a changed letter continues the numbers. */
+  pastMarkers: string[];
   lastTemplate: string | null;
   noClientSpaces: string[];
   ownCode: string;
@@ -536,6 +538,24 @@ export interface DevicesView {
   syncTemplates: boolean;
   /** Plain words when template sync couldn't run. */
   templateProblem: string | null;
+  /** v0.7.4: the job-code letter of each other computer (published, or guessed from its newest codes). */
+  letters: ComputerLetter[];
+  /** This computer's own letter, as saved. */
+  thisLetter: string;
+  /** The computers using the same letter as this one (a subset of `letters`). */
+  letterClash: ComputerLetter[];
+  /** A free letter for this computer: never one in `letters`, and different from computer to computer. */
+  suggestedLetter: string;
+}
+
+/** One other computer and its job-code letter (Rust `markers::ComputerLetter`). */
+export interface ComputerLetter {
+  deviceId: string;
+  name: string;
+  os: string;
+  letter: string;
+  /** Not published (an older Nest): judged from its newest job codes. */
+  guessed: boolean;
 }
 
 /** The "What's new" note shown once after an update (whats_new.rs). */

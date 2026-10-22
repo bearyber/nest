@@ -42,6 +42,7 @@ src-tauri/
     plan.rs          plan_project (pure)
     apply.rs         apply_plan + rollback
     names.rs         sanitiser + job codes
+    markers.rs       each computer's job-code letter: others' letters, same-letter check, free-letter suggestion (pure)
     manifest.rs      .project.json read/write (atomic, preserve unknown)
     index.rs         SQLite index + rescan
     devices.rs       Devices: this computer's list, reading other computers' lists, Google Drive detection

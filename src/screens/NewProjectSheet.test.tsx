@@ -209,6 +209,19 @@ describe("NewProjectSheet", () => {
     restore();
   });
 
+  it("a typed code with another computer's letter warns in plain words and never blocks Create", async () => {
+    const message =
+      'VX-W07 uses the letter W, which your computer "Studio PC" uses, so it could clash with a code made there. You can still use it.';
+    const restore = planWith({ issues: [{ level: "warning", field: "jobCode", message }] });
+    render(<NewProjectSheet onClose={() => {}} onCreated={() => {}} />);
+    expect(await screen.findByText(message)).toBeTruthy();
+    fireEvent.change(await screen.findByLabelText(/^Artist/), { target: { value: "KIRA" } });
+    await screen.findAllByText("VX-L01_KIRA");
+    const create = screen.getByRole("button", { name: /^Create/ }) as HTMLButtonElement;
+    await waitFor(() => expect(create.disabled).toBe(false));
+    restore();
+  });
+
   it("keeps Create disabled until required fields are valid", async () => {
     render(<NewProjectSheet onClose={() => {}} onCreated={() => {}} />);
     const create = await screen.findByRole("button", { name: /^Create/ });

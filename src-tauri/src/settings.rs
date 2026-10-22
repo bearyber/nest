@@ -19,6 +19,9 @@ pub struct Settings {
     pub default_space: String,
     pub code_pattern: String,
     pub local_marker: String,
+    /// v0.7.4: letters this computer used before (newest last), so a changed letter continues
+    /// the numbers (W05 → WL06). Published in the device file too.
+    pub past_markers: Vec<String>,
     pub last_template: Option<String>,
     /// Spaces whose projects have no client (the Client field is hidden there).
     pub no_client_spaces: Vec<String>,
@@ -118,6 +121,7 @@ impl Default for Settings {
             default_space: "Work".into(),
             code_pattern: DEFAULT_CODE_PATTERN.into(),
             local_marker: "L".into(),
+            past_markers: vec![],
             last_template: None,
             no_client_spaces: vec!["Personal".into()],
             own_code: "OWN".into(),
@@ -163,18 +167,24 @@ pub const THEMES: [&str; 3] = ["system", "light", "dark"];
 const MAX_PAST_ARCHIVES: usize = 10;
 const MAX_SPACE_CHARS: usize = 40;
 
-/// The letter in job codes made on this computer (`{marker}`). Each computer has its own, so
-/// two computers never make the same code. J is kept for jobs from the job tracker (later).
+/// The letter in job codes made on this computer (`{marker}`): 1 or 2 letters, A to Z, no
+/// digits (ACME-W205 would be ambiguous). Each computer has its own, so two computers never
+/// make the same code. J (alone or first) is kept for jobs from the job tracker (later).
 pub fn check_marker(marker: &str) -> Result<String, String> {
     let marker = marker.trim().to_ascii_uppercase();
-    if marker.len() != 1 || !marker.chars().all(|c| c.is_ascii_uppercase()) {
-        return Err("The letter for this computer must be one letter, A to Z".into());
+    if !(1..=2).contains(&marker.len()) || !marker.chars().all(|c| c.is_ascii_uppercase()) {
+        return Err(
+            "The letter for this computer must be 1 or 2 letters, A to Z (no numbers)".into(),
+        );
     }
-    if marker == "J" {
-        return Err("J is kept for jobs from your job tracker. Pick another letter.".into());
+    if marker.starts_with('J') {
+        return Err("J is kept for jobs from your job tracker, so a letter can't start with J. Pick another.".into());
     }
     Ok(marker)
 }
+
+/// Past letters kept per computer (the newest ones).
+pub const MAX_PAST_MARKERS: usize = 10;
 
 /// What first run suggests: W on Windows, M on a Mac. (The saved default stays "L" so older
 /// settings files without the key keep the letter they always had.)
@@ -203,9 +213,24 @@ impl Settings {
             "The code for personal jobs must be 2 to 5 letters or digits (e.g. OWN)".to_string()
         })?;
         self.code_pattern = pattern.trim().to_string();
-        self.local_marker = marker;
+        self.change_marker(marker);
         self.own_code = own;
         Ok(())
+    }
+
+    /// Set this computer's letter; the old one is remembered (only valid ones; an old setting
+    /// like "LX" stays valid, a 3-letter one from long ago is not kept).
+    fn change_marker(&mut self, new: String) {
+        let old = std::mem::replace(&mut self.local_marker, new.clone());
+        self.past_markers.retain(|m| !m.eq_ignore_ascii_case(&new));
+        if !old.eq_ignore_ascii_case(&new) {
+            if let Ok(old) = check_marker(&old) {
+                self.past_markers.retain(|m| *m != old);
+                self.past_markers.push(old);
+            }
+        }
+        let extra = self.past_markers.len().saturating_sub(MAX_PAST_MARKERS);
+        self.past_markers.drain(..extra);
     }
 
     fn space_name(&self, name: &str, except: Option<&str>) -> Result<String, String> {
@@ -908,9 +933,9 @@ mod tests {
             "J is kept for the job tracker"
         );
         assert!(
-            s.set_code_settings(DEFAULT_CODE_PATTERN, "LX", "OWN")
+            s.set_code_settings(DEFAULT_CODE_PATTERN, "LXY", "OWN")
                 .is_err(),
-            "one letter"
+            "at most two letters"
         );
         assert!(s
             .set_code_settings(DEFAULT_CODE_PATTERN, "", "OWN")
@@ -927,6 +952,62 @@ mod tests {
             s.code_pattern, "{clientCode}-{marker}{seq:03}",
             "unchanged after errors"
         );
+    }
+
+    #[test]
+    fn computer_letter_is_one_or_two_letters_without_digits() {
+        for ok in ["W", "w", " m ", "WL", "wl", "PC", "AJ"] {
+            assert!(check_marker(ok).is_ok(), "{ok} should be fine");
+        }
+        assert_eq!(check_marker(" wl ").unwrap(), "WL");
+        for bad in [
+            "", "W1", "1", "12", "WLX", "J", "j", "JA", "W-", "가", "北京", "W 1",
+        ] {
+            assert!(check_marker(bad).is_err(), "{bad:?} should be refused");
+        }
+        // The message says what to do, in plain words.
+        assert!(check_marker("J").unwrap_err().contains("Pick another"));
+        assert!(check_marker("W1").unwrap_err().contains("1 or 2 letters"));
+    }
+
+    #[test]
+    fn changing_the_letter_remembers_the_old_one() {
+        // The default letter is L.
+        let mut s = Settings::default();
+        s.set_code_settings(DEFAULT_CODE_PATTERN, "W", "OWN")
+            .unwrap();
+        assert_eq!(s.past_markers, ["L"]);
+        s.set_code_settings(DEFAULT_CODE_PATTERN, "WL", "OWN")
+            .unwrap();
+        assert_eq!(s.past_markers, ["L", "W"]);
+        // Saving without changing the letter keeps the list as it is.
+        s.set_code_settings(DEFAULT_CODE_PATTERN, "wl", "OWN")
+            .unwrap();
+        assert_eq!(s.past_markers, ["L", "W"]);
+        // Going back to an old letter: it is current again, no longer "past".
+        s.set_code_settings(DEFAULT_CODE_PATTERN, "W", "OWN")
+            .unwrap();
+        assert_eq!(s.local_marker, "W");
+        assert_eq!(s.past_markers, ["L", "WL"]);
+        // A refused change leaves both alone.
+        assert!(s
+            .set_code_settings(DEFAULT_CODE_PATTERN, "J", "OWN")
+            .is_err());
+        assert_eq!(s.past_markers, ["L", "WL"]);
+        assert_eq!(s.local_marker, "W");
+    }
+
+    #[test]
+    fn only_the_newest_past_letters_are_kept() {
+        let mut s = Settings::default();
+        for m in [
+            "A", "B", "C", "D", "E", "F", "G", "H", "I", "K", "L", "M", "N",
+        ] {
+            s.set_code_settings(DEFAULT_CODE_PATTERN, m, "OWN").unwrap();
+        }
+        assert_eq!(s.past_markers.len(), MAX_PAST_MARKERS);
+        assert_eq!(s.past_markers.last().map(String::as_str), Some("M"));
+        assert!(!s.past_markers.contains(&"A".to_string()));
     }
 
     #[test]
@@ -990,7 +1071,25 @@ mod tests {
             r#"{ "jobsRoots": ["D:/Jobs"], "localMarker": "LX" }"#,
         )
         .unwrap();
-        assert_eq!(load(dir.path()).unwrap().unwrap().local_marker, "LX");
+        let s = load(dir.path()).unwrap().unwrap();
+        assert_eq!(s.local_marker, "LX");
+        assert!(s.past_markers.is_empty());
+    }
+
+    #[test]
+    fn an_old_one_letter_setting_is_unchanged() {
+        let dir = tempfile::tempdir().unwrap();
+        fs::write(
+            dir.path().join(SETTINGS_FILE),
+            r#"{ "jobsRoots": ["D:/Jobs"], "localMarker": "W" }"#,
+        )
+        .unwrap();
+        let mut s = load(dir.path()).unwrap().unwrap();
+        assert_eq!((s.local_marker.as_str(), s.past_markers.len()), ("W", 0));
+        // Saving the same letter again changes nothing.
+        s.set_code_settings(DEFAULT_CODE_PATTERN, "W", "OWN")
+            .unwrap();
+        assert!(s.past_markers.is_empty());
     }
 
     /// A settings folder that can't be looked into is an error, never "first run".

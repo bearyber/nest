@@ -12,6 +12,7 @@ pub mod kits;
 mod kits_cmd;
 pub mod login_item;
 pub mod manifest;
+pub mod markers;
 mod menu;
 pub mod names;
 pub mod plan;

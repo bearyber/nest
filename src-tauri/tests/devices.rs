@@ -982,6 +982,8 @@ fn a_clock_set_in_the_future_once_never_freezes_trust() {
         requests: vec![],
         handled: vec![],
         handled_upto: None,
+        marker: String::new(),
+        past_markers: vec![],
         problem: None,
         not_downloaded: false,
     };
@@ -1001,4 +1003,93 @@ fn a_clock_set_in_the_future_once_never_freezes_trust() {
     // An older copy than the remembered one still isn't trusted.
     let t = trusted_lists_at(&[list("2026-10-16T11:00:00Z")], true, &mut newest, now);
     assert!(!t.contains("pc"));
+}
+
+// ───── v0.7.4: each computer publishes its job-code letter ─────
+
+#[test]
+fn the_letter_and_past_letters_travel_in_the_list() {
+    let (_tmp, dir) = shared();
+    let mut mac = build_own(MAC, "MacBook", &[], "2026-10-22T10:00:00+09:00");
+    mac.marker = "WL".into();
+    mac.past_markers = vec!["W".into()];
+    write_own(&dir, &mac, &mut None).unwrap();
+    // The schema number is unchanged: older Nest versions read the file as before.
+    let text = fs::read_to_string(dir.join(format!("{MAC}.json"))).unwrap();
+    let v: serde_json::Value = serde_json::from_str(&text).unwrap();
+    assert_eq!(v["schema"], 1);
+    assert_eq!(v["marker"], "WL");
+    assert_eq!(v["pastMarkers"][0], "W");
+    let others = read_others(&dir, PC, &mut HashMap::new());
+    assert_eq!(others[0].marker, "WL");
+    assert_eq!(others[0].past_markers, ["W"]);
+    // A computer that publishes none (an older Nest) writes no such keys and reads as "unknown".
+    let old = build_own(PC, "Studio PC", &[], "t");
+    write_own(&dir, &old, &mut None).unwrap();
+    let v: serde_json::Value =
+        serde_json::from_str(&fs::read_to_string(dir.join(format!("{PC}.json"))).unwrap()).unwrap();
+    assert!(v.get("marker").is_none() && v.get("pastMarkers").is_none());
+    let others = read_others(&dir, MAC, &mut HashMap::new());
+    assert_eq!(others[0].marker, "");
+}
+
+#[test]
+fn a_letter_from_another_computer_is_checked_not_trusted() {
+    let (_tmp, dir) = shared();
+    let write = |marker: &str, past: Vec<&str>| {
+        let mut f = build_own(MAC, "MacBook", &[], "t");
+        f.marker = marker.into();
+        f.past_markers = past.into_iter().map(String::from).collect();
+        // Straight to disk (write_own would be fine too): what another Nest wrote may be anything.
+        fs::write(
+            dir.join(format!("{MAC}.json")),
+            serde_json::to_string(&f).unwrap(),
+        )
+        .unwrap();
+        read_others(&dir, PC, &mut HashMap::new()).remove(0)
+    };
+    fs::create_dir_all(&dir).unwrap();
+    for bad in ["W1", "WLX", "J", "JA", "가", "<script>", "  "] {
+        assert_eq!(write(bad, vec![]).marker, "", "{bad:?} is dropped");
+    }
+    assert_eq!(write(" wl ", vec![]).marker, "WL");
+    // Past letters: bad ones dropped, repeats removed, at most ten, the newest kept.
+    let many: Vec<String> = ('A'..='Z')
+        .filter(|c| *c != 'J')
+        .map(|c| c.to_string())
+        .collect();
+    let past: Vec<&str> = ["W", "w", "J", "W1"]
+        .into_iter()
+        .chain(many.iter().map(String::as_str))
+        .collect();
+    let got = write("M", past).past_markers;
+    assert_eq!(got.len(), 10);
+    assert_eq!(got.last().map(String::as_str), Some("Z"));
+    assert!(got
+        .iter()
+        .all(|m| nest_lib::settings::check_marker(m).is_ok()));
+}
+
+#[test]
+fn two_computers_with_one_letter_are_noticed_and_a_free_one_is_suggested() {
+    use nest_lib::markers::{clashing, letters_of, suggest};
+    use nest_lib::names::{CodePattern, DEFAULT_CODE_PATTERN};
+    let (_tmp, dir) = shared();
+    let mut pc = build_own(PC, "Studio PC", &[], "t");
+    pc.marker = "W".into();
+    write_own(&dir, &pc, &mut None).unwrap();
+    let others = read_others(&dir, MAC, &mut HashMap::new());
+    let letters = letters_of(&others, &CodePattern::parse(DEFAULT_CODE_PATTERN).unwrap());
+    // This Mac also uses W: noticed.
+    let clash = clashing("W", &letters);
+    assert_eq!(clash.len(), 1);
+    assert_eq!(clash[0].name, "Studio PC");
+    assert!(clashing("M", &letters).is_empty());
+    let taken: Vec<String> = letters.iter().map(|l| l.letter.clone()).collect();
+    // The two computers would suggest different letters for themselves.
+    let mac_pick = suggest("MacBook", "macos", MAC, &taken);
+    let pc_pick = suggest("Studio PC", "windows", PC, &["W".into()]);
+    assert_eq!(mac_pick, "M");
+    assert_ne!(mac_pick, pc_pick);
+    assert_ne!(pc_pick, "W");
 }

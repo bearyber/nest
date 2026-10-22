@@ -6,6 +6,7 @@ import { getCurrentWindow } from "@tauri-apps/api/window";
 import { setNewProjectOpen } from "../lib/commands";
 import Icon from "../components/Icon";
 import FirstSteps, { FirstProjectNote } from "../components/FirstSteps";
+import LetterNote from "../components/LetterNote";
 import Inspector from "../components/Inspector";
 import ProjectList from "../components/ProjectList";
 import Sidebar, { type Computer } from "../components/Sidebar";
@@ -147,6 +148,8 @@ export default function Main() {
   const fail = useCallback((e: unknown) => setToast({ message: errorMessage(e) }), []);
 
   const [devices, setDevices] = useState<DevicesView | null>(null);
+  /** "Later" on the same-letter note: that situation stays hidden until it changes or Nest restarts. */
+  const [letterLater, setLetterLater] = useState<string | null>(null);
   const refresh = useCallback(
     () =>
       Promise.all([listProjects(), devicesView().then(setDevices).catch(() => {})])
@@ -218,6 +221,8 @@ export default function Main() {
     () => {
       void loadSpaces();
       rescan(false);
+      // A changed letter may end (or start) a clash.
+      void devicesView().then(setDevices).catch(() => {});
     },
   );
   // Settings → Templates → Open templates.
@@ -346,6 +351,11 @@ export default function Main() {
     };
   }, [selectedKey, readable, resolveTick]);
   const offlineRoots = list?.roots.filter((r) => !r.online) ?? [];
+  const letterClash = devices?.letterClash ?? [];
+  const letterClashKey = `${devices?.thisLetter ?? ""}|${letterClash
+    .map((c) => c.deviceId)
+    .sort()
+    .join(",")}`;
 
   const counts = useMemo(() => {
     const c: Record<string, number> = { "": 0 };
@@ -814,6 +824,16 @@ export default function Main() {
             fullPath={firstTip.root}
             onReveal={() => void revealProject(firstTip.key).catch(fail)}
             onDone={() => setFirstTip(null)}
+          />
+        )}
+
+        {letterClash.length > 0 && letterLater !== letterClashKey && (
+          <LetterNote
+            clash={letterClash}
+            letter={devices?.thisLetter ?? ""}
+            mac={isMac()}
+            onChange={() => void openSettings("codes").catch(fail)}
+            onLater={() => setLetterLater(letterClashKey)}
           />
         )}
 

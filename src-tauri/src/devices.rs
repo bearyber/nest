@@ -56,6 +56,14 @@ pub struct DeviceFile {
     /// files.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub handled_upto: Option<BTreeMap<String, u64>>,
+    /// v0.7.4: the letter in this computer's job codes (`{marker}`, 1–2 letters A–Z), so other
+    /// computers can warn about two computers sharing one. Missing in older files (their
+    /// letter is then guessed from their newest codes: a warning only, never a refusal).
+    #[serde(skip_serializing_if = "String::is_empty")]
+    pub marker: String,
+    /// v0.7.4: letters this computer used before (newest last, at most `MAX_PAST_MARKERS`).
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub past_markers: Vec<String>,
 }
 
 /// "Please mark this project done (or active)", from one computer to the one that has it.
@@ -166,6 +174,8 @@ pub fn build_own(device_id: &str, name: &str, rows: &[ProjectRow], updated_at: &
         requests: vec![],
         handled: vec![],
         handled_upto: None,
+        marker: String::new(),
+        past_markers: vec![],
     }
 }
 
@@ -235,6 +245,11 @@ pub struct OtherDevice {
     pub handled: Vec<Handled>,
     #[serde(skip)]
     pub handled_upto: Option<BTreeMap<String, u64>>,
+    /// Its published job-code letter ("" = not published: an older Nest) and past letters.
+    #[serde(skip)]
+    pub marker: String,
+    #[serde(skip)]
+    pub past_markers: Vec<String>,
     /// Plain words when the latest file couldn't be used (the last good copy is shown).
     pub problem: Option<String>,
     /// Only a cloud placeholder so far (e.g. iCloud `.icloud`): "not downloaded yet".
@@ -288,6 +303,8 @@ pub fn read_others(
                         requests: file.requests,
                         handled: file.handled,
                         handled_upto: file.handled_upto,
+                        marker: file.marker,
+                        past_markers: file.past_markers,
                         problem: None,
                         not_downloaded: false,
                     },
@@ -307,6 +324,8 @@ pub fn read_others(
                     requests: vec![],
                     handled: vec![],
                     handled_upto: None,
+                    marker: String::new(),
+                    past_markers: vec![],
                     problem: None,
                     not_downloaded: false,
                 });
@@ -327,6 +346,8 @@ pub fn read_others(
                     requests: vec![],
                     handled: vec![],
                     handled_upto: None,
+                    marker: String::new(),
+                    past_markers: vec![],
                     problem: None,
                     not_downloaded: true,
                 },
@@ -381,6 +402,20 @@ fn read_one(path: &Path, id: &str) -> Result<DeviceFile, String> {
     if file.projects.len() > MAX_PROJECTS {
         return Err("Its list has too many projects.".into());
     }
+    // Letters from another computer: only what a letter may be (A–Z, 1–2, not J-first);
+    // anything else is dropped, never "fixed".
+    file.marker = crate::settings::check_marker(&file.marker).unwrap_or_default();
+    let mut past: Vec<String> = vec![];
+    for m in &file.past_markers {
+        if let Ok(m) = crate::settings::check_marker(m) {
+            if !past.contains(&m) {
+                past.push(m);
+            }
+        }
+    }
+    let extra = past.len().saturating_sub(crate::settings::MAX_PAST_MARKERS);
+    past.drain(..extra);
+    file.past_markers = past;
     clamp(&mut file.name);
     clamp(&mut file.os);
     clamp(&mut file.updated_at);

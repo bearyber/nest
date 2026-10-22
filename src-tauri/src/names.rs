@@ -233,27 +233,72 @@ impl CodePattern {
         }
         digits.parse().ok()
     }
+
+    /// The computer's letter(s) inside `code` for this client, if the code follows this pattern
+    /// (`ACME-WL06` → `WL`). Only the part before the number is read; a pattern with no
+    /// `{marker}` there (or a code that doesn't fit) gives `None`. Used to guess an older
+    /// computer's letter and to warn about a typed code: never to refuse anything.
+    pub fn marker_of(&self, code: &str, client: &str) -> Option<String> {
+        let at = self.before.find("{marker}")?;
+        if self.before.matches("{marker}").count() != 1 || self.after.contains("{marker}") {
+            return None;
+        }
+        let head = Self::resolve(&self.before[..at], client, "").to_ascii_uppercase();
+        let tail =
+            Self::resolve(&self.before[at + "{marker}".len()..], client, "").to_ascii_uppercase();
+        let after = Self::resolve(&self.after, client, "").to_ascii_uppercase();
+        let code = code.to_ascii_uppercase();
+        let rest = code.strip_prefix(&head)?;
+        let letters: String = rest
+            .chars()
+            .take_while(|c| c.is_ascii_uppercase())
+            .take(3)
+            .collect();
+        if !(1..=2).contains(&letters.len()) {
+            return None;
+        }
+        let digits = rest[letters.len()..]
+            .strip_prefix(&tail)?
+            .strip_suffix(&after)?;
+        if digits.is_empty() || !digits.bytes().all(|b| b.is_ascii_digit()) {
+            return None;
+        }
+        Some(letters)
+    }
 }
 
 /// How far past the highest existing code `next_code` looks before giving up.
 /// A real jobs folder never needs more than a handful; the cap stops a runaway search.
 pub const MAX_CODE_TRIES: u32 = 1_000;
 
-/// Next free job code: highest existing seq for this client + marker, plus one,
-/// then skipping any code `is_taken` rejects. Gaps are never refilled.
+/// Next free job code for this client + marker: one past the highest number seen, then
+/// skipping any code `is_taken` rejects. Gaps are never refilled.
+/// - `codes.0` = codes found on THIS computer (index + folders): counted for the current letter
+///   and for every letter this computer used before (`past_markers`), so changing W to WL
+///   goes W05 → WL06, not WL01.
+/// - `codes.1` = codes other computers made: counted for the current letter only (it keeps two
+///   computers that share a letter from repeating a number), never for past letters (a PC's
+///   W07 must not push the Mac's WL to 08).
+///
 /// `None` if nothing free turns up within `MAX_CODE_TRIES`.
 pub fn next_code(
     pattern: &CodePattern,
     client: &str,
     marker: &str,
-    existing: &[String],
+    past_markers: &[String],
+    codes: (&[String], &[String]),
     mut is_taken: impl FnMut(&str) -> bool,
 ) -> Option<String> {
-    let highest = existing
+    let (own, remote) = codes;
+    let current = own
         .iter()
-        .filter_map(|c| pattern.seq_of(c, client, marker))
-        .max()
-        .unwrap_or(0);
+        .chain(remote)
+        .filter_map(|c| pattern.seq_of(c, client, marker));
+    let past = past_markers
+        .iter()
+        .filter(|m| !m.eq_ignore_ascii_case(marker))
+        .flat_map(|m| own.iter().filter_map(move |c| pattern.seq_of(c, client, m)));
+    let highest = current.chain(past).max().unwrap_or(0);
     let first = highest.saturating_add(1);
     (first..first.saturating_add(MAX_CODE_TRIES))
         .map(|seq| pattern.format(client, marker, seq))
@@ -427,14 +472,14 @@ mod tests {
     fn next_code_counts_up_from_highest_and_skips_taken() {
         let p = CodePattern::parse(DEFAULT_CODE_PATTERN).unwrap();
         let next = |existing: &[String], taken: &[&str]| {
-            next_code(&p, "VX", "L", existing, |c| taken.contains(&c)).unwrap()
+            next_code(&p, "VX", "L", &[], (existing, &[]), |c| taken.contains(&c)).unwrap()
         };
         assert_eq!(next(&[], &[]), "VX-L01");
         // Gaps are not refilled: J01, J03 → J04 (spec M1).
         let existing = codes(&["VX-L01", "VX-L03", "BF-L09", "VX-J12"]);
         assert_eq!(next(&existing, &[]), "VX-L04");
         assert_eq!(
-            next_code(&p, "VX", "J", &existing, |_| false).unwrap(),
+            next_code(&p, "VX", "J", &[], (&existing, &[]), |_| false).unwrap(),
             "VX-J13"
         );
         // Case-only variants count.
@@ -447,11 +492,78 @@ mod tests {
     fn next_code_gives_up_instead_of_searching_forever() {
         let p = CodePattern::parse(DEFAULT_CODE_PATTERN).unwrap();
         let mut calls = 0;
-        let found = next_code(&p, "VX", "L", &[], |_| {
+        let found = next_code(&p, "VX", "L", &[], (&[], &[]), |_| {
             calls += 1;
             true
         });
         assert_eq!(found, None);
         assert_eq!(calls, MAX_CODE_TRIES);
+    }
+
+    #[test]
+    fn one_and_two_letter_markers_never_mix_up() {
+        let p = CodePattern::parse(DEFAULT_CODE_PATTERN).unwrap();
+        // W's numbers never count for WL, and WL's never for W.
+        assert_eq!(p.seq_of("ACME-W05", "ACME", "WL"), None);
+        assert_eq!(p.seq_of("ACME-WL06", "ACME", "W"), None);
+        assert_eq!(p.seq_of("ACME-WL06", "ACME", "WL"), Some(6));
+        assert_eq!(p.seq_of("ACME-W05", "ACME", "W"), Some(5));
+    }
+
+    #[test]
+    fn changing_letter_continues_the_numbers() {
+        let p = CodePattern::parse(DEFAULT_CODE_PATTERN).unwrap();
+        let own = codes(&["ACME-W01", "ACME-W05", "BF-W09"]);
+        // W05 → WL06 after the letter changed from W to WL.
+        let past = codes(&["W"]);
+        assert_eq!(
+            next_code(&p, "ACME", "WL", &past, (&own, &[]), |_| false).unwrap(),
+            "ACME-WL06"
+        );
+        // Another client's numbers don't count.
+        assert_eq!(
+            next_code(&p, "NEW", "WL", &past, (&own, &[]), |_| false).unwrap(),
+            "NEW-WL01"
+        );
+        // The PC's W07 (another computer, same old letter) doesn't push the Mac to 08.
+        let remote = codes(&["ACME-W07"]);
+        assert_eq!(
+            next_code(&p, "ACME", "WL", &past, (&own, &remote), |_| false).unwrap(),
+            "ACME-WL06"
+        );
+        // But the current letter still counts remote codes (two computers sharing a letter).
+        let remote = codes(&["ACME-WL09"]);
+        assert_eq!(
+            next_code(&p, "ACME", "WL", &past, (&own, &remote), |_| false).unwrap(),
+            "ACME-WL10"
+        );
+        // Several past letters: the highest of them wins; the current letter in the list is ignored.
+        let own = codes(&["ACME-W05", "ACME-X11", "ACME-WL02"]);
+        let past = codes(&["W", "X", "WL"]);
+        assert_eq!(
+            next_code(&p, "ACME", "WL", &past, (&own, &[]), |_| false).unwrap(),
+            "ACME-WL12"
+        );
+    }
+
+    #[test]
+    fn marker_of_reads_the_letters_before_the_number() {
+        let p = CodePattern::parse(DEFAULT_CODE_PATTERN).unwrap();
+        assert_eq!(p.marker_of("ACME-W07", "ACME"), Some("W".into()));
+        assert_eq!(p.marker_of("acme-wl07", "ACME"), Some("WL".into()));
+        assert_eq!(p.marker_of("ACME-WLX07", "ACME"), None);
+        assert_eq!(p.marker_of("ACME-07", "ACME"), None);
+        assert_eq!(p.marker_of("OTHER-W07", "ACME"), None);
+        assert_eq!(p.marker_of("ACME-W", "ACME"), None);
+        // No separator: the client code is known, so the split is clear.
+        let q = CodePattern::parse("{clientCode}{marker}{seq:02}").unwrap();
+        assert_eq!(q.marker_of("ACMEW07", "ACME"), Some("W".into()));
+        assert_eq!(q.marker_of("ACMEWL07", "ACME"), Some("WL".into()));
+        // A style without the letter has none to read.
+        let r = CodePattern::parse("{clientCode}-{seq:02}").unwrap();
+        assert_eq!(r.marker_of("ACME-07", "ACME"), None);
+        // Korean / Chinese client codes are just text here.
+        assert_eq!(p.marker_of("서울-M03", "서울"), Some("M".into()));
+        assert_eq!(p.marker_of("北京-WL12", "北京"), Some("WL".into()));
     }
 }
