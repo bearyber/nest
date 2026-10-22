@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState } from "react";
 import { listen } from "@tauri-apps/api/event";
+import { useTauriListener } from "../../lib/useTauriListener";
 import { Button, PathText } from "../../components/ui";
 import {
   devicesClaim,
@@ -46,12 +47,11 @@ export default function DevicesTab({ run }: TabProps) {
         setFolder((cur) => cur ?? f[0]?.path ?? null);
       })
       .catch(() => setFound([]));
-    let unlisten: (() => void) | undefined;
-    listen("devices-changed", () => void load())
-      .then((u) => (unlisten = u))
-      .catch(() => {});
-    return () => unlisten?.();
   }, [load]);
+  useTauriListener(
+    (cb) => listen("devices-changed", cb),
+    () => void load(),
+  );
 
   if (!view) return null;
   const thisOs = isMac() ? "macos" : "windows";

@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { listen } from "@tauri-apps/api/event";
+import { listen, type Event } from "@tauri-apps/api/event";
+import { useTauriListener } from "../lib/useTauriListener";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { getSettings, settingsReady } from "../lib/commands";
 import { closesSettings } from "../lib/shortcuts";
@@ -68,26 +69,22 @@ export default function Settings() {
 
   useEffect(() => {
     void refresh();
-    let unlisten: (() => void) | undefined;
-    listen("settings-changed", () => void refresh())
-      .then((u) => (unlisten = u))
-      .catch(() => {});
-    return () => unlisten?.();
   }, [refresh]);
+  useTauriListener(
+    (cb) => listen("settings-changed", cb),
+    () => void refresh(),
+  );
 
   // Already open: the same request arrives as an event.
-  useEffect(() => {
-    let unlisten: (() => void) | undefined;
-    listen<string>("settings-tab", (e) => {
+  useTauriListener<Event<string>>(
+    (cb) => listen<string>("settings-tab", cb),
+    (e) => {
       if (e.payload === "shortcuts") {
         setTab("shortcuts");
         setMessage(null);
       }
-    })
-      .then((u) => (unlisten = u))
-      .catch(() => {});
-    return () => unlisten?.();
-  }, []);
+    },
+  );
 
   // Windows: Escape (when you're not typing) and Ctrl+W close the window, like other Windows
   // settings windows. macOS has ⌘W in the menu bar; Escape doesn't close a Mac settings window.

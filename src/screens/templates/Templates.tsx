@@ -1,6 +1,7 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { listen } from "@tauri-apps/api/event";
-import { getCurrentWebview } from "@tauri-apps/api/webview";
+import { useCallback, useEffect, useMemo, useState } from "react";
+import { listen, type Event } from "@tauri-apps/api/event";
+import { useTauriListener } from "../../lib/useTauriListener";
+import { getCurrentWebview, type DragDropEvent } from "@tauri-apps/api/webview";
 import { popupMenu } from "../../lib/popupMenu";
 import { Button, IconButton } from "../../components/ui";
 import {
@@ -100,12 +101,11 @@ export default function Templates({ run, onNewProject }: Props) {
   );
   useEffect(() => {
     void load();
-    let unlisten: (() => void) | undefined;
-    listen("settings-changed", () => void load())
-      .then((u) => (unlisten = u))
-      .catch(() => {});
-    return () => unlisten?.();
   }, [load]);
+  useTauriListener(
+    (cb) => listen("settings-changed", cb),
+    () => void load(),
+  );
 
   // One card per template: yours, and Nest's that you haven't replaced (your version is listed
   // instead) or removed. Older copies of yours (T-A) stay out of the list.
@@ -180,27 +180,17 @@ export default function Templates({ run, onNewProject }: Props) {
   };
 
   // Drop a folder or a template file anywhere on this view.
-  const droppedRef = useRef(dropped);
-  const editingRef = useRef(false);
-  useEffect(() => {
-    droppedRef.current = dropped;
-    editingRef.current = editing !== null;
-  });
-  useEffect(() => {
-    let unlisten: (() => void) | undefined;
-    getCurrentWebview()
-      .onDragDropEvent((e) => {
-        const p = e.payload;
-        if (p.type === "drop") {
-          setDragging(false);
-          void droppedRef.current(p.paths);
-        } else if (p.type === "leave") setDragging(false);
-        else if (!editingRef.current) setDragging(true);
-      })
-      .then((u) => (unlisten = u))
-      .catch(() => {});
-    return () => unlisten?.();
-  }, []);
+  useTauriListener<Event<DragDropEvent>>(
+    (cb) => getCurrentWebview().onDragDropEvent(cb),
+    (e) => {
+      const p = e.payload;
+      if (p.type === "drop") {
+        setDragging(false);
+        void dropped(p.paths);
+      } else if (p.type === "leave") setDragging(false);
+      else if (editing === null) setDragging(true);
+    },
+  );
 
   const changeTemplate = (t: TemplateInfo) => void open(t.builtIn ? "customize" : "edit", t.key);
 

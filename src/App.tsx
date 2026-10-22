@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState } from "react";
 import { listen } from "@tauri-apps/api/event";
+import { useTauriListener } from "./lib/useTauriListener";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import FirstRun from "./screens/FirstRun";
 import Main from "./screens/Main";
@@ -42,13 +43,12 @@ export default function App() {
         document.documentElement.dataset.material = "none";
       });
     void syncSettings();
-    // Appearance changes in the Settings window apply here too.
-    let unlisten: (() => void) | undefined;
-    listen("settings-changed", () => void syncSettings())
-      .then((u) => (unlisten = u))
-      .catch(() => {});
-    return () => unlisten?.();
   }, [syncSettings]);
+  // Appearance changes in the Settings window apply here too.
+  useTauriListener(
+    (cb) => listen("settings-changed", cb),
+    () => void syncSettings(),
+  );
 
   // The OS accent colour, live (locked #7).
   useEffect(() => followSystemAccent(), []);

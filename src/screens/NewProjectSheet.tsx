@@ -1,5 +1,6 @@
 import { Fragment, useCallback, useEffect, useRef, useState } from "react";
-import { listen } from "@tauri-apps/api/event";
+import { listen, type Event } from "@tauri-apps/api/event";
+import { useTauriListener } from "../lib/useTauriListener";
 import FieldInput from "../components/fields/FieldInput";
 import Icon from "../components/Icon";
 import PreviewTree from "../components/PreviewTree";
@@ -255,20 +256,17 @@ export default function NewProjectSheet({ initialTemplate, example = false, onCl
 
   // Settings changed while the sheet is open (e.g. a new Personal folder or a client's kit):
   // reload what it shows, and plan again.
-  useEffect(() => {
-    let unlisten: (() => void) | undefined;
-    listen("settings-changed", () => {
+  useTauriListener(
+    (cb) => listen("settings-changed", cb),
+    () => {
       newProjectContext()
         .then((c) => {
           setCtx(c);
           setReplan((n) => n + 1);
         })
         .catch((e) => setError(errorMessage(e)));
-    })
-      .then((u) => (unlisten = u))
-      .catch(() => {});
-    return () => unlisten?.();
-  }, []);
+    },
+  );
 
   // New jobs folder (or Personal folder, when that's the one shown): reload the context
   // (rescans that folder); the preview effect re-plans.
@@ -315,23 +313,16 @@ export default function NewProjectSheet({ initialTemplate, example = false, onCl
   const kitFingerprint = plan?.kit?.state === "ready" ? (plan.kit.fingerprint ?? null) : null;
 
   // While Create copies a client kit, Rust says how far it got.
-  useEffect(() => {
-    if (!creating) return;
-    let unlisten: (() => void) | undefined;
-    let live = true;
-    listen<CreateProgress>("create-progress", (e) => live && setProgress(e.payload))
-      .then((u) => (live ? (unlisten = u) : u()))
-      .catch(() => {});
-    return () => {
-      live = false;
-      unlisten?.();
-      setProgress(null);
-    };
-  }, [creating]);
+  useTauriListener<Event<CreateProgress>>(
+    (cb) => listen<CreateProgress>("create-progress", cb),
+    (e) => setProgress(e.payload),
+    creating,
+  );
 
   const create = useCallback(() => {
     if (!ready) return;
     setCreating(true);
+    setProgress(null);
     setError(null);
     const resolveName = plan?.resolve?.name ?? null;
     createProject({ templateId, values, space, codeOverride, noClient, kitFingerprint, resolve: resolveOn })

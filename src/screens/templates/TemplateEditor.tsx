@@ -1,6 +1,8 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { popupMenu, type PopupItem } from "../../lib/popupMenu";
-import { getCurrentWebview } from "@tauri-apps/api/webview";
+import { getCurrentWebview, type DragDropEvent } from "@tauri-apps/api/webview";
+import type { Event as TauriEvent } from "@tauri-apps/api/event";
+import { useTauriListener } from "../../lib/useTauriListener";
 import { Button } from "../../components/ui";
 import {
   editorAddFiles,
@@ -486,45 +488,35 @@ export default function TemplateEditor({ sourceKey, mode, start, note, onClose, 
     const el = document.elementFromPoint(x / ratio, y / ratio)?.closest("[data-drop-path]");
     return el ? (el.getAttribute("data-drop-path") ?? null) : null;
   };
-  const addFilesRef = useRef(addFiles);
-  const addDrpRef = useRef(addDrp);
   const drpOnlyRef = useRef(false);
-  useEffect(() => {
-    addFilesRef.current = addFiles;
-    addDrpRef.current = addDrp;
-  });
-  useEffect(() => {
-    let unlisten: (() => void) | undefined;
-    getCurrentWebview()
-      .onDragDropEvent((e) => {
-        const ev = e.payload;
-        if (ev.type === "enter") {
-          const drpOnly = ev.paths.length > 0 && ev.paths.every(isDrp);
-          drpOnlyRef.current = drpOnly;
-          setDraggingDrp(drpOnly);
-          if (!drpOnly) setDropPath(dropTarget(ev.position.x, ev.position.y));
-        } else if (ev.type === "over") {
-          // A .drp goes to the Resolve project wherever it's dropped: no folder lights up.
-          if (!drpOnlyRef.current) setDropPath(dropTarget(ev.position.x, ev.position.y));
-        } else if (ev.type === "drop") {
-          const into = dropTarget(ev.position.x, ev.position.y);
-          setDropPath(null);
-          setDraggingDrp(false);
-          drpOnlyRef.current = false;
-          const drps = ev.paths.filter(isDrp);
-          const rest = ev.paths.filter((p) => !isDrp(p));
-          if (drps.length) void addDrpRef.current(drps[0], drps.length - 1);
-          if (rest.length) void addFilesRef.current(into ?? "", rest);
-        } else {
-          setDropPath(null);
-          setDraggingDrp(false);
-          drpOnlyRef.current = false;
-        }
-      })
-      .then((u) => (unlisten = u))
-      .catch(() => {});
-    return () => unlisten?.();
-  }, []);
+  useTauriListener<TauriEvent<DragDropEvent>>(
+    (cb) => getCurrentWebview().onDragDropEvent(cb),
+    (e) => {
+      const ev = e.payload;
+      if (ev.type === "enter") {
+        const drpOnly = ev.paths.length > 0 && ev.paths.every(isDrp);
+        drpOnlyRef.current = drpOnly;
+        setDraggingDrp(drpOnly);
+        if (!drpOnly) setDropPath(dropTarget(ev.position.x, ev.position.y));
+      } else if (ev.type === "over") {
+        // A .drp goes to the Resolve project wherever it's dropped: no folder lights up.
+        if (!drpOnlyRef.current) setDropPath(dropTarget(ev.position.x, ev.position.y));
+      } else if (ev.type === "drop") {
+        const into = dropTarget(ev.position.x, ev.position.y);
+        setDropPath(null);
+        setDraggingDrp(false);
+        drpOnlyRef.current = false;
+        const drps = ev.paths.filter(isDrp);
+        const rest = ev.paths.filter((p) => !isDrp(p));
+        if (drps.length) void addDrp(drps[0], drps.length - 1);
+        if (rest.length) void addFiles(into ?? "", rest);
+      } else {
+        setDropPath(null);
+        setDraggingDrp(false);
+        drpOnlyRef.current = false;
+      }
+    },
+  );
 
   // ── Right-click ──
 

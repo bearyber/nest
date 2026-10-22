@@ -11,7 +11,8 @@ interface Props {
   onSort: (key: SortKey) => void;
   onSelect: (key: string) => void;
   onOpen: (row: ProjectRow) => void;
-  onContextMenu: (row: ProjectRow) => void;
+  /** `option`: ⌥ (Alt) was held, which on a Mac asks for Show in Finder instead of Open. */
+  onContextMenu: (row: ProjectRow, option: boolean) => void;
 }
 
 const COLUMNS: { key: SortKey; label: string }[] = [
@@ -167,7 +168,7 @@ export default function ProjectList({ rows, selected, sort, onSort, onSelect, on
               onContextMenu={(e) => {
                 e.preventDefault();
                 onSelect(r.key);
-                onContextMenu(r);
+                onContextMenu(r, e.altKey);
               }}
             >
               <span role="gridcell" className={styles.statusCell}>

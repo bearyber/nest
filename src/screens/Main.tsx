@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { getVersion } from "@tauri-apps/api/app";
-import { listen } from "@tauri-apps/api/event";
+import { listen, type Event } from "@tauri-apps/api/event";
+import { useTauriListener } from "../lib/useTauriListener";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { setNewProjectOpen } from "../lib/commands";
 import Icon from "../components/Icon";
@@ -185,9 +186,8 @@ export default function Main() {
   );
 
   // Launch: show the saved list instantly, then rescan in the background.
-  useEffect(() => {
-    refresh().then(() => rescan(false));
-    const loadSpaces = () =>
+  const loadSpaces = useCallback(
+    () =>
       getSettings()
         .then((v) => {
           setSpaces(v.settings.spaces);
@@ -195,44 +195,45 @@ export default function Main() {
           setArchiveOn(v.settings.archiveFolder !== null);
           setTipSeen(v.settings.firstProjectTipSeen === true);
         })
-        .catch(() => {});
-    void loadSpaces();
-    // Settings window changed something (spaces, jobs folders…): refresh and rescan.
-    let unlisten: (() => void) | undefined;
-    listen("settings-changed", () => {
-      void loadSpaces();
-      rescan(false);
-    })
-      .then((u) => (unlisten = u))
-      .catch(() => {});
-    // Settings → Templates → Open templates.
-    let unlistenTemplates: (() => void) | undefined;
-    listen("open-templates", () => setView("templates"))
-      .then((u) => (unlistenTemplates = u))
-      .catch(() => {});
-    // Devices: another computer's list changed (or this one's was saved): reload the list.
-    let unlistenDevices: (() => void) | undefined;
-    listen("devices-changed", () => void refresh())
-      .then((u) => (unlistenDevices = u))
-      .catch(() => {});
-    // A one-off note from the app (e.g. the template tidy on first start of v0.3.0): asked
-    // now, and again if it arrives later.
-    const showNotice = () =>
+        .catch(() => {}),
+    [],
+  );
+  // A one-off note from the app (e.g. the template tidy on first start of v0.3.0): asked
+  // now, and again if it arrives later.
+  const showNotice = useCallback(
+    () =>
       takeNotice()
         .then((n) => n && setToast((cur) => toastForNotice(cur, pendingResolve.current, n)))
-        .catch(() => {});
+        .catch(() => {}),
+    [],
+  );
+  useEffect(() => {
+    refresh().then(() => rescan(false));
+    void loadSpaces();
     void showNotice();
-    let unlistenNotice: (() => void) | undefined;
-    listen("notice", () => void showNotice())
-      .then((u) => (unlistenNotice = u))
-      .catch(() => {});
-    return () => {
-      unlisten?.();
-      unlistenDevices?.();
-      unlistenTemplates?.();
-      unlistenNotice?.();
-    };
-  }, [refresh, rescan]);
+  }, [refresh, rescan, loadSpaces, showNotice]);
+  // Settings window changed something (spaces, jobs folders…): refresh and rescan.
+  useTauriListener(
+    (cb) => listen("settings-changed", cb),
+    () => {
+      void loadSpaces();
+      rescan(false);
+    },
+  );
+  // Settings → Templates → Open templates.
+  useTauriListener(
+    (cb) => listen("open-templates", cb),
+    () => setView("templates"),
+  );
+  // Devices: another computer's list changed (or this one's was saved): reload the list.
+  useTauriListener(
+    (cb) => listen("devices-changed", cb),
+    () => void refresh(),
+  );
+  useTauriListener(
+    (cb) => listen("notice", cb),
+    () => void showNotice(),
+  );
 
   // Updates (release builds): ask once in case the check finished before we listened.
   const [update, setUpdate] = useState<UpdateInfo | null>(null);
@@ -246,12 +247,11 @@ export default function Main() {
   useEffect(() => {
     pendingUpdate().then(setUpdate).catch(() => {});
     getVersion().then(setVersion).catch(() => {});
-    let unlisten: (() => void) | undefined;
-    listen<UpdateInfo>("update-available", (e) => setUpdate(e.payload))
-      .then((u) => (unlisten = u))
-      .catch(() => {});
-    return () => unlisten?.();
   }, []);
+  useTauriListener<Event<UpdateInfo>>(
+    (cb) => listen<UpdateInfo>("update-available", cb),
+    (e) => setUpdate(e.payload),
+  );
   const [checking, setChecking] = useState(false);
   const checkUpdates = useCallback(() => {
     setChecking(true);
@@ -271,21 +271,17 @@ export default function Main() {
   };
 
   // Window focus: rescan if the last one is older than 10 minutes.
-  useEffect(() => {
-    let unlisten: (() => void) | undefined;
-    getCurrentWindow()
-      .onFocusChanged(({ payload: focused }) => {
-        // Hover highlights only while this window is the active one (like other Mac / Windows apps).
-        document.documentElement.dataset.window = focused ? "active" : "inactive";
-        // Devices: read the other computers' lists again (some drives don't announce changes).
-        if (focused) void devicesRefresh().catch(() => {});
-        const last = scannedAtRef.current;
-        if (focused && (last === null || Date.now() - last > FOCUS_RESCAN_MS)) rescan(false);
-      })
-      .then((u) => (unlisten = u))
-      .catch(() => {});
-    return () => unlisten?.();
-  }, [rescan]);
+  useTauriListener<Event<boolean>>(
+    (cb) => getCurrentWindow().onFocusChanged(cb),
+    ({ payload: focused }) => {
+      // Hover highlights only while this window is the active one (like other Mac / Windows apps).
+      document.documentElement.dataset.window = focused ? "active" : "inactive";
+      // Devices: read the other computers' lists again (some drives don't announce changes).
+      if (focused) void devicesRefresh().catch(() => {});
+      const last = scannedAtRef.current;
+      if (focused && (last === null || Date.now() - last > FOCUS_RESCAN_MS)) rescan(false);
+    },
+  );
 
   const projects = useMemo(() => list?.projects ?? [], [list]);
   const selectedRow = projects.find((p) => p.key === selected) ?? null;
@@ -334,13 +330,10 @@ export default function Main() {
   // waiting list changes.
   const [resolveInfo, setResolveInfo] = useState<{ key: string; r: ProjectResolve | null } | null>(null);
   const [resolveTick, setResolveTick] = useState(0);
-  useEffect(() => {
-    let unlisten: (() => void) | undefined;
-    listen("resolve-changed", () => setResolveTick((n) => n + 1))
-      .then((u) => (unlisten = u))
-      .catch(() => {});
-    return () => unlisten?.();
-  }, []);
+  useTauriListener(
+    (cb) => listen("resolve-changed", cb),
+    () => setResolveTick((n) => n + 1),
+  );
   const readable = !!selectedRow && !selectedRow.device && !selectedRow.error;
   useEffect(() => {
     if (!selectedKey || !readable) return;
@@ -450,7 +443,7 @@ export default function Main() {
   );
 
   const showContextMenu = useCallback(
-    async (r: ProjectRow) => {
+    async (r: ProjectRow, option = false) => {
       const canStatus = !r.error && !r.offline && !r.archived && (r.device ? true : r.paths.length === 1);
       const canArchive =
         archiveOn && !r.error && !r.offline && !r.device && r.paths.length === 1 && (r.archived || isDone(r));
@@ -459,12 +452,18 @@ export default function Main() {
       const path = r.device?.path ?? r.paths[0] ?? "";
       try {
         await popupMenu([
-            { text: "Open", enabled: here, action: () => void open(r) },
-            {
-              text: `Show in ${fileManager()}`,
-              enabled: here,
-              action: () => void reveal(r),
-            },
+            // Mac (Bernard, 2026-10-22): one item, Open; ⌥-right-click gives Show in Finder instead
+            // (both are in the File menu). Windows lists both, like File Explorer.
+            ...(isMac()
+              ? [
+                  option
+                    ? { text: "Show in Finder", enabled: here, action: () => void reveal(r) }
+                    : { text: "Open", enabled: here, action: () => void open(r) },
+                ]
+              : [
+                  { text: "Open", enabled: here, action: () => void open(r) },
+                  { text: `Show in ${fileManager()}`, enabled: here, action: () => void reveal(r) },
+                ]),
             { item: "Separator" },
             { text: "Copy path", enabled: path !== "", action: () => void copy(path, "path") },
             {
@@ -569,35 +568,21 @@ export default function Main() {
   useEffect(() => trackFocusArea(), []);
 
   // Menu bar commands, sent to this window only (lib.rs brings it forward first). Listened to
-  // once, through a ref: re-listening whenever runMenu changed (a refresh when the window comes
-  // forward gives a new selected row) left a gap where a menu click was lost.
-  const runMenuRef = useRef(runMenu);
-  useEffect(() => {
-    runMenuRef.current = runMenu;
-  }, [runMenu]);
-  useEffect(() => {
-    let unlisten: (() => void) | undefined;
-    let gone = false;
-    listenHere<string>("menu", (e) => runMenuRef.current(e.payload))
-      .then((u) => (gone ? u() : (unlisten = u)))
-      .catch(() => {});
-    return () => {
-      gone = true;
-      unlisten?.();
-    };
-  }, []);
+  // once, through useTauriListener (it calls the latest runMenu): re-listening whenever runMenu changed
+  // (a refresh when the window comes forward gives a new selected row) left a gap where a menu click was lost.
+  useTauriListener<Event<string>>(
+    (cb) => listenHere<string>("menu", cb),
+    (e) => runMenu(e.payload),
+  );
 
   // Menu bar / notification area icon (tray.rs): "New Project…" and "New from ›".
-  useEffect(() => {
-    let unlisten: (() => void) | undefined;
-    listen<string | null>("open-new-project", (e) => {
+  useTauriListener<Event<string | null>>(
+    (cb) => listen<string | null>("open-new-project", cb),
+    (e) => {
       setSheetTemplate(e.payload ?? undefined);
       setSheetOpen(true);
-    })
-      .then((u) => (unlisten = u))
-      .catch(() => {});
-    return () => unlisten?.();
-  }, []);
+    },
+  );
   // An update never installs by itself while the sheet is open (tray.rs).
   useEffect(() => {
     setNewProjectOpen(sheetOpen).catch(() => {});
@@ -868,7 +853,7 @@ export default function Main() {
               onSort={onSort}
               onSelect={setSelected}
               onOpen={(r) => void open(r)}
-              onContextMenu={(r) => void showContextMenu(r)}
+              onContextMenu={(r, option) => void showContextMenu(r, option)}
             />
           </div>
         ) : (

@@ -1,5 +1,7 @@
 import { useEffect, useState } from "react";
-import { getCurrentWebview } from "@tauri-apps/api/webview";
+import { getCurrentWebview, type DragDropEvent } from "@tauri-apps/api/webview";
+import type { Event } from "@tauri-apps/api/event";
+import { useTauriListener } from "../lib/useTauriListener";
 import Icon from "../components/Icon";
 import { Button } from "../components/ui";
 import {
@@ -39,26 +41,22 @@ export default function FirstRun({ onDone }: { onDone: () => void }) {
   }, []);
 
   // A folder dropped anywhere on the window counts, on the second screen.
-  useEffect(() => {
-    if (step !== "template") return;
-    let unlisten: (() => void) | undefined;
-    getCurrentWebview()
-      .onDragDropEvent((e) => {
-        const t = e.payload.type;
-        if (t === "enter" || t === "over") setOver(true);
-        else if (t === "leave") setOver(false);
-        else if (t === "drop") {
-          setOver(false);
-          if (e.payload.paths.length > 0) {
-            setError(null);
-            setTemplate(e.payload.paths[0]);
-          }
+  useTauriListener<Event<DragDropEvent>>(
+    (cb) => getCurrentWebview().onDragDropEvent(cb),
+    (e) => {
+      const t = e.payload.type;
+      if (t === "enter" || t === "over") setOver(true);
+      else if (t === "leave") setOver(false);
+      else if (t === "drop") {
+        setOver(false);
+        if (e.payload.paths.length > 0) {
+          setError(null);
+          setTemplate(e.payload.paths[0]);
         }
-      })
-      .then((u) => (unlisten = u))
-      .catch(() => {});
-    return () => unlisten?.();
-  }, [step]);
+      }
+    },
+    step === "template",
+  );
 
   const tryFolder = (p: Promise<FolderInfo | null>) =>
     p.then((f) => f && setFolder(f)).catch((e) => setError(errorMessage(e)));
