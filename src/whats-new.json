@@ -1,4 +1,12 @@
 {
+  "0.7.2": [
+    "Nest now uses your system's accent colour, and switches to blue wherever your colour would be hard to read",
+    "Settings → Shortcuts: see every shortcut, click to change it, and Nest asks before swapping keys that are already used",
+    "Help → Keyboard Shortcuts opens that list (Windows: F1 or ?)",
+    "Mac: File → Open (⌘O), Show in Finder and Copy Path (⌥⌘C); View → Show/Hide Sidebar (⌃⌘S); Window → Nest (⌘0) brings the window back",
+    "Mac: selected rows look like Finder's, and only the part you're working in is coloured",
+    "Easier with the keyboard and screen readers: clear focus on selected rows, key names read out, Windows High Contrast works"
+  ],
   "0.7.1": [
     "Resolve: a project with no client goes into a folder named after its space (e.g. Personal), never loose at the top",
     "Mac: Open at login now shows as Nest under Login Items, and Nest offers to move itself to Applications if you opened it from the download",
