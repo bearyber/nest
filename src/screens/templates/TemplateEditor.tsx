@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { Menu } from "@tauri-apps/api/menu";
+import { popupMenu, type PopupItem } from "../../lib/popupMenu";
 import { getCurrentWebview } from "@tauri-apps/api/webview";
 import { Button } from "../../components/ui";
 import {
@@ -409,15 +409,12 @@ export default function TemplateEditor({ sourceKey, mode, start, note, onClose, 
   /** "+ Add a file": your own, or the one ready-made file. */
   const addFileMenu = async (into: string) => {
     try {
-      const m = await Menu.new({
-        items: [
+      await popupMenu([
           { text: "Your own file…", action: () => void addFiles(into, null) },
           { text: "Project info (job code, client, project, dates)", action: () => void addProjectInfo(into) },
           { item: "Separator" },
           { text: "Tip: you can also drag files here from Finder or File Explorer", enabled: false },
-        ],
-      });
-      await m.popup();
+      ]);
     } catch (e) {
       console.warn("Add a file: menu didn't open", e);
       void addFiles(into, null);
@@ -538,8 +535,7 @@ export default function TemplateEditor({ sourceKey, mode, start, note, onClose, 
     const ticks = draft.fields.filter((f) => f.type === "bool");
     const picks = draft.fields.filter((f) => f.type === "multi");
     const path = id === ROOT ? "" : (at?.path ?? "");
-    type Item = { text: string; action?: () => void; enabled?: boolean } | { item: "Separator" } | { text: string; items: Item[] };
-    let items: Item[];
+    let items: PopupItem[];
     if (isFile) {
       items = [
         { text: "Rename", action: () => startRename(id) },
@@ -583,8 +579,7 @@ export default function TemplateEditor({ sourceKey, mode, start, note, onClose, 
       }
     }
     try {
-      const m = await Menu.new({ items: items as Parameters<typeof Menu.new>[0] extends { items?: infer I } ? I : never });
-      await m.popup();
+      await popupMenu(items);
     } catch (e) {
       console.warn("Right-click menu didn't open", e);
     }

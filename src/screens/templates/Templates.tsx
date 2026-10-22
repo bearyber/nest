@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { listen } from "@tauri-apps/api/event";
 import { getCurrentWebview } from "@tauri-apps/api/webview";
-import { Menu } from "@tauri-apps/api/menu";
+import { popupMenu } from "../../lib/popupMenu";
 import { Button, IconButton } from "../../components/ui";
 import {
   dropKinds,
@@ -215,11 +215,7 @@ export default function Templates({ run, onNewProject }: Props) {
 
   const templateMenu = async (t: TemplateInfo) => {
     try {
-      // No ids on right-click items: Tauri makes each one unique. A fixed id ("open") was shared with
-      // the last right-click menu, whose clean-up then took this menu's actions away (they did nothing),
-      // and one matching a menu bar item ("copy-path") ran the menu bar's command instead.
-      const menu = await Menu.new({
-        items: [
+      await popupMenu([
           {
             text: "New project from this",
             enabled: !!onNewProject && !t.hidden,
@@ -244,9 +240,7 @@ export default function Templates({ run, onNewProject }: Props) {
             : []),
           { item: "Separator" as const },
           { text: t.builtIn ? "Remove" : "Remove…", action: () => void remove(t) },
-        ],
-      });
-      await menu.popup();
+      ]);
     } catch {
       /* the menu couldn't open: nothing to do */
     }
@@ -257,8 +251,7 @@ export default function Templates({ run, onNewProject }: Props) {
     try {
       // Start empty, or from a copy of any template you have (e.g. Grading: MV → a short-film one).
       const copies = listed.filter((t) => t.id !== "blank");
-      const menu = await Menu.new({
-        items: [
+      await popupMenu([
           {
             text: "Start empty",
             enabled: !!blank,
@@ -272,9 +265,7 @@ export default function Templates({ run, onNewProject }: Props) {
               action: () => void open("new", t.key),
             })),
           },
-        ],
-      });
-      await menu.popup();
+      ]);
     } catch {
       /* the menu couldn't open: nothing to do */
     }

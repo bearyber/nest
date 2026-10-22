@@ -50,13 +50,10 @@ vi.mock("../../lib/commands", () => ({
 
 type MenuItem = { id?: string; text?: string; action?: () => void; items?: MenuItem[] };
 let menuItems: MenuItem[] = [];
-vi.mock("@tauri-apps/api/menu", () => ({
-  Menu: {
-    new: vi.fn(async (opts: { items: MenuItem[] }) => {
-      menuItems = opts.items;
-      return { popup: async () => {} };
-    }),
-  },
+vi.mock("../../lib/popupMenu", () => ({
+  popupMenu: vi.fn(async (items: MenuItem[]) => {
+    menuItems = items;
+  }),
 }));
 vi.mock("@tauri-apps/api/event", () => ({ listen: async () => () => {} }));
 type DropEvent = { payload: { type: string; paths: string[] } };

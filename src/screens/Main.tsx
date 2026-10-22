@@ -1,7 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { getVersion } from "@tauri-apps/api/app";
 import { listen } from "@tauri-apps/api/event";
-import { Menu } from "@tauri-apps/api/menu";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { setNewProjectOpen } from "../lib/commands";
 import Icon from "../components/Icon";
@@ -46,6 +45,7 @@ import { fileManager, isMac } from "../lib/platform";
 import { hasOpenDialog } from "../lib/dialogStack";
 import { findShortcut, listenHere, type ShortcutId } from "../lib/shortcuts";
 import { isListKey } from "../lib/listKeys";
+import { popupMenu } from "../lib/popupMenu";
 import { trackFocusArea } from "../lib/focusArea";
 import { createdMessage, toastForNotice } from "../lib/resolve";
 import {
@@ -458,11 +458,7 @@ export default function Main() {
       const here = !r.offline && !r.device;
       const path = r.device?.path ?? r.paths[0] ?? "";
       try {
-        // No ids on right-click items: Tauri makes each one unique. A fixed id ("open") was shared with
-        // the last right-click menu, whose clean-up then took this menu's actions away (they did nothing),
-        // and one matching a menu bar item ("copy-path") ran the menu bar's command instead.
-        const menu = await Menu.new({
-          items: [
+        await popupMenu([
             { text: "Open", enabled: here, action: () => void open(r) },
             {
               text: `Show in ${fileManager()}`,
@@ -491,9 +487,7 @@ export default function Main() {
                   },
                 ]
               : []),
-          ],
-        });
-        await menu.popup();
+          ]);
       } catch (e) {
         fail(e);
       }

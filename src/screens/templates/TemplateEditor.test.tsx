@@ -35,7 +35,7 @@ vi.mock("../../lib/commands", () => ({
   editorAddFiles: vi.fn(),
   editorAddTextFile: (key: string, into: string, name: string, contents: string) => addText(key, into, name, contents),
 }));
-vi.mock("@tauri-apps/api/menu", () => ({ Menu: { new: (opts: MenuOpts) => menuNew(opts) } }));
+vi.mock("../../lib/popupMenu", () => ({ popupMenu: (items: MenuOpts["items"]) => menuNew({ items }) }));
 vi.mock("@tauri-apps/api/webview", () => ({
   getCurrentWebview: () => ({ onDragDropEvent: async () => () => {} }),
 }));
