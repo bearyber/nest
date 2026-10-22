@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { listen } from "@tauri-apps/api/event";
 import { useTauriListener } from "../../lib/useTauriListener";
 import { Button, PathText } from "../../components/ui";
@@ -9,23 +9,38 @@ import {
   devicesEnable,
   devicesForget,
   devicesPickFolder,
+  devicesSetName,
   devicesSetSyncTemplates,
   devicesView,
+  setCodeSettings,
 } from "../../lib/commands";
 import { isMac } from "../../lib/platform";
 import { ago, isFresh } from "../../lib/search";
 import type { DevicesView, OtherComputer, SyncedFolder } from "../../lib/types";
 import type { TabProps } from "../Settings";
+import { Warning, computersWithLetter, previewCode, yourComputers } from "./CodesTab";
 import styles from "./settings.module.css";
 
-/** Devices (spec §12a #16): see which of your computers has which project, through a folder
+/** Computers: this computer's name and job-code letter (always editable, sharing or not), then
+ *  Devices (spec §12a #16): see which of your computers has which project, through a folder
  *  your cloud app (Google Drive…) or NAS already syncs. */
-export default function DevicesTab({ run }: TabProps) {
+export default function DevicesTab({ view: settingsView, run, focusLetter }: TabProps) {
+  const st = settingsView.settings;
   const [view, setView] = useState<DevicesView | null>(null);
   const [found, setFound] = useState<SyncedFolder[] | null>(null);
   const [name, setName] = useState("");
   const [folder, setFolder] = useState<string | null>(null);
   const [custom, setCustom] = useState<string | null>(null);
+  const [letter, setLetter] = useState(st.localMarker);
+  /** "Keep W": the warning for that letter stays quiet until the letter changes. */
+  const [kept, setKept] = useState<string | null>(null);
+  // The saved letter changed (saved here, or by the same-letter note): the box follows it.
+  const [seenMarker, setSeenMarker] = useState(st.localMarker);
+  if (seenMarker !== st.localMarker) {
+    setSeenMarker(st.localMarker);
+    setLetter(st.localMarker);
+  }
+  const letterBox = useRef<HTMLInputElement>(null);
 
   const load = useCallback(
     () =>
@@ -40,18 +55,25 @@ export default function DevicesTab({ run }: TabProps) {
   );
 
   useEffect(() => {
-    void load();
     devicesDetect()
       .then((f) => {
         setFound(f);
         setFolder((cur) => cur ?? f[0]?.path ?? null);
       })
       .catch(() => setFound([]));
-  }, [load]);
+  }, []);
   useTauriListener(
     (cb) => listen("devices-changed", cb),
     () => void load(),
   );
+  useEffect(() => {
+    void load();
+  }, [st.localMarker, load]);
+  // Opened by the same-letter note: the cursor goes to the letter.
+  const ready = view !== null;
+  useEffect(() => {
+    if (focusLetter && ready) letterBox.current?.focus();
+  }, [focusLetter, ready]);
 
   if (!view) return null;
   const thisOs = isMac() ? "macos" : "windows";
@@ -62,7 +84,33 @@ export default function DevicesTab({ run }: TabProps) {
       ? [{ label: "Current folder", path: view.folder }]
       : []),
   ];
-  const changed = name.trim() !== view.name || folder !== view.folder;
+  const changed = folder !== view.folder;
+
+  const trimmedName = name.trim();
+  const nameOk = trimmedName.length > 0 && trimmedName.length <= 40;
+  const letterProblem = letter.startsWith("J")
+    ? "J is kept for jobs from your job tracker, so a letter can't start with J. Pick another."
+    : letter.length > 2
+      ? `Older versions allowed "${letter}". Use 1 or 2 letters to save changes.`
+      : letter.length === 0
+        ? "Every computer needs one letter."
+        : null;
+  const nameChanged = trimmedName !== view.name;
+  const letterChanged = letter !== st.localMarker;
+  const takenBy = letterProblem ? [] : computersWithLetter(view.letters, letter);
+  const suggested = view.suggestedLetter;
+  const savedNote = (l: string) => `Saved. Your next code will look like ${previewCode(st.codePattern, "ACME", l, 4)}.`;
+  /** One button, one change: only the letter is saved (the name stays as typed). */
+  const saveLetter = (l: string) => run(setCodeSettings(st.codePattern, l, st.ownCode), savedNote(l));
+  const saveThisComputer = async () => {
+    if (nameChanged) {
+      const v = await run(devicesSetName(trimmedName), letterChanged ? undefined : "Saved.");
+      if (!v) return;
+      setView(v);
+      setName(v.name);
+    }
+    if (letterChanged) await saveLetter(letter);
+  };
 
   const pick = async () => {
     const p = await run(devicesPickFolder());
@@ -74,6 +122,97 @@ export default function DevicesTab({ run }: TabProps) {
 
   return (
     <>
+      <section className={styles.section} aria-labelledby="this-computer-title">
+        <h3 className={styles.sectionTitle} id="this-computer-title">
+          This computer
+        </h3>
+        <div className={styles.card}>
+          <div className={styles.field}>
+            <label className={styles.name} htmlFor="device-name">
+              Name
+            </label>
+            <input
+              id="device-name"
+              className={styles.input}
+              style={{ width: 240 }}
+              value={name}
+              maxLength={40}
+              aria-describedby="device-name-hint"
+              onChange={(e) => setName(e.target.value)}
+            />
+            <p className={styles.hint} id="device-name-hint">
+              Shown on your other computers, like “On {trimmedName || "Studio PC"}”.
+            </p>
+          </div>
+          <div className={styles.field}>
+            <label className={styles.name} htmlFor="marker">
+              Letter
+            </label>
+            <input
+              id="marker"
+              ref={letterBox}
+              className={`${styles.input} ${styles.codeInput}`}
+              value={letter}
+              maxLength={letter.length > 2 ? undefined : 2}
+              aria-describedby="marker-hint"
+              onChange={(e) => setLetter(e.target.value.toUpperCase().replace(/[^A-Z]/g, ""))}
+            />
+            <p className={styles.hint} id="marker-hint">
+              Every computer has its own letter, so two never make the same code. Use 1 or 2 letters, for example W on your
+              PC and M on your Mac. e.g.{" "}
+              <b className={styles.mono}>{previewCode(st.codePattern, "ACME", letter || "MB", 4)}</b>
+            </p>
+            <p className={styles.problem} role="status" hidden={!letterProblem}>
+              {letterProblem}
+            </p>
+            {!letterProblem && letterChanged && (
+              <p className={styles.hint}>
+                Your numbers carry on from the old letter ({st.localMarker}05 is followed by {letter}06). Nothing already made
+                is renamed.
+              </p>
+            )}
+            <Warning
+              text={
+                takenBy.length > 0 && kept !== letter
+                  ? `${letter} ${takenBy.some((l) => l.guessed) ? "seems to be used" : "is used"} by ${yourComputers(takenBy.map((l) => l.name))}.${suggested ? ` Use ${suggested} instead?` : ""}`
+                  : null
+              }
+            >
+              {suggested && (
+                <Button onClick={() => void saveLetter(suggested).then((r) => r !== undefined && setLetter(suggested))}>
+                  Use {suggested}
+                </Button>
+              )}
+              <Button onClick={() => setKept(letter)}>Keep {letter}</Button>
+            </Warning>
+            {!letterProblem && st.localMarker === "L" && letter === "L" && (
+              <p className={styles.note}>L was the old default. If another of your computers also uses L, change one of them.</p>
+            )}
+          </div>
+        </div>
+        <div className={styles.actions}>
+          <Button
+            variant="primary"
+            disabled={!nameOk || !!letterProblem || (!nameChanged && !letterChanged)}
+            onClick={() => void saveThisComputer()}
+          >
+            Save
+          </Button>
+          <Button
+            disabled={!nameChanged && !letterChanged}
+            onClick={() => {
+              setName(view.name);
+              setLetter(st.localMarker);
+            }}
+          >
+            Undo changes
+          </Button>
+        </div>
+      </section>
+
+      <hr className={styles.rule} />
+
+      <h3 className={styles.sectionTitle}>Share with your other computers</h3>
       <p className={styles.hint}>
         See which of your computers has which project. Each computer keeps a small list of its projects in a folder your
         cloud app already syncs (like Google Drive), and reads the others' lists from there. Nest never copies your
@@ -94,23 +233,6 @@ export default function DevicesTab({ run }: TabProps) {
           <span>Usually within a minute or two. Nest shows how fresh each list is.</span>
         </div>
       </div>
-
-      <section className={styles.section}>
-        <label className={styles.sectionTitle} htmlFor="device-name">
-          This computer's name
-        </label>
-        <div className={styles.actions}>
-          <input
-            id="device-name"
-            className={styles.input}
-            style={{ width: 240 }}
-            value={name}
-            maxLength={40}
-            onChange={(e) => setName(e.target.value)}
-          />
-        </div>
-        <p className={styles.hint}>Shown on your other computers, like “On {name.trim() || "Studio PC"}”.</p>
-      </section>
 
       <section className={styles.section}>
         <h3 className={styles.sectionTitle}>Synced folder</h3>
@@ -158,11 +280,11 @@ export default function DevicesTab({ run }: TabProps) {
       <div className={styles.actions}>
         <Button
           variant="primary"
-          disabled={!folder || !name.trim() || (view.enabled && !changed)}
+          disabled={!folder || (view.enabled && !changed)}
           onClick={async () => {
             if (!folder) return;
             const v = await run(
-              devicesEnable(name.trim(), folder),
+              devicesEnable(view.name, folder),
               view.enabled ? "Saved." : "Devices is on. Do the same on your other computers.",
             );
             if (v) setView(v);

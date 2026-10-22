@@ -34,7 +34,7 @@ pub struct SettingsWin {
 
 /// Tabs a request may name; anything else opens as usual.
 pub fn known_tab(tab: Option<&str>) -> Option<&str> {
-    tab.filter(|t| matches!(*t, "shortcuts" | "codes"))
+    tab.filter(|t| matches!(*t, "shortcuts" | "codes" | "computers"))
 }
 
 /// Show the window now? Only when someone asked and the page has drawn. Pure.
@@ -155,8 +155,8 @@ fn reveal(app: &AppHandle, w: &WebviewWindow) -> tauri::Result<()> {
     w.set_focus()
 }
 
-/// Open (or focus) Settings, on a tab: "shortcuts" (Help → Keyboard Shortcuts, F1) or "codes"
-/// (the note about two computers sharing a letter). Anything else opens as usual.
+/// Open (or focus) Settings, on a tab: "shortcuts" (Help → Keyboard Shortcuts, F1) or "computers"
+/// (the note about two computers sharing a letter; "codes" still works). Anything else opens as usual.
 pub fn open(app: &AppHandle, tab: Option<&str>) -> tauri::Result<()> {
     let tab = known_tab(tab);
     let Some(st) = state(app) else {
@@ -281,6 +281,7 @@ mod tests {
     fn only_known_tabs_are_passed_on() {
         assert_eq!(known_tab(Some("shortcuts")), Some("shortcuts"));
         assert_eq!(known_tab(Some("codes")), Some("codes"));
+        assert_eq!(known_tab(Some("computers")), Some("computers"));
         assert_eq!(known_tab(Some("about")), None);
         assert_eq!(known_tab(None), None);
     }

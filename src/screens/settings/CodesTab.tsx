@@ -38,7 +38,7 @@ export const CODE_STYLES = [
 /** A warning with its fix as buttons. The box and its `role="status"` sentence stay in place and
  *  only the words change (so typing a letter doesn't make a new element each time); the buttons
  *  are outside the status text so they aren't read out as part of it. */
-function Warning({ text, children }: { text: string | null; children?: ReactNode }) {
+export function Warning({ text, children }: { text: string | null; children?: ReactNode }) {
   return (
     <div className={styles.warning} hidden={!text}>
       <span role="status">{text}</span>
@@ -87,25 +87,17 @@ const INSERTS = [
 
 /** Job codes, in plain words: a live example, a few styles, the letter for this computer and the
  *  code for personal jobs. The raw pattern lives under Advanced. */
-export default function CodesTab({ view, run }: TabProps) {
+export default function CodesTab({ view, run, goTo }: TabProps) {
   const s = view.settings;
   const [pattern, setPattern] = useState(s.codePattern);
-  const [marker, setMarker] = useState(s.localMarker);
   const [own, setOwn] = useState(s.ownCode);
   const isStyle = CODE_STYLES.some((c) => c.pattern === pattern);
   const [advanced, setAdvanced] = useState(!isStyle);
-  const changed = pattern !== s.codePattern || marker !== s.localMarker || own !== s.ownCode;
-  const letter = marker || "?";
+  const changed = pattern !== s.codePattern || own !== s.ownCode;
+  // The letter is set in Computers; here it is only shown.
+  const letter = s.localMarker || "?";
   const parts = codeParts(pattern, "ACME", letter, 4);
   const noClient = s.noClientSpaces[0] ?? "Personal";
-  const markerProblem =
-    marker.startsWith("J")
-      ? "J is kept for jobs from your job tracker, so a letter can't start with J. Pick another."
-      : marker.length > 2
-        ? `Older versions allowed "${marker}". Use 1 or 2 letters to save changes.`
-        : marker.length === 0
-          ? "Every computer needs one letter."
-          : null;
   const patternProblem = pattern.trim() ? null : "The format can't be empty.";
 
   // Your other computers' letters (Devices must be on to know them).
@@ -118,13 +110,9 @@ export default function CodesTab({ view, run }: TabProps) {
     (cb) => listen("devices-changed", cb),
     () => void loadDevices(),
   );
-  /** "Keep W": the warning for that letter stays quiet until the letter changes. */
-  const [kept, setKept] = useState<string | null>(null);
-  const takenBy = markerProblem ? [] : computersWithLetter(dev?.letters ?? [], marker);
-  const suggested = dev?.suggestedLetter ?? "";
   const devicesOn = dev?.enabled === true;
   const noLetter = devicesOn && !patternProblem && !pattern.includes("{marker}");
-  const separator = patternProblem ? null : separatorWarning(pattern, marker);
+  const separator = patternProblem ? null : separatorWarning(pattern, s.localMarker);
   /** One button, one change: only what the warning is about is saved (other edits stay as typed). */
   const saveOne = (p: string, m: string) =>
     run(setCodeSettings(p, m, s.ownCode), `Saved. Your next code will look like ${previewCode(p, "ACME", m, 4)}.`);
@@ -202,47 +190,14 @@ export default function CodesTab({ view, run }: TabProps) {
             </p>
           </div>
           <div className={styles.field}>
-            <label className={styles.name} htmlFor="marker">
-              Letter for this computer
-            </label>
-            <input
-              id="marker"
-              className={`${styles.input} ${styles.codeInput}`}
-              value={marker}
-              maxLength={marker.length > 2 ? undefined : 2}
-              aria-describedby="marker-hint"
-              onChange={(e) => setMarker(e.target.value.toUpperCase().replace(/[^A-Z]/g, ""))}
-            />
-            <p className={styles.hint} id="marker-hint">
-              Each of your computers needs its own letter, so two computers never make the same code. Use 1 or 2 letters,
-              and a different one on each (for example W on your PC, M on your Mac).
-            </p>
-            {markerProblem && <p className={styles.problem}>{markerProblem}</p>}
-            {!markerProblem && marker !== s.localMarker && (
-              <p className={styles.hint}>
-                Your numbers carry on from the old letter ({s.localMarker}05 is followed by {marker}06). Nothing already
-                made is renamed.
-              </p>
-            )}
-            <Warning
-              text={
-                takenBy.length > 0 && kept !== marker
-                  ? `${marker} ${takenBy.some((l) => l.guessed) ? "seems to be used" : "is used"} by ${yourComputers(takenBy.map((l) => l.name))}.${suggested ? ` Use ${suggested} instead?` : ""}`
-                  : null
-              }
-            >
-              {suggested && (
-                <Button onClick={() => void saveOne(s.codePattern, suggested).then((r) => r !== undefined && setMarker(suggested))}>
-                  Use {suggested}
-                </Button>
+            <p className={styles.hint}>
+              This computer's letter: <b className={styles.mono}>{letter}</b>{" "}
+              {goTo && (
+                <button type="button" className={styles.linkish} onClick={() => goTo("computers")}>
+                  Change in Computers
+                </button>
               )}
-              <Button onClick={() => setKept(marker)}>Keep {marker}</Button>
-            </Warning>
-            {!markerProblem && s.localMarker === "L" && marker === "L" && (
-              <p className={styles.note}>
-                L was the old default. If another of your computers also uses L, change one of them.
-              </p>
-            )}
+            </p>
           </div>
           <div className={styles.field}>
             <label className={styles.name} htmlFor="own">
@@ -294,8 +249,8 @@ export default function CodesTab({ view, run }: TabProps) {
       <div className={styles.actions}>
         <Button
           variant="primary"
-          disabled={!changed || !!markerProblem || !!patternProblem}
-          onClick={() => run(setCodeSettings(pattern, marker, own), `Saved. Your next code will look like ${previewCode(pattern, "ACME", marker, 4)}.`)}
+          disabled={!changed || !!patternProblem}
+          onClick={() => run(setCodeSettings(pattern, s.localMarker, own), `Saved. Your next code will look like ${previewCode(pattern, "ACME", s.localMarker, 4)}.`)}
         >
           Save
         </Button>
@@ -303,7 +258,6 @@ export default function CodesTab({ view, run }: TabProps) {
           disabled={!changed}
           onClick={() => {
             setPattern(s.codePattern);
-            setMarker(s.localMarker);
             setOwn(s.ownCode);
             setAdvanced(!CODE_STYLES.some((c) => c.pattern === s.codePattern));
           }}

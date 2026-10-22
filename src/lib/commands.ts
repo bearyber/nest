@@ -107,7 +107,7 @@ const s = <T,>(cmd: string, args?: Record<string, unknown>) => invoke<T>(cmd, ar
 
 export const getSettings = () => s<SettingsView>("get_settings");
 /** `tab: "shortcuts"` opens Settings on the Shortcuts tab. */
-export const openSettings = (tab?: "shortcuts" | "codes") => s<void>("open_settings", { tab });
+export const openSettings = (tab?: "shortcuts" | "codes" | "computers") => s<void>("open_settings", { tab });
 export const addJobsRoot = () => s<SettingsView | null>("add_jobs_root");
 export const removeJobsRoot = (path: string) => s<SettingsView>("remove_jobs_root", { path });
 export const moveJobsRoot = (path: string, to: number) => s<SettingsView>("move_jobs_root", { path, to });
@@ -203,6 +203,7 @@ export const devicesForget = (deviceId: string, forget: boolean) =>
 /** "Keep W": the same-letter note stays quiet until that situation (this letter + these computers) changes. */
 export const keepLetterClash = (key: string) => s<DevicesView>("keep_letter_clash", { key });
 export const devicesNameCopied = (name: string) => s<DevicesView>("devices_name_copied", { name });
+export const devicesSetName = (name: string) => s<DevicesView>("devices_set_name", { name });
 export const devicesClaim = (deviceId: string) => s<DevicesView>("devices_claim", { deviceId });
 export const devicesRefresh = () => invoke<void>("devices_refresh");
 export const devicesSetSyncTemplates = (on: boolean) => s<DevicesView>("devices_set_sync_templates", { on });

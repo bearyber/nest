@@ -204,6 +204,7 @@ pub fn run() {
             devices_cmd::devices_forget,
             devices_cmd::devices_claim,
             devices_cmd::devices_name_copied,
+            devices_cmd::devices_set_name,
             devices_cmd::keep_letter_clash,
             devices_cmd::devices_refresh,
             devices_cmd::devices_set_sync_templates,

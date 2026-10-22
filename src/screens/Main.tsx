@@ -857,7 +857,7 @@ export default function Main() {
             clash={letterClash}
             letter={devices?.thisLetter ?? ""}
             mac={isMac()}
-            onChange={() => void openSettings("codes").catch(fail)}
+            onChange={() => void openSettings("computers").catch(fail)}
             onKeep={() => void keepLetterClash(letterClashKey).then(setDevices).catch(fail)}
             onLater={() => setLetterLater(letterClashKey)}
           />

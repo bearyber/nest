@@ -12,8 +12,8 @@ export function letterNoteText(clash: ComputerLetter[], letter: string, mac: boo
 }
 
 /** Shown when another of your computers makes job codes with the same letter as this one.
- *  Nothing changes by itself: "Change letter…" opens Settings → Job codes with a free letter
- *  suggested; "Keep W" remembers (in settings) that this is fine until the situation changes;
+ *  Nothing changes by itself: "Change letter…" opens Settings → Computers (the letter field has
+ *  the cursor, with a free letter suggested); "Keep W" remembers (in settings) that this is fine until the situation changes;
  *  "Not now" hides it until Nest restarts. It stays mounted while the situation lasts (the
  *  parent never re-creates it), and only the sentence is a live region, so it is read out once. */
 export default function LetterNote({

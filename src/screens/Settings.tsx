@@ -19,27 +19,32 @@ import styles from "./settings/settings.module.css";
 /** Sent by Rust when the window is closed (hidden). */
 const RESET_EVENT = "settings-reset";
 
-type Tab = "general" | "codes" | "spaces" | "kits" | "devices" | "appearance" | "shortcuts" | "about";
+type Tab = "general" | "codes" | "spaces" | "kits" | "computers" | "appearance" | "shortcuts" | "about";
 
 const TABS: { id: Tab; label: string }[] = [
   { id: "general", label: "General" },
   { id: "codes", label: "Job codes" },
   { id: "spaces", label: "Spaces" },
   { id: "kits", label: "Client files" },
-  { id: "devices", label: "Devices" },
+  { id: "computers", label: "Computers" },
   { id: "appearance", label: "Appearance" },
   { id: "shortcuts", label: "Shortcuts" },
   { id: "about", label: "About" },
 ];
 
-/** The tab a window opens on: Help → Keyboard Shortcuts, or the "same letter" note's button. */
+/** The tab a window opens on: Help → Keyboard Shortcuts, or the "same letter" note's button
+ *  (Computers, with the letter field focused). */
 export function startTab(name: string | null): Tab {
-  return name === "shortcuts" || name === "codes" ? name : "general";
+  return name === "shortcuts" || name === "codes" || name === "computers" ? name : "general";
 }
 
 /** What each tab gets: the current settings and a way to run a change. */
 export interface TabProps {
   view: SettingsView;
+  /** Switch to another tab (the "Change in Computers" link). */
+  goTo?: (tab: "computers") => void;
+  /** Put the cursor in the letter field when the Computers tab shows (the same-letter note's button). */
+  focusLetter?: boolean;
   /** Run a settings command; shows its error, keeps the returned settings. */
   run: <T>(p: Promise<T>, ok?: string) => Promise<T | undefined>;
 }
@@ -49,6 +54,8 @@ export default function Settings() {
   const [view, setView] = useState<SettingsView | null>(null);
   // Help → Keyboard Shortcuts / F1 open the window on the Shortcuts tab (?tab=shortcuts).
   const [tab, setTab] = useState<Tab>(() => startTab(new URLSearchParams(window.location.search).get("tab")));
+  // Opened on Computers by a request (not by clicking the tab): the letter field gets the cursor.
+  const [focusLetter, setFocusLetter] = useState(() => new URLSearchParams(window.location.search).get("tab") === "computers");
   // Bumped when the window is closed (hidden): everything inside starts fresh next time.
   const [epoch, setEpoch] = useState(0);
   const [message, setMessage] = useState<{
@@ -95,8 +102,9 @@ export default function Settings() {
   useTauriListener<Event<string>>(
     (cb) => listen<string>("settings-tab", cb),
     (e) => {
-      if (e.payload === "shortcuts" || e.payload === "codes") {
+      if (e.payload === "shortcuts" || e.payload === "codes" || e.payload === "computers") {
         setTab(e.payload);
+        setFocusLetter(e.payload === "computers");
         setMessage(null);
       }
     },
@@ -107,6 +115,7 @@ export default function Settings() {
     (cb) => listen(RESET_EVENT, cb),
     () => {
       setTab("general");
+      setFocusLetter(false);
       setMessage(null);
       setEpoch((n) => n + 1);
     },
@@ -139,6 +148,12 @@ export default function Settings() {
     }
   }, []);
 
+  const goTo = useCallback((t: "computers") => {
+    setTab(t);
+    setFocusLetter(false);
+    setMessage(null);
+  }, []);
+
   return (
     <div className={styles.window}>
       <nav className={styles.nav} aria-label="Settings sections">
@@ -151,6 +166,7 @@ export default function Settings() {
             aria-current={tab === t.id ? "page" : undefined}
             onClick={() => {
               setTab(t.id);
+              setFocusLetter(false);
               setMessage(null);
             }}
           >
@@ -175,10 +191,10 @@ export default function Settings() {
           {message && !message.error && <div className={styles.note}>{message.text}</div>}
         </div>
         {view && tab === "general" && <GeneralTab view={view} run={run} />}
-        {view && tab === "codes" && <CodesTab view={view} run={run} />}
+        {view && tab === "codes" && <CodesTab view={view} run={run} goTo={goTo} />}
         {view && tab === "spaces" && <SpacesTab view={view} run={run} />}
         {view && tab === "kits" && <KitsTab view={view} run={run} />}
-        {view && tab === "devices" && <DevicesTab view={view} run={run} />}
+        {view && tab === "computers" && <DevicesTab view={view} run={run} focusLetter={focusLetter} />}
         {view && tab === "appearance" && <AppearanceTab view={view} run={run} />}
         {view && tab === "shortcuts" && <ShortcutsTab view={view} run={run} />}
         {view && tab === "about" && <AboutTab view={view} run={run} />}

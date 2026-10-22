@@ -532,3 +532,9 @@
 .ask span {
   flex: 1;
 }
+
+.rule {
+  margin: var(--space-4) 0;
+  border: none;
+  border-top: var(--hairline) solid var(--separator);
+}

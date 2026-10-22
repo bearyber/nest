@@ -20,8 +20,12 @@ vi.mock("../lib/theme", () => ({ applyTheme: vi.fn() }));
 // The tabs themselves are tested on their own.
 vi.mock("./settings/AboutTab", () => ({ default: () => null }));
 vi.mock("./settings/AppearanceTab", () => ({ default: () => null }));
-vi.mock("./settings/CodesTab", () => ({ default: () => null }));
-vi.mock("./settings/DevicesTab", () => ({ default: () => null }));
+vi.mock("./settings/CodesTab", () => ({
+  default: ({ goTo }: { goTo?: (t: "computers") => void }) => <button onClick={() => goTo?.("computers")}>Change in Computers</button>,
+}));
+vi.mock("./settings/DevicesTab", () => ({
+  default: ({ focusLetter }: { focusLetter?: boolean }) => <div data-testid="computers" data-focus={String(!!focusLetter)} />,
+}));
 vi.mock("./settings/GeneralTab", () => ({ default: () => null }));
 vi.mock("./settings/KitsTab", () => ({ default: () => null }));
 vi.mock("./settings/SpacesTab", () => ({ default: () => null }));
@@ -45,10 +49,26 @@ describe("Settings", () => {
     expect(screen.getByRole("button", { name: "General" }).getAttribute("aria-current")).toBe("page");
   });
 
+  it("the Job codes link switches to Computers", async () => {
+    render(<Settings />);
+    fireEvent.click(await screen.findByRole("button", { name: "Job codes" }));
+    fireEvent.click(screen.getByRole("button", { name: "Change in Computers" }));
+    expect(screen.getByRole("button", { name: "Computers" }).getAttribute("aria-current")).toBe("page");
+    expect(screen.getByTestId("computers").getAttribute("data-focus")).toBe("false");
+  });
+
+  it("a request for Computers (the same-letter note) asks for the letter to be focused", async () => {
+    render(<Settings />);
+    await screen.findByRole("button", { name: "General" });
+    await vi.waitFor(() => expect(handlers.has("settings-tab")).toBe(true));
+    act(() => handlers.get("settings-tab")?.({ payload: "computers" }));
+    expect(screen.getByTestId("computers").getAttribute("data-focus")).toBe("true");
+  });
+
   it("has no DaVinci Resolve tab: Resolve is set up in each template", async () => {
     render(<Settings />);
     expect(await screen.findByRole("button", { name: "General" })).toBeTruthy();
-    expect(screen.getByRole("button", { name: "Devices" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Computers" })).toBeTruthy();
     expect(screen.queryByRole("button", { name: /Resolve/ })).toBeNull();
   });
 
@@ -77,7 +97,8 @@ describe("Settings", () => {
 });
 
 describe("startTab", () => {
-  it("opens on Job codes for the same-letter note's button, on Shortcuts for the help menu", () => {
+  it("opens on Computers for the same-letter note's button, on Shortcuts for the help menu", () => {
+    expect(startTab("computers")).toBe("computers");
     expect(startTab("codes")).toBe("codes");
     expect(startTab("shortcuts")).toBe("shortcuts");
     expect(startTab(null)).toBe("general");

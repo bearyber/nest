@@ -531,7 +531,7 @@ export interface OtherComputer {
   notDownloaded: boolean;
 }
 
-/** Settings → Devices (Rust `DevicesView`). */
+/** Settings → Computers (Rust `DevicesView`). */
 export interface DevicesView {
   enabled: boolean;
   deviceId: string | null;

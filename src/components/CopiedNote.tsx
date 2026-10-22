@@ -19,7 +19,7 @@ export function copiedLetterText(clash: ComputerLetter[], letter: string, mac: b
 
 /** Shown once, after Nest found this computer to be a copy and gave it its own id (nothing
  *  else changed by itself). Saving the name closes it. If the letter is the same as the
- *  original's, the same one-button suggestion as in Settings → Job codes is offered here. */
+ *  original's, the same one-button suggestion as in Settings → Computers is offered here. */
 export default function CopiedNote({
   initialName,
   mac,

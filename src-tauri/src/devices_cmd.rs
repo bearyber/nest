@@ -733,6 +733,20 @@ pub fn devices_name_copied(app: AppHandle, name: String) -> AppResult<DevicesVie
     view(&app.state::<AppState>())
 }
 
+/// Settings → Computers → This computer: save the name. Works with sharing off too (the name
+/// is kept in settings, and shared once sharing is on).
+#[tauri::command(async)]
+pub fn devices_set_name(app: AppHandle, name: String) -> AppResult<DevicesView> {
+    let name = clean_name(&name)?;
+    change(&app, |s| {
+        s.device_name = Some(name);
+        Ok(())
+    })?;
+    sync_now(&app);
+    let _ = app.emit(CHANGED_EVENT, ());
+    view(&app.state::<AppState>())
+}
+
 /// "Keep W" on the same-letter note: remember this situation (the letter and the computers
 /// sharing it, as the window worked it out) so the note stays quiet until it changes. Nothing
 /// else changes; an empty key forgets the choice.
