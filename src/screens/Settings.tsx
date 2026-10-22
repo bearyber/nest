@@ -142,11 +142,15 @@ export default function Settings() {
             {view.settingsError}
           </div>
         )}
-        {message && (
-          <div className={message.error ? styles.banner : styles.note} role={message.error ? "alert" : "status"}>
+        {message?.error && (
+          <div className={styles.banner} role="alert">
             {message.text}
           </div>
         )}
+        {/* Always there (empty), so a "saved" message put into it is announced. */}
+        <div role="status" aria-live="polite">
+          {message && !message.error && <div className={styles.note}>{message.text}</div>}
+        </div>
         {view && tab === "general" && <GeneralTab view={view} run={run} />}
         {view && tab === "codes" && <CodesTab view={view} run={run} />}
         {view && tab === "spaces" && <SpacesTab view={view} run={run} />}

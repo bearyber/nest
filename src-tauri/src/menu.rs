@@ -42,20 +42,37 @@ pub const CLOSE_WINDOW: &str = "close-window";
 pub const QUIT: &str = "quit";
 /// Help → Keyboard Shortcuts: opens Settings on the Shortcuts tab (Rust does it).
 pub const KEYBOARD_SHORTCUTS: &str = "keyboard-shortcuts";
+/// Window → Nest (⌘0): brings the main window back when it is closed or hidden. Not changeable.
+pub const SHOW_MAIN: &str = "show-main";
 
-/// While Settings → Shortcuts is recording a new key, the menu bar is empty so no menu key
-/// (⌘N, ⌘Q…) runs; the page gets the key press instead.
+/// While Settings → Shortcuts is recording a new key, the menu bar has no keys (same menu, no
+/// accelerators) so no menu key (⌘N, ⌘Q…) runs; the page gets the key press instead.
 static SUSPENDED: AtomicBool = AtomicBool::new(false);
-/// What `set_state` last said, so a rebuilt menu says the same.
-static LAST_STATE: Mutex<(bool, bool)> = Mutex::new((true, false));
+/// What `set_state` last said (sidebar shown, details shown, project selected), so a rebuilt
+/// menu says the same.
+static LAST_STATE: Mutex<(bool, bool, bool)> = Mutex::new((true, true, false));
 
 /// `custom`: the keys changed in Settings → Shortcuts; they replace the default accelerator
-/// written at each item below.
+/// written at each item below. A stored key that isn't safe (`shortcut_keys::usable`) is
+/// skipped: that shortcut keeps its default, and Nest still starts.
 pub fn build<R: Runtime>(
     app: &AppHandle<R>,
     custom: &BTreeMap<String, Combo>,
 ) -> tauri::Result<Menu<R>> {
+    build_with(app, custom, true)
+}
+
+/// `keys`: false = the same menu with no keys at all (while a new key is being recorded).
+fn build_with<R: Runtime>(
+    app: &AppHandle<R>,
+    custom: &BTreeMap<String, Combo>,
+    keys: bool,
+) -> tauri::Result<Menu<R>> {
+    let custom = shortcut_keys::usable(custom);
     let accel_of = |id: &str, default: Option<&str>| -> Option<String> {
+        if !keys {
+            return None;
+        }
         custom
             .get(id)
             .map(shortcut_keys::accelerator)
@@ -126,9 +143,10 @@ pub fn build<R: Runtime>(
             "Hide Sidebar",
             Some("Ctrl+CmdOrCtrl+S"),
         )?)
+        // "Show Details" when it's hidden (`set_state`).
         .item(&item(
             TOGGLE_INSPECTOR,
-            "Toggle Details",
+            "Hide Details",
             Some("CmdOrCtrl+Alt+I"),
         )?)
         .separator()
@@ -137,9 +155,20 @@ pub fn build<R: Runtime>(
 
     // The standard Window menu (macOS also lists the open windows in it), and the Help menu
     // (macOS adds its search box to it).
+    // "Nest" (⌘0) is a fixed key (not in the Shortcuts list), so it isn't written as `item(…)`.
+    let show_main = {
+        let b = MenuItemBuilder::with_id(SHOW_MAIN, "Nest");
+        if keys {
+            b.accelerator("CmdOrCtrl+0").build(app)?
+        } else {
+            b.build(app)?
+        }
+    };
     let window = SubmenuBuilder::new(app, "Window")
         .minimize()
         .maximize()
+        .separator()
+        .item(&show_main)
         .separator()
         .item(&PredefinedMenuItem::bring_all_to_front(app, None)?)
         .build()?;
@@ -157,16 +186,17 @@ pub fn build<R: Runtime>(
         .build()
 }
 
-/// Make the menu say what's true now: "Hide Sidebar" / "Show Sidebar", and Open / Show in Finder /
-/// Copy Path on only while a project on this computer is selected. Called by the page when either
-/// changes. No menu bar (Windows): nothing to do.
+/// Make the menu say what's true now: "Hide Sidebar" / "Show Sidebar", "Hide Details" / "Show
+/// Details", and Open / Show in Finder / Copy Path on only while a project on this computer is
+/// selected. Called by the page when any changes. No menu bar (Windows): nothing to do.
 pub fn set_state<R: Runtime>(
     app: &AppHandle<R>,
     sidebar_shown: bool,
+    inspector_shown: bool,
     project_selected: bool,
 ) -> tauri::Result<()> {
     if let Ok(mut last) = LAST_STATE.lock() {
-        *last = (sidebar_shown, project_selected);
+        *last = (sidebar_shown, inspector_shown, project_selected);
     }
     let Some(menu) = app.menu() else {
         return Ok(());
@@ -185,6 +215,11 @@ pub fn set_state<R: Runtime>(
                 } else {
                     "Show Sidebar"
                 })?,
+                TOGGLE_INSPECTOR => it.set_text(if inspector_shown {
+                    "Hide Details"
+                } else {
+                    "Show Details"
+                })?,
                 OPEN_PROJECT | REVEAL_PROJECT | COPY_PATH => it.set_enabled(project_selected)?,
                 _ => {}
             }
@@ -193,35 +228,59 @@ pub fn set_state<R: Runtime>(
     Ok(())
 }
 
-/// Install the menu bar again with the keys now in settings (macOS; a no-op elsewhere, and while
-/// a new key is being recorded: it is installed when that ends).
+/// Install the menu bar again with the keys now in settings (macOS; a no-op elsewhere). While a
+/// new key is being recorded it is installed without keys, and gets them when that ends.
 pub fn rebuild(app: &AppHandle) -> tauri::Result<()> {
-    if !cfg!(target_os = "macos") || SUSPENDED.load(Ordering::SeqCst) {
+    if !cfg!(target_os = "macos") {
         return Ok(());
     }
+    install(app, SUSPENDED.load(Ordering::SeqCst))
+}
+
+fn install(app: &AppHandle, quiet: bool) -> tauri::Result<()> {
     let custom = app
         .try_state::<crate::commands::AppState>()
         .and_then(|s| s.settings.lock().ok().map(|s| s.shortcuts.clone()))
         .unwrap_or_default();
-    app.set_menu(build(app, &custom)?)?;
-    let (sidebar, selected) = LAST_STATE.lock().map(|l| *l).unwrap_or((true, false));
-    set_state(app, sidebar, selected)
+    app.set_menu(build_with(app, &custom, !quiet)?)?;
+    let (sidebar, inspector, selected) =
+        LAST_STATE.lock().map(|l| *l).unwrap_or((true, true, false));
+    set_state(app, sidebar, inspector, selected)
 }
 
-/// Settings → Shortcuts is recording a key (`true`): empty the menu bar so its keys don't run.
-/// Recording ended (`false`): put it back.
+/// Settings → Shortcuts is recording a key (`true`): the same menu bar with no keys, so none of
+/// its keys run. Recording ended (`false`): the keys come back. Safe to call again and again.
 pub fn suspend(app: &AppHandle, on: bool) -> tauri::Result<()> {
     if !cfg!(target_os = "macos") {
         return Ok(());
     }
     let was = SUSPENDED.swap(on, Ordering::SeqCst);
-    if on && !was {
-        app.set_menu(Menu::new(app)?)?;
-    } else if !on && was {
-        rebuild(app)?;
+    if on != was {
+        if let Err(e) = install(app, on) {
+            // Couldn't switch: say so, so the next call tries again.
+            SUSPENDED.store(was, Ordering::SeqCst);
+            return Err(e);
+        }
     }
     Ok(())
 }
+
+/// macOS: close the key window, whoever's it is (the About panel, a system panel…): ⌘W when no
+/// Nest window of ours has focus.
+#[cfg(target_os = "macos")]
+pub fn close_key_window() {
+    use objc2::MainThreadMarker;
+    use objc2_app_kit::NSApplication;
+    let Some(mtm) = MainThreadMarker::new() else {
+        return;
+    };
+    if let Some(w) = NSApplication::sharedApplication(mtm).keyWindow() {
+        w.performClose(None);
+    }
+}
+
+#[cfg(not(target_os = "macos"))]
+pub fn close_key_window() {}
 
 /// Where a menu bar command goes (lib.rs acts on it).
 #[derive(Debug, PartialEq, Eq)]
@@ -251,6 +310,7 @@ pub fn route(id: &str, first_run: bool) -> Route {
     match id {
         SETTINGS => Route::Settings,
         KEYBOARD_SHORTCUTS => Route::SettingsShortcuts,
+        SHOW_MAIN => Route::ShowMainOnly,
         CLOSE_WINDOW => Route::CloseWindow,
         QUIT => Route::Quit,
         UNDO | REDO => Route::Focused,
@@ -297,6 +357,9 @@ mod tests {
         assert_eq!(route(SETTINGS, true), Route::Settings);
         assert_eq!(route(KEYBOARD_SHORTCUTS, true), Route::SettingsShortcuts);
         assert_eq!(route(CLOSE_WINDOW, false), Route::CloseWindow);
+        // Window → Nest only brings the main window back, first run or not.
+        assert_eq!(route(SHOW_MAIN, false), Route::ShowMainOnly);
+        assert_eq!(route(SHOW_MAIN, true), Route::ShowMainOnly);
         assert_eq!(route(QUIT, false), Route::Quit);
         assert_eq!(route("something-else", false), Route::Ignore);
     }

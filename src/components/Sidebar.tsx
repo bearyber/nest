@@ -76,7 +76,7 @@ export default function Sidebar({
     });
 
   return (
-    <nav className={styles.sidebar} aria-label="Filters">
+    <nav className={styles.sidebar} aria-label="Filters" data-area="sidebar">
       <div className={styles.top}>
         <IconButton icon="sidebar" label={`Hide sidebar (${isMac() ? "⌃⌘S" : "Ctrl+B"})`} onClick={onHide} />
       </div>

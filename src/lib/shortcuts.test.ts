@@ -6,6 +6,7 @@ import {
   closesSettings,
   effectiveCombos,
   findShortcut,
+  describeCombo,
   formatCombo,
   listedShortcuts,
   planChange,
@@ -285,7 +286,73 @@ describe("changed keys", () => {
     expect(formatCombo({ key: "Enter", mod: true }, "mac")).toBe("⌘↩");
     expect(formatCombo({ key: "n", mod: true, shift: true }, "win")).toBe("Ctrl+Shift+N");
     expect(formatCombo({ key: "F5" }, "win")).toBe("F5");
-    expect(formatCombo({ key: "?", shift: true }, "win")).toBe("Shift+?");
+    // ? already is a shifted character: shown as "?", not "Shift+?".
+    expect(formatCombo({ key: "?", shift: true }, "win")).toBe("?");
+    expect(formatCombo({ key: "ArrowUp", mod: true }, "mac")).toBe("⌘↑");
+    expect(formatCombo({ key: "ArrowUp", mod: true }, "win")).toBe("Ctrl+↑");
+    expect(formatCombo({ key: " ", mod: true }, "win")).toBe("Ctrl+Space");
+  });
+
+  it("describes keys in words for a screen reader, by OS", () => {
+    expect(describeCombo({ key: "n", mod: true, shift: true }, "mac")).toBe("Shift Command N");
+    expect(describeCombo({ key: "s", mod: true, ctrl: true }, "mac")).toBe("Control Command S");
+    expect(describeCombo({ key: "c", mod: true, alt: true }, "mac")).toBe("Option Command C");
+    expect(describeCombo({ key: "Enter", mod: true }, "mac")).toBe("Command Return");
+    expect(describeCombo({ key: "n", mod: true, shift: true }, "win")).toBe("Control Shift N");
+    expect(describeCombo({ key: "Enter", mod: true }, "win")).toBe("Control Enter");
+    expect(describeCombo({ key: "ArrowUp", mod: true }, "mac")).toBe("Command Up Arrow");
+    expect(describeCombo({ key: " ", mod: true }, "win")).toBe("Control Space");
+    expect(describeCombo({ key: ",", mod: true }, "mac")).toBe("Command Comma");
+    expect(describeCombo({ key: "?", shift: true }, "win")).toBe("Question Mark");
+    expect(describeCombo({ key: "F5" }, "win")).toBe("F5");
+  });
+
+  it("messages say Option on a Mac and Alt on Windows", () => {
+    const shifted = { key: ",", mod: true, shift: true };
+    expect(checkCombo("search", shifted, "mac")).toMatch(/Shift and Option only/);
+    expect(checkCombo("search", shifted, "win")).toMatch(/Shift and Alt only/);
+    expect(checkCombo("search", shifted, "win")).not.toMatch(/Option/);
+  });
+
+  it("refuses ⌃⌘D, ⌃F2 and ⌃F3 on a Mac", () => {
+    expect(checkCombo("search", { key: "d", mod: true, ctrl: true }, "mac")).toMatch(/looks a word up/);
+    expect(checkCombo("search", { key: "F2", ctrl: true }, "mac")).toMatch(/menu bar/);
+    expect(checkCombo("search", { key: "F3", ctrl: true }, "mac")).toMatch(/Dock/);
+    expect(checkCombo("search", { key: "0", mod: true }, "mac")).toMatch(/Nest window/);
+    expect(checkCombo("search", { key: "F2" }, "mac")).toBeNull();
+  });
+
+  it("other keyboard layouts: the typed character wins unless Option / Alt is held", () => {
+    // French (AZERTY): , and ? are on the M key's place.
+    const fr = (k: string, mods: Partial<KeyLike> = {}): KeyLike => ({
+      ...key(k, mods),
+      code: "KeyM",
+    });
+    expect(matchesCombo(fr(",", { metaKey: true }), { key: ",", mod: true }, "mac")).toBe(true);
+    expect(matchesCombo(fr(",", { metaKey: true }), { key: "m", mod: true }, "mac")).toBe(false);
+    expect(matchesCombo(fr("?", { shiftKey: true }), { key: "?", shift: true }, "win")).toBe(true);
+    expect(matchesCombo(fr("m", { ctrlKey: true }), { key: "m", mod: true }, "win")).toBe(true);
+    expect(recordedCombo(fr(",", { metaKey: true }), "mac")).toEqual({
+      combo: { key: ",", mod: true },
+    });
+    // Option / Alt held: the physical key says which letter (⌥M types µ on a Mac).
+    expect(
+      matchesCombo(
+        { ...key("µ", { metaKey: true, altKey: true }), code: "KeyM" },
+        { key: "m", mod: true, alt: true },
+        "mac",
+      ),
+    ).toBe(true);
+    expect(
+      matchesCombo(
+        { ...key("m", { ctrlKey: true, altKey: true }), code: "KeyM" },
+        { key: "m", mod: true, alt: true },
+        "win",
+      ),
+    ).toBe(true);
+    expect(matchesCombo(fr(",", { metaKey: true, altKey: true }), { key: ",", mod: true, alt: true }, "mac")).toBe(
+      false,
+    );
   });
 
   it("Quit is listed on a Mac only; Show Keyboard Shortcuts has F1 and ? on Windows and no key on a Mac", () => {

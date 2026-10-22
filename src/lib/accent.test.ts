@@ -1,6 +1,18 @@
 // @vitest-environment jsdom
-import { describe, expect, it } from "vitest";
-import { NEST_BLUE, accentTokens, applyAccent, contrast, mix, parseHex } from "./accent";
+import { describe, expect, it, vi } from "vitest";
+import { NEST_BLUE, accentTokens, applyAccent, contrast, followSystemAccent, mix, parseHex } from "./accent";
+
+let accentAnswer: (hex: string | null) => void = () => {};
+let accentEvent: (payload: string | null) => void = () => {};
+vi.mock("./commands", () => ({
+  systemAccent: () => new Promise<string | null>((resolve) => (accentAnswer = resolve)),
+}));
+vi.mock("@tauri-apps/api/event", () => ({
+  listen: (_name: string, cb: (e: { payload: string | null }) => void) => {
+    accentEvent = (payload) => cb({ payload });
+    return Promise.resolve(() => {});
+  },
+}));
 
 const rgb = (hex: string) => parseHex(hex)!;
 const rgba = (css: string) => css.match(/\d+(\.\d+)?/g)!.map(Number);
@@ -48,7 +60,12 @@ describe("accent shades", () => {
     for (const hex of [ACCENTS.purple, ACCENTS.red]) {
       const t = accentTokens(hex);
       expect(t.fill).not.toBe(accentTokens(NEST_BLUE).fill);
-      expect(t.textLight).toBe("#" + mix(rgb(hex), [0, 0, 0], 30).map((v) => v.toString(16).padStart(2, "0")).join(""));
+      expect(t.textLight).toBe(
+        "#" +
+          mix(rgb(hex), [0, 0, 0], 30)
+            .map((v) => v.toString(16).padStart(2, "0"))
+            .join(""),
+      );
     }
   });
 
@@ -90,6 +107,13 @@ describe("accent shades", () => {
     expect(rgba(t.softDark)).toEqual([149, 61, 150, 0.2]);
   });
 
+  it("when the fill falls back to blue, the soft tints do too (one hue in a selection)", () => {
+    const t = accentTokens(ACCENTS.white);
+    expect(rgb(t.fill).join()).toBe(rgb(accentTokens(NEST_BLUE).fill).join());
+    expect(rgba(t.softLight)).toEqual([10, 132, 255, 0.12]);
+    expect(rgba(t.softDark)).toEqual([10, 132, 255, 0.2]);
+  });
+
   it("a bad colour reads as Nest blue", () => {
     expect(accentTokens("nonsense").accentLight).toBe("#0a84ff");
   });
@@ -106,5 +130,28 @@ describe("applying the accent", () => {
     expect(root.style.getPropertyValue("--accent-soft-dark")).toBe("");
     applyAccent("garbage", root);
     expect(root.style.getPropertyValue("--accent")).toBe("");
+  });
+});
+
+describe("following the system accent", () => {
+  it("a change that arrives before the first answer is not overwritten by it", async () => {
+    document.documentElement.removeAttribute("style");
+    const stop = followSystemAccent();
+    await Promise.resolve();
+    accentEvent("#953d96");
+    accentAnswer("#0078d4"); // the late, older answer
+    await new Promise((r) => setTimeout(r, 0));
+    expect(document.documentElement.style.getPropertyValue("--accent-light")).toBe("#953d96");
+    stop();
+  });
+
+  it("the first answer is used when nothing newer arrived", async () => {
+    document.documentElement.removeAttribute("style");
+    const stop = followSystemAccent();
+    await Promise.resolve();
+    accentAnswer("#953d96");
+    await new Promise((r) => setTimeout(r, 0));
+    expect(document.documentElement.style.getPropertyValue("--accent-light")).toBe("#953d96");
+    stop();
   });
 });

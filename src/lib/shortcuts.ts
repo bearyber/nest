@@ -203,14 +203,71 @@ export function effectiveCombos(
 const sameCombo = (a: Combo, b: Combo) =>
   a.key === b.key && !!a.mod === !!b.mod && !!a.shift === !!b.shift && !!a.alt === !!b.alt && !!a.ctrl === !!b.ctrl;
 
-/** How a key shows: ⇧⌘N on a Mac, Ctrl+Shift+N on Windows. */
+const isLetterKey = (key: string) => /^[a-z]$/.test(key);
+
+/** A key that already types a shifted character (?), so Shift isn't part of its name. */
+const shiftIsTyped = (c: Combo) =>
+  !!c.shift && !c.mod && !c.ctrl && !c.alt && c.key.length === 1 && !isLetterKey(c.key) && !/[0-9]/.test(c.key);
+
+const KEY_GLYPHS: Record<string, { mac: string; win: string }> = {
+  Enter: { mac: "↩", win: "Enter" },
+  ArrowUp: { mac: "↑", win: "↑" },
+  ArrowDown: { mac: "↓", win: "↓" },
+  ArrowLeft: { mac: "←", win: "←" },
+  ArrowRight: { mac: "→", win: "→" },
+  Escape: { mac: "⎋", win: "Esc" },
+  Tab: { mac: "⇥", win: "Tab" },
+  Backspace: { mac: "⌫", win: "Backspace" },
+  Delete: { mac: "⌦", win: "Delete" },
+  " ": { mac: "Space", win: "Space" },
+};
+
+/** How a key shows: ⇧⌘N on a Mac, Ctrl+Shift+N on Windows. A named key shows as its symbol or
+ *  short name (↑, Esc), never as the raw `KeyboardEvent.key` ("ArrowUp"). */
 export function formatCombo(c: Combo, platform: Platform = currentPlatform()): string {
-  if (platform === "mac") {
-    const key = c.key === "Enter" ? "↩" : c.key.length === 1 ? c.key.toUpperCase() : c.key;
-    return `${c.ctrl ? "⌃" : ""}${c.alt ? "⌥" : ""}${c.shift ? "⇧" : ""}${c.mod ? "⌘" : ""}${key}`;
-  }
-  const key = c.key.length === 1 ? c.key.toUpperCase() : c.key;
-  return [c.mod && "Ctrl", c.alt && "Alt", c.shift && "Shift", key].filter(Boolean).join("+");
+  const named = KEY_GLYPHS[c.key]?.[platform];
+  const key = named ?? (c.key.length === 1 ? c.key.toUpperCase() : c.key);
+  const shift = c.shift && !shiftIsTyped(c);
+  if (platform === "mac") return `${c.ctrl ? "⌃" : ""}${c.alt ? "⌥" : ""}${shift ? "⇧" : ""}${c.mod ? "⌘" : ""}${key}`;
+  return [c.mod && "Ctrl", c.alt && "Alt", shift && "Shift", key].filter(Boolean).join("+");
+}
+
+const KEY_WORDS: Record<string, { mac?: string; win?: string; both?: string }> = {
+  Enter: { mac: "Return", win: "Enter" },
+  ArrowUp: { both: "Up Arrow" },
+  ArrowDown: { both: "Down Arrow" },
+  ArrowLeft: { both: "Left Arrow" },
+  ArrowRight: { both: "Right Arrow" },
+  Escape: { both: "Escape" },
+  Tab: { both: "Tab" },
+  Backspace: { mac: "Delete", win: "Backspace" },
+  Delete: { mac: "Forward Delete", win: "Delete" },
+  " ": { both: "Space" },
+  ",": { both: "Comma" },
+  ".": { both: "Period" },
+  "/": { both: "Slash" },
+  ";": { both: "Semicolon" },
+  "'": { both: "Apostrophe" },
+  "[": { both: "Left Bracket" },
+  "]": { both: "Right Bracket" },
+  "\\": { both: "Backslash" },
+  "-": { both: "Minus" },
+  "=": { both: "Equals" },
+  "`": { both: "Grave Accent" },
+  "?": { both: "Question Mark" },
+};
+
+/** The same key in words, for screen readers: "Command Shift N", "Control Shift N" (Windows),
+ *  "Up Arrow", "Space". The symbols (⇧⌘N) are not read out reliably. */
+export function describeCombo(c: Combo, platform: Platform = currentPlatform()): string {
+  const w = KEY_WORDS[c.key];
+  const key = w?.[platform] ?? w?.both ?? (c.key.length === 1 ? c.key.toUpperCase() : c.key);
+  const shift = c.shift && !shiftIsTyped(c);
+  const parts =
+    platform === "mac"
+      ? [c.ctrl && "Control", c.alt && "Option", shift && "Shift", c.mod && "Command", key]
+      : [c.mod && "Control", c.alt && "Alt", shift && "Shift", key];
+  return parts.filter(Boolean).join(" ");
 }
 
 /** A key that would type something (no ⌘ / Ctrl / ⌥, not an F key), like ?: it must not run
@@ -232,6 +289,10 @@ const OS_OWNED: Record<Platform, Record<string, string>> = {
     "cm+q": "⌃⌘Q locks the screen",
     "ms+q": "⇧⌘Q logs you out",
     "ma+d": "⌥⌘D shows or hides the Dock",
+    "cm+d": "⌃⌘D looks a word up",
+    "c+F2": "⌃F2 moves to the menu bar",
+    "c+F3": "⌃F3 moves to the Dock",
+    "m+0": "⌘0 brings the Nest window back (Window menu)",
     "m+c": "⌘C copies in a text box",
     "m+v": "⌘V pastes in a text box",
     "m+x": "⌘X cuts in a text box",
@@ -254,14 +315,15 @@ const sig = (c: Combo) => `${c.ctrl ? "c" : ""}${c.mod ? "m" : ""}${c.alt ? "a" 
  *  rules as shortcut_keys.rs (which refuses unsafe keys when saving), plus keys the OS owns. */
 export function checkCombo(id: ShortcutId, c: Combo, platform: Platform = currentPlatform()): string | null {
   const named = c.key === "Enter" || isFKey(c.key);
+  const altName = platform === "mac" ? "Option" : "Alt";
   const plainKey = c.key.length === 1 && (isLetter(c.key) || /[0-9]/.test(c.key) || ",./;'[]\\-=`".includes(c.key));
   if (!named && !plainKey) {
     return (c.shift || c.alt) && c.key.length === 1
-      ? "Shift and Option only go with letters, Enter and F keys. Try other keys."
+      ? `Shift and ${altName} only go with letters, Enter and F keys. Try other keys.`
       : "Use a letter, a number, a punctuation key, Enter or an F key.";
   }
   if ((c.shift || c.alt) && !(isLetter(c.key) || named)) {
-    return "Shift and Option only go with letters, Enter and F keys. Try other keys.";
+    return `Shift and ${altName} only go with letters, Enter and F keys. Try other keys.`;
   }
   if (platform === "win" && c.alt) {
     return "Alt keys belong to Windows, and some keyboards type letters with them. Use Ctrl, or Ctrl+Shift.";
@@ -407,12 +469,17 @@ export const currentPlatform = (): Platform => (isMac() ? "mac" : "win");
 /** AltGr (Windows reports it as Ctrl+Alt): it types characters, so it's never a shortcut. */
 const altGr = (e: KeyLike) => e.getModifierState?.("AltGraph") === true;
 
-/** The key, lower case for letters. ⌥ on a Mac (and other keyboard layouts) can turn a letter
- *  into another character: then the physical key (`code`) says which letter it is. */
+/** The key, lower case for letters. The character the key types wins when it is plain ASCII and
+ *  ⌥ / Alt isn't held, so other layouts work (on a French keyboard `,` and `?` sit on the M key:
+ *  they are "," and "?", not "m"). Where the character isn't a usable guide (⌥ turns a letter
+ *  into å, ∂…; a dead key), the physical key (`code`) says which letter it is. */
 function keyOf(e: KeyLike): string {
-  if (/^[a-z]$/i.test(e.key)) return e.key.toLowerCase();
-  if (e.key.length === 1 && /^Key[A-Z]$/.test(e.code)) return e.code.slice(3).toLowerCase();
-  return e.key;
+  const k = e.key;
+  const plainAscii = k.length === 1 && k.charCodeAt(0) > 32 && k.charCodeAt(0) < 127;
+  if (plainAscii && !e.altKey) return /[A-Za-z]/.test(k) ? k.toLowerCase() : k;
+  const letter = /^Key([A-Z])$/.exec(e.code ?? "");
+  if (letter && (e.altKey || k === "Dead" || (k.length === 1 && k.charCodeAt(0) > 127))) return letter[1].toLowerCase();
+  return /^[a-z]$/i.test(k) ? k.toLowerCase() : k;
 }
 
 /** Does this key press match the combo exactly (no extra modifiers)? */

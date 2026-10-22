@@ -340,12 +340,16 @@ fn setup(app: &mut tauri::App, started_at: std::time::SystemTime) -> Result<(), 
                 Ok(())
             }
             menu::Route::CloseWindow => {
-                if let Some(w) = app
+                match app
                     .webview_windows()
                     .into_values()
                     .find(|w| w.is_focused().unwrap_or(false))
                 {
-                    let _ = w.close();
+                    Some(w) => {
+                        let _ = w.close();
+                    }
+                    // No Nest window has focus (the About panel is in front): close that one.
+                    None => menu::close_key_window(),
                 }
                 Ok(())
             }

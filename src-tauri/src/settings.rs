@@ -570,12 +570,19 @@ pub fn load(config_dir: &Path) -> AppResult<Option<Settings>> {
             io_reason(&e)
         ))
     })?;
-    serde_json::from_str(&text).map(Some).map_err(|e| {
-        AppError::new(format!(
-            "Settings file {} is damaged ({e}). Nest is using defaults and won't overwrite it.",
-            path.display()
-        ))
-    })
+    serde_json::from_str::<Settings>(&text)
+        .map(|mut s| {
+            // A bad stored shortcut key must never get in the way: those shortcuts go back to
+            // their default keys (saved that way the next time settings are saved).
+            s.shortcuts = crate::shortcut_keys::usable(&s.shortcuts);
+            Some(s)
+        })
+        .map_err(|e| {
+            AppError::new(format!(
+                "Settings file {} is damaged ({e}). Nest is using defaults and won't overwrite it.",
+                path.display()
+            ))
+        })
 }
 
 pub fn save(config_dir: &Path, settings: &Settings) -> AppResult<()> {
@@ -807,6 +814,22 @@ mod tests {
         assert_eq!(s.scan_roots(), vec![PathBuf::from("/Jobs/Active")]);
         assert_eq!(s.archive_after_days, None);
         assert!(s.set_archive_after_days(Some(30)).is_err());
+    }
+
+    #[test]
+    fn bad_stored_shortcuts_are_dropped_when_settings_load() {
+        let dir = tempfile::tempdir().unwrap();
+        fs::write(
+            dir.path().join(SETTINGS_FILE),
+            r#"{"shortcuts":{
+                "search":{"key":"g","mod":true},
+                "rescan":{"key":"g"},
+                "undo":{"key":"Escape","mod":true},
+                "from-the-future":{"key":"h","mod":true}}}"#,
+        )
+        .unwrap();
+        let s = load(dir.path()).unwrap().unwrap();
+        assert_eq!(s.shortcuts.keys().collect::<Vec<_>>(), ["search"]);
     }
 
     #[test]

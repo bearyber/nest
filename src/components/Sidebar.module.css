@@ -204,8 +204,10 @@
   background: var(--folder);
 }
 
-/* macOS: selection like Finder's sidebar. No hover tint; the selected row is a solid accent fill
-   with white text (no side bar, no bold); when the window isn't in front it turns grey. */
+/* macOS: selection like Finder's sidebar. No hover tint. The selected row is grey (no side bar, no
+   bold); a solid accent fill with white text only while the window is in front and the sidebar
+   is the area you are in (<html data-area>, src/lib/focusArea.ts). Text on the grey is full
+   strength so it reads on the vibrancy behind it in dark mode (4.5:1 against the lightest). */
 :global(:root[data-platform="mac"]) .item:not([aria-current="true"]):hover,
 :global(:root[data-platform="mac"]:not([data-window="inactive"])) .item:not([aria-current="true"]):hover,
 :global(:root[data-platform="mac"]) .settings:not(.settingsOn):hover,
@@ -217,8 +219,8 @@
 :global(:root[data-platform="mac"]) .item[aria-current="true"]:hover,
 :global(:root[data-platform="mac"]) .settingsOn,
 :global(:root[data-platform="mac"]) .settingsOn:hover {
-  background: var(--accent-fill);
-  color: #fff;
+  background: color-mix(in srgb, var(--text) 14%, transparent);
+  color: var(--text);
   font-weight: 400;
 }
 
@@ -228,33 +230,78 @@
 }
 
 :global(:root[data-platform="mac"]) .item[aria-current="true"] .count {
-  color: #fff;
-}
-
-:global(:root[data-platform="mac"]) .item[aria-current="true"] .dotActive {
-  background: #fff;
-}
-
-:global(:root[data-platform="mac"]) .item[aria-current="true"] .dotDone {
-  border-color: #fff;
-}
-
-:global(:root[data-platform="mac"][data-window="inactive"]) .item[aria-current="true"],
-:global(:root[data-platform="mac"][data-window="inactive"]) .item[aria-current="true"]:hover,
-:global(:root[data-platform="mac"][data-window="inactive"]) .settingsOn,
-:global(:root[data-platform="mac"][data-window="inactive"]) .settingsOn:hover {
-  background: color-mix(in srgb, var(--text) 14%, transparent);
   color: var(--text);
 }
 
-:global(:root[data-platform="mac"][data-window="inactive"]) .item[aria-current="true"] .count {
-  color: var(--text-tertiary);
-}
-
-:global(:root[data-platform="mac"][data-window="inactive"]) .item[aria-current="true"] .dotActive {
+:global(:root[data-platform="mac"]) .item[aria-current="true"] .dotActive {
   background: var(--accent);
 }
 
-:global(:root[data-platform="mac"][data-window="inactive"]) .item[aria-current="true"] .dotDone {
+:global(:root[data-platform="mac"]) .item[aria-current="true"] .dotDone {
   border-color: var(--text-tertiary);
+}
+
+:global(:root[data-platform="mac"][data-area="sidebar"]:not([data-window="inactive"])) .item[aria-current="true"],
+:global(:root[data-platform="mac"][data-area="sidebar"]:not([data-window="inactive"])) .item[aria-current="true"]:hover,
+:global(:root[data-platform="mac"][data-area="sidebar"]:not([data-window="inactive"])) .settingsOn,
+:global(:root[data-platform="mac"][data-area="sidebar"]:not([data-window="inactive"])) .settingsOn:hover {
+  background: var(--accent-fill);
+  color: #fff;
+}
+
+:global(:root[data-platform="mac"][data-area="sidebar"]:not([data-window="inactive"])) .item[aria-current="true"] .count {
+  color: #fff;
+}
+
+:global(:root[data-platform="mac"][data-area="sidebar"]:not([data-window="inactive"])) .item[aria-current="true"] .dotActive {
+  background: #fff;
+}
+
+:global(:root[data-platform="mac"][data-area="sidebar"]:not([data-window="inactive"])) .item[aria-current="true"] .dotDone {
+  border-color: #fff;
+}
+
+/* Keyboard focus on an accent-filled row: a white ring inside the edge with a dark ring inside
+   that, so it shows on any accent colour. */
+:global(:root[data-platform="mac"][data-area="sidebar"]:not([data-window="inactive"])) .item[aria-current="true"]:focus-visible,
+:global(:root[data-platform="mac"][data-area="sidebar"]:not([data-window="inactive"])) .settingsOn:focus-visible {
+  outline: 2px solid #fff;
+  outline-offset: -2px;
+  box-shadow: inset 0 0 0 4px rgba(0, 0, 0, 0.55);
+}
+
+/* Windows High Contrast (forced colors): the system drops backgrounds, so the selected item is
+   drawn with the system's Highlight colours. */
+@media (forced-colors: active) {
+  .item[aria-current="true"],
+  .item[aria-current="true"]:hover,
+  .settingsOn,
+  .settingsOn:hover {
+    forced-color-adjust: none;
+    background: Highlight !important;
+    color: HighlightText !important;
+  }
+
+  .item[aria-current="true"] .count {
+    color: HighlightText !important;
+  }
+
+  .item[aria-current="true"] .dotActive {
+    background: HighlightText !important;
+  }
+
+  .item[aria-current="true"] .dotDone {
+    border-color: HighlightText !important;
+  }
+
+  .item[aria-current="true"]::before,
+  .settingsOn::before {
+    background: HighlightText !important;
+  }
+
+  .item[aria-current="true"]:focus-visible,
+  .settingsOn:focus-visible {
+    outline: 2px solid HighlightText;
+    outline-offset: -3px;
+  }
 }

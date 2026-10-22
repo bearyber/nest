@@ -76,7 +76,9 @@ export function accentTokens(hex: string): AccentTokens {
   const fillOk = contrast(mine.fill, WHITE) >= AA && contrast(mine.fillHover, WHITE) >= AA;
   // Shapes (focus rings, dots, outlines) need 3:1 (WCAG non-text contrast), checked per theme.
   const shape = (surface: Rgb) => toHex(contrast(rgb, surface) >= SHAPES ? rgb : blue);
-  const soft = (a: number) => `rgba(${rgb.join(", ")}, ${a})`;
+  // The soft tints follow the fill: when the fill fell back to blue, so do they, so a selection
+  // never mixes two hues (an OS-colour tint next to a blue fill).
+  const soft = (a: number) => `rgba(${(fillOk ? rgb : blue).join(", ")}, ${a})`;
   return {
     accentLight: shape(LIGHT_SURFACE),
     accentDark: shape(DARK_SURFACE),
@@ -115,10 +117,15 @@ export function applyAccent(hex: string | null, root: HTMLElement = document.doc
 export function followSystemAccent(): () => void {
   let gone = false;
   let unlisten: (() => void) | undefined;
+  // The first answer can arrive after a newer `accent-changed`: the newer one wins.
+  let changed = false;
   systemAccent()
-    .then((hex) => !gone && applyAccent(hex))
+    .then((hex) => !gone && !changed && applyAccent(hex))
     .catch(() => {});
-  listen<string | null>("accent-changed", (e) => applyAccent(e.payload))
+  listen<string | null>("accent-changed", (e) => {
+    changed = true;
+    applyAccent(e.payload);
+  })
     .then((u) => (gone ? u() : (unlisten = u)))
     .catch(() => {});
   return () => {

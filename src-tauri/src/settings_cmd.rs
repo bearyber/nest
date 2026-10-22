@@ -145,10 +145,14 @@ pub fn open_settings_window_on(app: &AppHandle, tab: Option<&str>) -> tauri::Res
         );
     }
     let w = builder.build()?;
-    // Closed while a new key was being recorded: the menu bar comes back.
+    // Closed, or left (another window, the About panel…), while a new key was being recorded:
+    // the menu bar's keys come back.
     let closing = app.clone();
     w.on_window_event(move |e| {
-        if matches!(e, tauri::WindowEvent::Destroyed) {
+        if matches!(
+            e,
+            tauri::WindowEvent::Destroyed | tauri::WindowEvent::Focused(false)
+        ) {
             let _ = crate::menu::suspend(&closing, false);
         }
     });
@@ -563,15 +567,27 @@ pub fn set_shortcuts(
     state: State<'_, AppState>,
     shortcuts: std::collections::BTreeMap<String, crate::shortcut_keys::Combo>,
 ) -> AppResult<SettingsView> {
+    let before = lock(&state.settings)?.shortcuts.clone();
     let v = edit(&app, &state, |s| s.set_shortcuts(shortcuts))?;
-    crate::menu::rebuild(&app)
-        .map_err(|e| AppError::new(format!("Couldn't update the menu: {e}")))?;
+    if let Err(e) = crate::menu::rebuild(&app) {
+        // The menu bar didn't take the new keys: put the saved keys back, so what's saved and
+        // what the menu bar does never disagree.
+        let _ = edit(&app, &state, |s| {
+            s.shortcuts = before;
+            Ok(())
+        });
+        let _ = crate::menu::rebuild(&app);
+        return Err(AppError::new(format!("Couldn't update the menu: {e}")));
+    }
     Ok(v)
 }
 
-/// The Shortcuts tab is waiting for a key (`on`), or stopped: on a Mac the menu bar is empty
-/// meanwhile, so ⌘N, ⌘Q… arrive as key presses instead of running.
-#[tauri::command(async)]
+/// The Shortcuts tab is waiting for a key (`on`), or stopped: on a Mac the menu bar has no keys
+/// meanwhile, so ⌘N, ⌘Q… arrive as key presses instead of running. Not `async`: on/off must run
+/// in the order the page sends them (a late "on" after "off" would leave the keys off).
+/// Recording also ends when the Settings window loses focus, closes or reloads (see
+/// `open_settings_window_on`, `settings_ready`).
+#[tauri::command]
 pub fn shortcut_recording(app: AppHandle, on: bool) -> AppResult<()> {
     crate::menu::suspend(&app, on)
         .map_err(|e| AppError::new(format!("Couldn't update the menu: {e}")))
@@ -1568,6 +1584,8 @@ pub(crate) fn edit_settings(
 /// The Settings page has drawn: show its window (it's created hidden to avoid a blank flash).
 #[tauri::command(async)]
 pub fn settings_ready(app: AppHandle) -> AppResult<()> {
+    // A fresh page (first load or reload) is never recording: give the menu bar its keys back.
+    let _ = crate::menu::suspend(&app, false);
     if let Some(w) = app.get_webview_window(SETTINGS_WINDOW) {
         if !w.is_visible().unwrap_or(false) {
             w.show()

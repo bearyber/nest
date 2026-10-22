@@ -202,56 +202,98 @@
   user-select: none;
 }
 
-/* macOS: selection like Finder's list. No hover tint; the selected row is a solid accent fill with
-   white text; when the window isn't in front it turns grey with normal text. */
+/* macOS: selection like Finder's list. No hover tint. The selected row is grey; it is a solid accent
+   fill with white text only while the window is in front and the list is the area you are in
+   (<html data-area>, src/lib/focusArea.ts), as in Finder. Text on the grey is full strength, so
+   it reads on the vibrancy behind it in dark mode too (4.5:1 against the lightest it gets). */
 :global(:root[data-platform="mac"]) .row:hover {
   background: transparent;
 }
 
 :global(:root[data-platform="mac"]) .row[aria-selected="true"],
 :global(:root[data-platform="mac"]) .row[aria-selected="true"]:hover {
-  background: var(--accent-fill);
-  color: #fff;
-}
-
-:global(:root[data-platform="mac"]) .row[aria-selected="true"] :is(.muted, .pill, .code, .warn, .titleText) {
-  color: #fff;
-}
-
-:global(:root[data-platform="mac"]) .row[aria-selected="true"] .pill {
-  border-color: rgba(255, 255, 255, 0.6);
-}
-
-:global(:root[data-platform="mac"]) .row[aria-selected="true"] .dotActive {
-  background: #fff;
-}
-
-:global(:root[data-platform="mac"]) .row[aria-selected="true"] .dotDone {
-  border-color: #fff;
-}
-
-:global(:root[data-platform="mac"][data-window="inactive"]) .row[aria-selected="true"],
-:global(:root[data-platform="mac"][data-window="inactive"]) .row[aria-selected="true"]:hover {
   background: color-mix(in srgb, var(--text) 14%, transparent);
   color: var(--text);
 }
 
-:global(:root[data-platform="mac"][data-window="inactive"]) .row[aria-selected="true"] :is(.titleText, .code) {
+:global(:root[data-platform="mac"]) .row[aria-selected="true"] :is(.titleText, .code, .muted, .pill) {
   color: var(--text);
 }
 
-:global(:root[data-platform="mac"][data-window="inactive"]) .row[aria-selected="true"] :is(.muted, .pill) {
-  color: var(--text-secondary);
-}
-
-:global(:root[data-platform="mac"][data-window="inactive"]) .row[aria-selected="true"] .pill {
+:global(:root[data-platform="mac"]) .row[aria-selected="true"] .pill {
   border-color: var(--separator);
 }
 
-:global(:root[data-platform="mac"][data-window="inactive"]) .row[aria-selected="true"] .dotActive {
+:global(:root[data-platform="mac"]) .row[aria-selected="true"] .dotActive {
   background: var(--accent);
 }
 
-:global(:root[data-platform="mac"][data-window="inactive"]) .row[aria-selected="true"] .dotDone {
+:global(:root[data-platform="mac"]) .row[aria-selected="true"] .dotDone {
   border-color: var(--text-tertiary);
+}
+
+:global(:root[data-platform="mac"][data-area="list"]:not([data-window="inactive"])) .row[aria-selected="true"],
+:global(:root[data-platform="mac"][data-area="list"]:not([data-window="inactive"])) .row[aria-selected="true"]:hover {
+  background: var(--accent-fill);
+  color: #fff;
+}
+
+:global(:root[data-platform="mac"][data-area="list"]:not([data-window="inactive"]))
+  .row[aria-selected="true"]
+  :is(.muted, .pill, .code, .warn, .titleText) {
+  color: #fff;
+}
+
+:global(:root[data-platform="mac"][data-area="list"]:not([data-window="inactive"])) .row[aria-selected="true"] .pill {
+  border-color: rgba(255, 255, 255, 0.6);
+}
+
+:global(:root[data-platform="mac"][data-area="list"]:not([data-window="inactive"])) .row[aria-selected="true"] .dotActive {
+  background: #fff;
+}
+
+:global(:root[data-platform="mac"][data-area="list"]:not([data-window="inactive"])) .row[aria-selected="true"] .dotDone {
+  border-color: #fff;
+}
+
+/* Keyboard focus on an accent-filled row: a white ring inside the edge with a dark ring inside
+   that, so it shows on any accent colour. */
+:global(:root[data-platform="mac"][data-area="list"]:not([data-window="inactive"])) .row[aria-selected="true"]:focus-visible {
+  outline: 2px solid #fff;
+  outline-offset: -2px;
+  box-shadow: inset 0 0 0 4px rgba(0, 0, 0, 0.55);
+}
+
+/* Windows High Contrast (forced colors): the system drops backgrounds, so the selected row is
+   drawn with the system's Highlight colours. */
+@media (forced-colors: active) {
+  .row[aria-selected="true"],
+  .row[aria-selected="true"]:hover {
+    forced-color-adjust: none;
+    background: Highlight !important;
+    color: HighlightText !important;
+    outline: 1px solid Highlight;
+  }
+
+  .row[aria-selected="true"] :is(.muted, .pill, .code, .warn, .titleText) {
+    color: HighlightText !important;
+  }
+
+  .row[aria-selected="true"] .pill {
+    border-color: HighlightText !important;
+  }
+
+  .row[aria-selected="true"] .dotActive {
+    background: HighlightText !important;
+  }
+
+  .row[aria-selected="true"] .dotDone {
+    border-color: HighlightText !important;
+  }
+
+  .row[aria-selected="true"]:focus-visible {
+    outline: 2px solid HighlightText;
+    outline-offset: -3px;
+    box-shadow: none;
+  }
 }

@@ -38,9 +38,10 @@ import type {
 export const materialApplied = () => invoke<boolean>("material_applied");
 
 /** The OS accent colour as "#rrggbb", or null (see lib/accent.ts). */
-/** Tell the macOS menu bar the sidebar state and whether a project on this computer is selected. */
-export const setMenuState = (sidebarShown: boolean, projectSelected: boolean) =>
-  invoke<void>("set_menu_state", { sidebarShown, projectSelected });
+/** Tell the macOS menu bar the sidebar and Details panel states, and whether a project on this
+ *  computer is selected. */
+export const setMenuState = (sidebarShown: boolean, inspectorShown: boolean, projectSelected: boolean) =>
+  invoke<void>("set_menu_state", { sidebarShown, inspectorShown, projectSelected });
 
 export const systemAccent = () => invoke<string | null>("system_accent");
 

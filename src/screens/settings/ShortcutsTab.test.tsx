@@ -25,7 +25,11 @@ afterEach(() => {
 });
 
 const press = (init: KeyboardEventInit) => {
-  const e = new KeyboardEvent("keydown", { cancelable: true, bubbles: true, ...init });
+  const e = new KeyboardEvent("keydown", {
+    cancelable: true,
+    bubbles: true,
+    ...init,
+  });
   act(() => {
     window.dispatchEvent(e);
   });
@@ -40,14 +44,14 @@ describe("Shortcuts tab", () => {
   it("lists the shortcuts with their keys for this OS", () => {
     document.documentElement.dataset.platform = "mac";
     render(<ShortcutsTab view={view()} run={run} />);
-    expect(screen.getByRole("button", { name: /^New Project: ⌘N/ })).toBeTruthy();
-    expect(screen.getByRole("button", { name: /^Quit Nest: ⌘Q/ })).toBeTruthy();
+    expect(screen.getByRole("button", { name: /^New Project: Command N$/ })).toBeTruthy();
+    expect(screen.getByRole("button", { name: /^Quit Nest: Command Q$/ })).toBeTruthy();
     expect(screen.getByRole("button", { name: /^Show Keyboard Shortcuts: no keys/ })).toBeTruthy();
     expect(screen.queryByText("Reset All")).toBeNull();
     cleanup();
     document.documentElement.dataset.platform = "win";
     render(<ShortcutsTab view={view()} run={run} />);
-    expect(screen.getByRole("button", { name: /^New Project: Ctrl\+N/ })).toBeTruthy();
+    expect(screen.getByRole("button", { name: /^New Project: Control N$/ })).toBeTruthy();
     expect(screen.getByRole("button", { name: /^Show Keyboard Shortcuts: F1/ })).toBeTruthy();
     expect(screen.queryByRole("button", { name: /^Quit Nest/ })).toBeNull();
   });
@@ -59,7 +63,11 @@ describe("Shortcuts tab", () => {
     expect(shortcutRecording).toHaveBeenCalledWith(true);
     const e = press({ key: "g", code: "KeyG", metaKey: true });
     expect(e.defaultPrevented).toBe(true);
-    await waitFor(() => expect(setShortcuts).toHaveBeenCalledWith({ search: { key: "g", mod: true } }));
+    await waitFor(() =>
+      expect(setShortcuts).toHaveBeenCalledWith({
+        search: { key: "g", mod: true },
+      }),
+    );
     await waitFor(() => expect(shortcutRecording).toHaveBeenCalledWith(false));
   });
 
@@ -109,11 +117,62 @@ describe("Shortcuts tab", () => {
     expect(setShortcuts).not.toHaveBeenCalled();
     cleanup();
     render(<ShortcutsTab view={view({ search: { key: "g", mod: true } })} run={run} />);
-    expect(screen.getByRole("button", { name: /^Find: ⌘G/ })).toBeTruthy();
-    fireEvent.click(screen.getByRole("button", { name: "Reset Find to ⌘F" }));
+    expect(screen.getByRole("button", { name: /^Find: Command G$/ })).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "Reset Find to Command F" }));
     await waitFor(() => expect(setShortcuts).toHaveBeenCalledWith({}));
     setShortcuts.mockClear();
     fireEvent.click(screen.getByRole("button", { name: "Reset All" }));
     await waitFor(() => expect(setShortcuts).toHaveBeenCalledWith({}));
+  });
+
+  it("names keys in words, keeps the symbols visible, and has no 'Press Enter' in the button name", () => {
+    document.documentElement.dataset.platform = "mac";
+    render(<ShortcutsTab view={view({ redo: { key: "n", mod: true, shift: true } })} run={run} />);
+    const b = screen.getByRole("button", { name: "Redo: Shift Command N" });
+    expect(b.textContent).toBe("⇧⌘N");
+    expect(b.getAttribute("aria-label")).not.toMatch(/Enter/);
+    expect(b.getAttribute("aria-describedby")).toBe("shortcuts-hint");
+    expect(document.getElementById("shortcuts-hint")).toBeTruthy();
+    // Extra keys: symbols to look at, words to hear.
+    expect(screen.getAllByRole("img", { name: "Command K" }).length).toBe(1);
+    cleanup();
+    document.documentElement.dataset.platform = "win";
+    render(<ShortcutsTab view={view({ redo: { key: "n", mod: true, shift: true } })} run={run} />);
+    expect(screen.getByRole("button", { name: "Redo: Control Shift N" }).textContent).toBe("Ctrl+Shift+N");
+  });
+
+  it("the recording hint is in an always-present status region", async () => {
+    document.documentElement.dataset.platform = "win";
+    render(<ShortcutsTab view={view()} run={run} />);
+    const region = screen.getAllByRole("status")[0];
+    expect(region.textContent).toBe("");
+    await start(/^Find: /);
+    expect(region.textContent).toBe("Press the new keys. Esc cancels.");
+    press({ key: "Escape" });
+    expect(region.textContent).toBe("");
+  });
+
+  it("clicking elsewhere stops recording", async () => {
+    document.documentElement.dataset.platform = "mac";
+    render(<ShortcutsTab view={view()} run={run} />);
+    await start(/^Find: /);
+    act(() => {
+      document.body.dispatchEvent(new Event("pointerdown", { bubbles: true }));
+    });
+    expect(screen.queryByText("Type the new keys…")).toBeNull();
+    await waitFor(() => expect(shortcutRecording).toHaveBeenCalledWith(false));
+    expect(setShortcuts).not.toHaveBeenCalled();
+  });
+
+  it("the swap question is one alert, and the group is named by it", async () => {
+    document.documentElement.dataset.platform = "mac";
+    render(<ShortcutsTab view={view()} run={run} />);
+    await start(/^Find: /);
+    press({ key: "n", code: "KeyN", metaKey: true });
+    const group = await screen.findByRole("group", {
+      name: "Already used by New Project. Swap them?",
+    });
+    expect(group.hasAttribute("aria-label")).toBe(false);
+    expect(screen.getAllByRole("alert").length).toBe(1);
   });
 });

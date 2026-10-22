@@ -134,14 +134,16 @@ pub fn system_accent(accent: State<'_, crate::accent::Accent>) -> Result<Option<
 }
 
 /// Tell the macOS menu bar what's true in the main window: whether the sidebar is shown, and
-/// whether a project on this computer is selected (File → Open / Show in Finder / Copy Path).
+/// whether the Details panel is, and whether a project on this computer is selected (File → Open
+/// / Show in Finder / Copy Path).
 #[tauri::command]
 pub fn set_menu_state(
     app: tauri::AppHandle,
     sidebar_shown: bool,
+    inspector_shown: bool,
     project_selected: bool,
 ) -> Result<(), AppError> {
-    crate::menu::set_state(&app, sidebar_shown, project_selected)
+    crate::menu::set_state(&app, sidebar_shown, inspector_shown, project_selected)
         .map_err(|e| AppError::new(format!("Couldn't update the menu: {e}")))
 }
 

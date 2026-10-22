@@ -46,6 +46,7 @@ import { fileManager, isMac } from "../lib/platform";
 import { hasOpenDialog } from "../lib/dialogStack";
 import { findShortcut, listenHere, type ShortcutId } from "../lib/shortcuts";
 import { isListKey } from "../lib/listKeys";
+import { trackFocusArea } from "../lib/focusArea";
 import { createdMessage, toastForNotice } from "../lib/resolve";
 import {
   computerMatches,
@@ -569,8 +570,10 @@ export default function Main() {
   // only with one of this computer's projects selected (menu.rs; Windows has no menu bar).
   const canActOnSelected = view === "projects" && !!selectedRow && !selectedRow.offline && !selectedRow.device;
   useEffect(() => {
-    setMenuState(showSidebar, canActOnSelected).catch(() => {});
-  }, [showSidebar, canActOnSelected]);
+    setMenuState(showSidebar, showInspector, canActOnSelected).catch(() => {});
+  }, [showSidebar, showInspector, canActOnSelected]);
+  // Which area has the selection's blue (list or sidebar): see lib/focusArea.ts.
+  useEffect(() => trackFocusArea(), []);
 
   // Menu bar commands, sent to this window only (lib.rs brings it forward first).
   useEffect(() => {

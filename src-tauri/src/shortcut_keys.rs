@@ -3,6 +3,8 @@
 //! in `src/lib/shortcuts.ts`; the page also checks conflicts and keys the OS owns. This side
 //! keeps only what must be true for a key to be safe to store and to use in the menu bar.
 
+use std::collections::{BTreeMap, BTreeSet};
+
 use serde::{Deserialize, Serialize};
 
 /// The shortcut ids that can be changed (the same ids as `src/lib/shortcuts.ts`; a test there
@@ -75,9 +77,16 @@ pub fn check(id: &str, c: &Combo) -> Result<(), String> {
     if !known {
         return Err("Use a letter, a number, a punctuation key, Enter or an F key".into());
     }
-    // Shift and Option change what other keys type, so they only go with letters, Enter, F keys.
+    // Shift and Option/Alt change what other keys type, so they only go with letters, Enter, F keys.
     if (c.shift || c.alt) && !(is_letter(&c.key) || named) {
-        return Err("Shift and Option only go with letters, Enter and F keys".into());
+        let alt = if cfg!(target_os = "macos") {
+            "Option"
+        } else {
+            "Alt"
+        };
+        return Err(format!(
+            "Shift and {alt} only go with letters, Enter and F keys"
+        ));
     }
     if cfg!(windows) {
         // Ctrl+Alt is AltGr on many keyboards (it types letters); Alt is Windows' own.
@@ -98,6 +107,18 @@ pub fn check(id: &str, c: &Combo) -> Result<(), String> {
         });
     }
     Ok(())
+}
+
+/// The stored keys that are safe to use, in id order: any that fail `check`, and any that repeat
+/// an earlier shortcut's keys, are left out (a damaged or hand-edited settings file must never
+/// stop the menu bar from being built; those shortcuts use their default keys).
+pub fn usable(stored: &BTreeMap<String, Combo>) -> BTreeMap<String, Combo> {
+    let mut seen = BTreeSet::new();
+    stored
+        .iter()
+        .filter(|(id, c)| check(id, c).is_ok() && seen.insert((*c).clone()))
+        .map(|(id, c)| (id.clone(), c.clone()))
+        .collect()
 }
 
 /// The macOS menu accelerator for a stored key, e.g. `CmdOrCtrl+Shift+N`.
@@ -166,6 +187,28 @@ mod tests {
     fn windows_refuses_alt_combinations() {
         let r = check("search", &c("g", true, false, true, false));
         assert_eq!(r.is_err(), cfg!(windows));
+    }
+
+    #[test]
+    fn usable_leaves_out_bad_and_repeated_keys() {
+        let stored: BTreeMap<String, Combo> = [
+            ("new-project", c("g", true, false, false, false)),
+            // Same keys as new-project (later id): left out.
+            ("rescan", c("g", true, false, false, false)),
+            // No modifier, unknown id, odd key: left out.
+            ("search", c("g", false, false, false, false)),
+            ("nope", c("h", true, false, false, false)),
+            ("undo", c("Escape", true, false, false, false)),
+            ("quit", c("j", true, false, false, false)),
+        ]
+        .into_iter()
+        .map(|(id, k)| (id.to_string(), k))
+        .collect();
+        let ok = usable(&stored);
+        assert_eq!(
+            ok.keys().map(String::as_str).collect::<Vec<_>>(),
+            ["new-project", "quit"]
+        );
     }
 
     #[test]

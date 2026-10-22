@@ -25,7 +25,13 @@ const COLUMNS: { key: SortKey; label: string }[] = [
 // Resizable columns, like Explorer and Finder: each divider resizes the column on its left, and
 // an empty filler after the last column takes what's left.
 type Widths = Record<"code" | "title" | "client" | "size" | "created", number>;
-const DEFAULT_WIDTHS: Widths = { code: 110, title: 280, client: 140, size: 84, created: 104 };
+const DEFAULT_WIDTHS: Widths = {
+  code: 110,
+  title: 280,
+  client: 140,
+  size: 84,
+  created: 104,
+};
 const MIN_W = 44;
 const MIN_TITLE = 120;
 const MAX_W = 420;
@@ -110,6 +116,7 @@ export default function ProjectList({ rows, selected, sort, onSort, onSelect, on
       className={styles.table}
       role="grid"
       aria-label="Projects"
+      data-area="list"
       aria-rowcount={rows.length}
       style={{ "--cols": cols } as React.CSSProperties}
     >
@@ -169,7 +176,7 @@ export default function ProjectList({ rows, selected, sort, onSort, onSelect, on
               <span role="gridcell" className={styles.code}>
                 {r.jobCode || "—"}
                 {warning && (
-                  <span title={warning} className={styles.warn}>
+                  <span title={warning} role="img" aria-label={`Warning: ${warning}`} className={styles.warn}>
                     <Icon name="warning" />
                   </span>
                 )}

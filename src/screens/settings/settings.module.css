@@ -51,6 +51,24 @@
   transform: translateY(-50%);
 }
 
+/* Windows High Contrast (forced colors): the open section is drawn with Highlight colours. */
+@media (forced-colors: active) {
+  .navItem[aria-current="page"] {
+    forced-color-adjust: none;
+    background: Highlight !important;
+    color: HighlightText !important;
+  }
+
+  .navItem[aria-current="page"]::before {
+    background: HighlightText !important;
+  }
+
+  .navItem[aria-current="page"]:focus-visible {
+    outline: 2px solid HighlightText;
+    outline-offset: -3px;
+  }
+}
+
 .content {
   display: grid;
   align-content: start;
@@ -455,6 +473,16 @@
 }
 
 /* Shortcuts tab */
+.srOnly {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  margin: -1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+
 .rowWrap {
   flex-wrap: wrap;
 }

@@ -3,6 +3,7 @@ import { Button } from "../../components/ui";
 import { setShortcuts, shortcutRecording } from "../../lib/commands";
 import {
   currentPlatform,
+  describeCombo,
   effectiveCombos,
   formatCombo,
   listedShortcuts,
@@ -17,6 +18,17 @@ import type { TabProps } from "../Settings";
 import styles from "./settings.module.css";
 
 type Swap = Extract<Change, { kind: "swap" }>;
+
+const HINT = "Press the new keys. Esc cancels.";
+
+/** Keys as symbols to look at, and in words for a screen reader. */
+function Keys({ combo, platform }: { combo: Combo; platform: ReturnType<typeof currentPlatform> }) {
+  return (
+    <span role="img" aria-label={describeCombo(combo, platform)}>
+      {formatCombo(combo, platform)}
+    </span>
+  );
+}
 
 /** Shortcuts: every shortcut and its keys; click one, press the new keys. Per computer. */
 export default function ShortcutsTab({ view, run }: TabProps) {
@@ -103,10 +115,18 @@ export default function ShortcutsTab({ view, run }: TabProps) {
       if ("error" in got) setProblem({ id, text: got.error });
       else void apply(id, planChange(id, got.combo, platform, overrides));
     };
+    // Clicking anywhere but on this shortcut's keys ends the wait (a click elsewhere also ends
+    // Mac's WebKit focus on the button, which never fires blur).
+    const onPointer = (e: PointerEvent) => {
+      if (e.target instanceof Element && e.target.closest(`[data-keys="${id}"]`)) return;
+      stop();
+    };
     window.addEventListener("keydown", onKey, true);
+    window.addEventListener("pointerdown", onPointer, true);
     window.addEventListener("blur", stop);
     return () => {
       window.removeEventListener("keydown", onKey, true);
+      window.removeEventListener("pointerdown", onPointer, true);
       window.removeEventListener("blur", stop);
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -120,16 +140,20 @@ export default function ShortcutsTab({ view, run }: TabProps) {
 
   return (
     <section className={styles.section}>
-      <p className={styles.hint}>
+      <p id="shortcuts-hint" className={styles.hint}>
         Click a shortcut's keys, then press the new ones. These are for this computer only.{" "}
         {platform === "mac" ? "Help → Keyboard Shortcuts opens this list." : "F1 opens this list from anywhere."}
       </p>
+      {/* Always there (empty), so the hint put into it while waiting for keys is announced. */}
+      <div role="status" className={styles.srOnly}>
+        {recording ? HINT : ""}
+      </div>
       <div className={styles.card}>
         {rows.map((s) => {
           const keys: Combo[] = effectiveCombos(s, platform, overrides);
           const main = keys[0];
           const text = main ? formatCombo(main, platform) : "Not set";
-          const extras = keys.slice(1).map((c) => formatCombo(c, platform));
+          const extras = keys.slice(1);
           const isChanged = !!overrides[s.id];
           const waiting = recording === s.id;
           const base = s[platform][0];
@@ -137,8 +161,22 @@ export default function ShortcutsTab({ view, run }: TabProps) {
             <div key={s.id} className={`${styles.row} ${styles.rowWrap}`}>
               <div className={styles.grow}>
                 <div>{s.label}</div>
-                {extras.length > 0 && <div className={styles.sub}>Also works: {extras.join(", ")}</div>}
-                {waiting && <div className={styles.sub}>Press the new keys. Esc cancels.</div>}
+                {extras.length > 0 && (
+                  <div className={styles.sub}>
+                    Also works:{" "}
+                    {extras.map((c, i) => (
+                      <span key={i}>
+                        {i > 0 && ", "}
+                        <Keys combo={c} platform={platform} />
+                      </span>
+                    ))}
+                  </div>
+                )}
+                {waiting && (
+                  <div className={styles.sub} aria-hidden="true">
+                    {HINT}
+                  </div>
+                )}
                 {problem?.id === s.id && (
                   <div className={styles.problem} role="alert">
                     {problem.text}
@@ -150,16 +188,17 @@ export default function ShortcutsTab({ view, run }: TabProps) {
                 className={waiting ? styles.keysWaiting : styles.keys}
                 aria-label={
                   waiting
-                    ? `${s.label}: type the new keys. Press Escape to cancel.`
-                    : `${s.label}: ${main ? text : "no keys"}. Press Enter to change.`
+                    ? `${s.label}: type the new keys`
+                    : `${s.label}: ${main ? describeCombo(main, platform) : "no keys"}`
                 }
+                aria-describedby="shortcuts-hint"
                 onClick={() => void (waiting ? stop() : begin(s.id))}
               >
                 {waiting ? "Type the new keys…" : text}
               </Button>
               {isChanged && (
                 <Button
-                  aria-label={`Reset ${s.label}${base ? ` to ${formatCombo(base, platform)}` : ""}`}
+                  aria-label={`Reset ${s.label}${base ? ` to ${describeCombo(base, platform)}` : ""}`}
                   onClick={() => {
                     stop();
                     void apply(s.id, planReset(s.id, platform, overrides), true);
@@ -172,7 +211,7 @@ export default function ShortcutsTab({ view, run }: TabProps) {
                 <div
                   className={styles.ask}
                   role="group"
-                  aria-label={asking.swap.message}
+                  aria-labelledby={`swap-${s.id}`}
                   onKeyDown={(e) => {
                     if (e.key !== "Escape") return;
                     // Settings (Windows) closes on Escape unless something inside used it.
@@ -181,7 +220,9 @@ export default function ShortcutsTab({ view, run }: TabProps) {
                     focusKeys(s.id);
                   }}
                 >
-                  <span role="alert">{asking.swap.message}</span>
+                  <span id={`swap-${s.id}`} role="alert">
+                    {asking.swap.message}
+                  </span>
                   <Button
                     data-swap=""
                     variant="primary"
