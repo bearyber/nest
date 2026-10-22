@@ -627,7 +627,8 @@ fn bring_in(
 }
 
 /// This computer's own edit lost a same-version clash: save it as one copy of its own (new id,
-/// new lineage, "<Name> (<this computer>)"). Recorded before anything is replaced. `Ok(None)`
+/// new lineage, "<Name> (<this computer>)"). Recorded (and the record saved) before the copy
+/// is made and before anything is replaced. `Ok(None)`
 /// = there's nothing of mine to keep. The caller then installs the winner as usual.
 fn keep_my_edit(
     ctx: &Ctx,
@@ -652,7 +653,28 @@ fn keep_my_edit(
     taken.extend(book.meta.keys().cloned());
     taken.extend(book.seen.keys().cloned());
     let new = new_id(&name, &taken, ctx.user_dir);
-    let copy = template_io::copy_as(&mine.loaded, ctx.user_dir, &new, &name)?;
+    // The record comes first: if saving it fails, nothing is copied yet and the next try starts
+    // clean (never a new "Wedding (MacBook)" every minute). A copy that then can't be made takes
+    // the record back, so the edit is still kept next time.
+    let key = copy_key(id, version, ctx.device_id);
+    let had_record = book.copied.contains(&key);
+    book.copied.insert(key.clone());
+    if let Err(e) = save(book) {
+        if !had_record {
+            book.copied.remove(&key);
+        }
+        return Err(e);
+    }
+    let copy = match template_io::copy_as(&mine.loaded, ctx.user_dir, &new, &name) {
+        Ok(c) => c,
+        Err(e) => {
+            if !had_record {
+                book.copied.remove(&key);
+                let _ = save(book);
+            }
+            return Err(e);
+        }
+    };
     note_local_save(
         book,
         &copy.template.id,
@@ -660,8 +682,10 @@ fn keep_my_edit(
         true,
         ctx.now,
     );
-    book.copied.insert(copy_key(id, version, ctx.device_id));
-    save(book)?;
+    // Best effort: the record is already safe; this one only remembers the copy's own save.
+    if let Err(e) = save(book) {
+        log::info!("couldn't save the note for the kept copy yet: {e}");
+    }
     Ok(Some((
         mine.loaded.template.name.clone(),
         copy.template.name,

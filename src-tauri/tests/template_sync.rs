@@ -141,6 +141,11 @@ impl Pc {
     }
 
     fn sync(&mut self, w: &World, read: bool) -> Report {
+        self.sync_saving(w, read, true)
+    }
+
+    /// `saves_ok = false`: saving settings fails (disk full, file locked).
+    fn sync_saving(&mut self, w: &World, read: bool, saves_ok: bool) -> Report {
         let names: HashMap<String, String> = [
             (PC.to_string(), "PC".to_string()),
             (MAC.to_string(), "MacBook".to_string()),
@@ -173,7 +178,11 @@ impl Pc {
         let mut book = self.book.clone();
         let report = tick(&ctx, &mut book, read, &bin, &mut |_| {
             saved += 1;
-            Ok(())
+            if saves_ok {
+                Ok(())
+            } else {
+                Err("disk full".to_string())
+            }
         });
         self.book = book;
         report
@@ -331,6 +340,30 @@ fn a_tie_keeps_both_edits_and_the_loser_makes_one_copy() {
         assert_eq!(pc.mine().len(), 2);
         assert_eq!(mac.mine().len(), 2);
     }
+}
+
+/// Saving settings fails every minute: no copy is made while it does, and exactly one when it
+/// works again.
+#[test]
+fn a_failing_settings_save_never_piles_up_copies() {
+    let w = World::new();
+    let mut pc = w.computer(PC);
+    let mut mac = w.computer(MAC);
+    pc.save("promo", 2, "Promo", "pc edit", T1);
+    mac.save("promo", 2, "Promo", "mac edit", T2);
+    pc.sync(&w, true);
+    mac.sync(&w, true);
+    for _ in 0..4 {
+        pc.sync_saving(&w, true, false);
+        assert_eq!(pc.mine().len(), 1, "nothing is copied or replaced yet");
+        assert_eq!(pc.get("promo").unwrap().description, "pc edit");
+        assert!(pc.book.copied.is_empty());
+    }
+    pc.sync(&w, true);
+    pc.sync(&w, true);
+    assert_eq!(pc.mine().len(), 2, "exactly one copy once saving works");
+    assert_eq!(pc.get("promo").unwrap().description, "mac edit");
+    assert_eq!(pc.book.copied.len(), 1);
 }
 
 /// The other way round: the PC's save is later, so the Mac keeps the copy.

@@ -212,7 +212,7 @@
 }
 
 .warningText {
-  color: var(--text-secondary);
+  color: var(--text);
 }
 
 .foot {
@@ -356,6 +356,15 @@
 .whereIssue {
   font-size: var(--text-small);
   color: var(--error);
+}
+
+/* A warning about the typed code: normal text colour (the icon and "Heads up:" carry the meaning). */
+.whereWarning {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--space-2);
+  font-size: var(--text-small);
+  color: var(--text);
 }
 
 /* "Try an example": a quiet line saying nothing is made yet. */

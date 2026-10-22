@@ -21,6 +21,7 @@ import {
   devicesNameCopied,
   devicesRefresh,
   devicesView,
+  keepLetterClash,
   dismissArchiveSuggestion,
   firstProjectTipSeen,
   getSettings,
@@ -151,7 +152,7 @@ export default function Main() {
   const fail = useCallback((e: unknown) => setToast({ message: errorMessage(e) }), []);
 
   const [devices, setDevices] = useState<DevicesView | null>(null);
-  /** "Later" on the same-letter note: that situation stays hidden until it changes or Nest restarts. */
+  /** "Not now" on the same-letter note: that situation stays hidden until it changes or Nest restarts. */
   const [letterLater, setLetterLater] = useState<string | null>(null);
   const refresh = useCallback(
     () =>
@@ -851,12 +852,13 @@ export default function Main() {
           />
         )}
 
-        {!devices?.copiedNote && letterClash.length > 0 && letterLater !== letterClashKey && (
+        {!devices?.copiedNote && letterClash.length > 0 && letterLater !== letterClashKey && devices?.letterClashKept !== letterClashKey && (
           <LetterNote
             clash={letterClash}
             letter={devices?.thisLetter ?? ""}
             mac={isMac()}
             onChange={() => void openSettings("codes").catch(fail)}
+            onKeep={() => void keepLetterClash(letterClashKey).then(setDevices).catch(fail)}
             onLater={() => setLetterLater(letterClashKey)}
           />
         )}

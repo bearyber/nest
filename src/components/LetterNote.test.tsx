@@ -29,11 +29,24 @@ describe("LetterNote", () => {
   it("offers the change as one button and 'Later' as another; nothing happens by itself", () => {
     const change = vi.fn();
     const later = vi.fn();
-    render(<LetterNote clash={[pc]} letter="W" mac onChange={change} onLater={later} />);
+    const keep = vi.fn();
+    render(<LetterNote clash={[pc]} letter="W" mac onChange={change} onKeep={keep} onLater={later} />);
     expect(change).not.toHaveBeenCalled();
     fireEvent.click(screen.getByRole("button", { name: "Change letter…" }));
     expect(change).toHaveBeenCalledTimes(1);
-    fireEvent.click(screen.getByRole("button", { name: "Later" }));
+    fireEvent.click(screen.getByRole("button", { name: "Keep W" }));
+    expect(keep).toHaveBeenCalledTimes(1);
+    fireEvent.click(screen.getByRole("button", { name: "Not now" }));
     expect(later).toHaveBeenCalledTimes(1);
+  });
+
+  it("only the sentence is a live region (not the buttons), and it stays the same element when re-rendered", () => {
+    const props = { letter: "W", mac: true, onChange: () => {}, onKeep: () => {}, onLater: () => {} };
+    const { rerender } = render(<LetterNote clash={[pc]} {...props} />);
+    const status = screen.getByRole("status");
+    expect(status.textContent).toContain("both use W");
+    expect(status.querySelector("button")).toBeNull();
+    rerender(<LetterNote clash={[{ ...pc }]} {...props} />);
+    expect(screen.getByRole("status")).toBe(status);
   });
 });

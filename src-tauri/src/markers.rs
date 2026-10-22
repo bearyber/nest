@@ -26,10 +26,12 @@ pub struct ComputerLetter {
 }
 
 /// This other computer's letter: the one it published, else a guess from its newest codes
-/// (as `pattern` reads them). `None` if neither tells.
-pub fn letter_of(d: &OtherDevice, pattern: &CodePattern) -> Option<ComputerLetter> {
+/// (as `pattern` reads them). `None` if neither tells. `own` is THIS computer's letter: codes
+/// using it are never used for a guess (a project transferred from this computer carries it),
+/// so we never claim another computer shares our letter from our own codes.
+pub fn letter_of(d: &OtherDevice, pattern: &CodePattern, own: &str) -> Option<ComputerLetter> {
     let (letter, guessed) = if d.marker.is_empty() {
-        (guess(d, pattern)?, true)
+        (guess(d, pattern, own)?, true)
     } else {
         (d.marker.clone(), false)
     };
@@ -43,8 +45,8 @@ pub fn letter_of(d: &OtherDevice, pattern: &CodePattern) -> Option<ComputerLette
 }
 
 /// The letter in a computer's newest job codes. Newest only (it may have changed letters since),
-/// the first code that fits the pattern wins.
-fn guess(d: &OtherDevice, pattern: &CodePattern) -> Option<String> {
+/// the first code that fits the pattern and doesn't use `own` wins.
+fn guess(d: &OtherDevice, pattern: &CodePattern, own: &str) -> Option<String> {
     let mut newest: Vec<_> = d
         .projects
         .iter()
@@ -54,14 +56,15 @@ fn guess(d: &OtherDevice, pattern: &CodePattern) -> Option<String> {
     newest
         .into_iter()
         .take(GUESS_FROM_NEWEST)
-        .find_map(|p| pattern.marker_of(&p.job_code, &p.client.code))
+        .filter_map(|p| pattern.marker_of(&p.job_code, &p.client.code))
+        .find(|m| !m.eq_ignore_ascii_case(own))
 }
 
 /// Every other computer whose letter is known or guessed.
-pub fn letters_of(others: &[OtherDevice], pattern: &CodePattern) -> Vec<ComputerLetter> {
+pub fn letters_of(others: &[OtherDevice], pattern: &CodePattern, own: &str) -> Vec<ComputerLetter> {
     others
         .iter()
-        .filter_map(|d| letter_of(d, pattern))
+        .filter_map(|d| letter_of(d, pattern, own))
         .collect()
 }
 
@@ -146,7 +149,7 @@ mod tests {
     #[test]
     fn a_published_letter_is_used_as_it_is() {
         let d = other("PC", "W", vec![project("ACME-X09", "ACME", "2026-01-01")]);
-        let l = letter_of(&d, &pattern()).unwrap();
+        let l = letter_of(&d, &pattern(), "").unwrap();
         assert_eq!((l.letter.as_str(), l.guessed), ("W", false));
     }
 
@@ -162,7 +165,7 @@ mod tests {
                 project("北京-WL01", "北京", "2026-04-01T10:00:00+09:00"),
             ],
         );
-        let l = letter_of(&d, &pattern()).unwrap();
+        let l = letter_of(&d, &pattern(), "").unwrap();
         assert_eq!((l.letter.as_str(), l.guessed), ("WL", true));
         // An old code beyond the newest few doesn't count.
         let mut many = vec![project("ACME-L03", "ACME", "2020-01-01")];
@@ -173,15 +176,34 @@ mod tests {
                 &format!("2026-0{}-01", i + 1),
             ));
         }
-        assert_eq!(letter_of(&other("S", "", many), &pattern()), None);
+        assert_eq!(letter_of(&other("S", "", many), &pattern(), ""), None);
+    }
+
+    #[test]
+    fn codes_with_this_computers_letter_are_not_used_to_guess() {
+        // Projects transferred from this computer (letter W) sit in the other one's list.
+        let d = other(
+            "Mac",
+            "",
+            vec![
+                project("ACME-W09", "ACME", "2026-06-01T10:00:00+09:00"),
+                project("ACME-M03", "ACME", "2026-05-01T10:00:00+09:00"),
+            ],
+        );
+        let l = letter_of(&d, &pattern(), "W").unwrap();
+        assert_eq!(l.letter, "M");
+        let only_ours = other("Mac", "", vec![project("ACME-W09", "ACME", "2026-06-01")]);
+        assert_eq!(letter_of(&only_ours, &pattern(), "w"), None);
+        // Another computer's letter is still read as before.
+        assert_eq!(letter_of(&only_ours, &pattern(), "M").unwrap().letter, "W");
     }
 
     #[test]
     fn nothing_to_go_on_means_no_letter() {
-        assert_eq!(letter_of(&other("Empty", "", vec![]), &pattern()), None);
+        assert_eq!(letter_of(&other("Empty", "", vec![]), &pattern(), ""), None);
         // Projects without a client code (personal ones) say nothing.
         let d = other("P", "", vec![project("OWN-L01", "", "2026-01-01")]);
-        assert_eq!(letter_of(&d, &pattern()), None);
+        assert_eq!(letter_of(&d, &pattern(), ""), None);
     }
 
     #[test]
@@ -189,6 +211,7 @@ mod tests {
         let ls = letters_of(
             &[other("PC", "W", vec![]), other("Mac", "M", vec![])],
             &pattern(),
+            "",
         );
         let c = clashing("w", &ls);
         assert_eq!(c.len(), 1);

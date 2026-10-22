@@ -526,7 +526,11 @@ pub fn remote_codes(app_devices: &Devices) -> Vec<String> {
 
 /// Your other computers' job-code letters (name, letter), published or guessed from their
 /// newest codes. Hidden ("removed") computers aren't in `others`, so they don't count.
-pub fn other_letters(app_devices: &Devices, code_pattern: &str) -> Vec<(String, String)> {
+pub fn other_letters(
+    app_devices: &Devices,
+    code_pattern: &str,
+    own_letter: &str,
+) -> Vec<(String, String)> {
     let Ok(pattern) = crate::names::CodePattern::parse(code_pattern) else {
         return vec![];
     };
@@ -534,7 +538,7 @@ pub fn other_letters(app_devices: &Devices, code_pattern: &str) -> Vec<(String, 
         .runtime
         .lock()
         .map(|rt| {
-            crate::markers::letters_of(&rt.others, &pattern)
+            crate::markers::letters_of(&rt.others, &pattern, own_letter)
                 .into_iter()
                 .map(|l| (l.name, l.letter))
                 .collect()
@@ -571,6 +575,8 @@ pub struct DevicesView {
     /// v0.7.4: this computer was a copy and has its own place in the list now; the note that
     /// asks for a name is still to be answered.
     pub copied_note: bool,
+    /// "Keep W" was chosen for exactly this situation (see `keep_letter_clash`); empty = none.
+    pub letter_clash_kept: String,
     /// The computer's name as the system has it: what the note's name box starts with.
     pub system_name: String,
 }
@@ -626,7 +632,7 @@ fn view(state: &AppState) -> AppResult<DevicesView> {
         .collect();
     forgotten.sort_by(|a, b| a.name.cmp(&b.name));
     let letters = crate::names::CodePattern::parse(&s.code_pattern)
-        .map(|p| crate::markers::letters_of(&rt.others, &p))
+        .map(|p| crate::markers::letters_of(&rt.others, &p, &s.local_marker))
         .unwrap_or_default();
     let letter_clash = crate::markers::clashing(&s.local_marker, &letters)
         .into_iter()
@@ -661,6 +667,7 @@ fn view(state: &AppState) -> AppResult<DevicesView> {
         letter_clash,
         suggested_letter,
         copied_note: s.copied_note && enabled(&s).is_some(),
+        letter_clash_kept: s.letter_clash_kept.clone(),
         system_name: default_name(),
     })
 }
@@ -710,6 +717,8 @@ fn clean_name(name: &str) -> AppResult<String> {
     Ok(name)
 }
 
+const MAX_LETTER_KEY: usize = 400;
+
 /// The note after a copied computer got its own id: save the name it was given.
 #[tauri::command(async)]
 pub fn devices_name_copied(app: AppHandle, name: String) -> AppResult<DevicesView> {
@@ -722,6 +731,23 @@ pub fn devices_name_copied(app: AppHandle, name: String) -> AppResult<DevicesVie
     sync_now(&app);
     let _ = app.emit(CHANGED_EVENT, ());
     view(&app.state::<AppState>())
+}
+
+/// "Keep W" on the same-letter note: remember this situation (the letter and the computers
+/// sharing it, as the window worked it out) so the note stays quiet until it changes. Nothing
+/// else changes; an empty key forgets the choice.
+#[tauri::command(async)]
+pub fn keep_letter_clash(app: AppHandle, key: String) -> AppResult<DevicesView> {
+    let state = app.state::<AppState>();
+    if state.settings_error.is_none() {
+        let key: String = key.chars().take(MAX_LETTER_KEY).collect();
+        crate::settings_cmd::edit_settings_quietly(&state, |s| {
+            s.letter_clash_kept = key;
+            Ok(())
+        })?;
+    }
+    let _ = app.emit(CHANGED_EVENT, ());
+    view(&state)
 }
 
 /// Turn Devices on (or change the folder / name). A device id is made once.

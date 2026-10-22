@@ -6,8 +6,9 @@
 //! How it tells: every launch makes a random token, held in memory and written in this
 //! computer's own list. Our own earlier tokens are remembered in settings (`past_tokens`), so
 //! a list we wrote ourselves is never "foreign". A list written by a token that isn't ours,
-//! newer than our own last write, and seen at two different times, means another install is
-//! writing it. A list with no token (Nest 0.7.3) proves nothing. The one whose token is larger
+//! seen as two different writes (compared as written, never by clock), means another install is
+//! writing it. Our earlier tokens count as ours only on the file as it was when this launch
+//! first looked. A list with no token (Nest 0.7.3) proves nothing. The one whose token is larger
 //! moves; the other keeps its id and writes its list again at once. After a move the evidence
 //! starts over, so it can never loop.
 
@@ -19,7 +20,7 @@ use crate::settings::Settings;
 
 /// How many of this computer's own earlier tokens are remembered.
 pub const MAX_PAST_TOKENS: usize = 10;
-/// How many different write times are kept as evidence (two are enough).
+/// How many different foreign writes are kept as evidence (two are enough).
 const MAX_SEEN: usize = 4;
 
 /// This launch's token: random, made once, never saved except in this computer's own list.
@@ -29,10 +30,17 @@ pub fn launch_token() -> &'static str {
 }
 
 /// What has been seen of another install writing our list (kept in memory only).
+/// Only "which write is this" is compared (token + `updatedAt` as plain text), never a time
+/// against this computer's clock: the two installs may have different clocks.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct Watch {
-    /// The different `updatedAt` times at which a foreign token was seen.
-    seen: Vec<String>,
+    /// Whether this launch has looked at the list yet.
+    looked: bool,
+    /// The list as first seen this launch (token, updatedAt), if there was one. A file carrying
+    /// one of our own earlier tokens is ours only while it is still exactly this one.
+    baseline: Option<(String, String)>,
+    /// The different foreign writes seen (token, updatedAt).
+    seen: Vec<(String, String)>,
     /// The token of the newest foreign write.
     other_token: String,
 }
@@ -62,41 +70,36 @@ pub fn remember_token(past: &mut Vec<String>, token: &str) -> bool {
     true
 }
 
-fn parse(t: &str) -> Option<chrono::DateTime<chrono::FixedOffset>> {
-    chrono::DateTime::parse_from_rfc3339(t).ok()
-}
-
-/// Judge our own list as it is in the folder (`file`). `our_last_write` is the `updatedAt` of
-/// the last list this install wrote (none yet = any foreign write counts).
+/// Judge our own list as it is in the folder (`file`). A write is foreign when its token is
+/// not this launch's and is not one of our earlier tokens on a file that was already there
+/// when this launch first looked (an earlier token on a file that changed since is someone
+/// else writing: a copy made while the original was running holds the original's token).
+/// Two different foreign writes mean another install is writing this list.
 pub fn judge(
     watch: &mut Watch,
     file: Option<&DeviceFile>,
     my_token: &str,
     past: &[String],
-    our_last_write: Option<&str>,
 ) -> Verdict {
-    let Some(file) = file else {
+    let sig = file.map(|f| (f.token.clone(), f.updated_at.clone()));
+    if !watch.looked {
+        watch.looked = true;
+        watch.baseline = sig.clone();
+    }
+    let (Some(file), Some(sig)) = (file, sig) else {
         return Verdict::Alone;
     };
-    if file.token.is_empty() || file.token == my_token || past.contains(&file.token) {
+    if file.token.is_empty() || file.token == my_token {
         return Verdict::Alone; // ours, or an older Nest: no evidence
     }
-    let Some(written) = parse(&file.updated_at) else {
-        return Verdict::Alone;
-    };
-    // Older than our own last write: a stale copy coming back from a sync app, not a write
-    // made after ours.
-    if our_last_write
-        .and_then(parse)
-        .is_some_and(|ours| written <= ours)
-    {
+    if past.contains(&file.token) && watch.baseline.as_ref() == Some(&sig) {
+        return Verdict::Alone; // one of our own earlier writes, from before this launch
+    }
+    // The same write read again tells nothing new (a stale copy read twice, a slow sync app).
+    if watch.seen.contains(&sig) {
         return Verdict::Alone;
     }
-    // The same write read again tells nothing new.
-    if watch.seen.iter().any(|s| s == &file.updated_at) {
-        return Verdict::Alone;
-    }
-    watch.seen.push(file.updated_at.clone());
+    watch.seen.push(sig);
     let extra = watch.seen.len().saturating_sub(MAX_SEEN);
     watch.seen.drain(..extra);
     watch.other_token = file.token.clone();
@@ -106,8 +109,8 @@ pub fn judge(
     if my_token > watch.other_token.as_str() {
         Verdict::Move
     } else {
-        // The other install moves. Start the count over: if it never does, we see it again.
-        *watch = Watch::default();
+        // The other install moves. Start the evidence over: if it never does, we see it again.
+        watch.seen.clear();
         Verdict::Stay
     }
 }
@@ -123,8 +126,7 @@ pub fn step(
     last: &mut Option<DeviceFile>,
 ) -> Verdict {
     let file = devices::read_own(dir, own_id);
-    let ours = last.as_ref().map(|l| l.updated_at.clone());
-    let v = judge(watch, file.as_ref(), my_token, past, ours.as_deref());
+    let v = judge(watch, file.as_ref(), my_token, past);
     if matches!(v, Verdict::Rewrite | Verdict::Stay) {
         *last = None;
     }
@@ -167,79 +169,112 @@ mod tests {
     #[test]
     fn our_own_and_older_files_are_never_evidence() {
         let mut w = Watch::default();
+        // The file as first seen this launch carries an earlier token of ours.
         let past = vec!["old".to_string()];
-        assert_eq!(judge(&mut w, None, "me", &past, None), Verdict::Alone);
         assert_eq!(
-            judge(&mut w, Some(&file("me", T1)), "me", &past, None),
+            judge(&mut w, Some(&file("old", T1)), "me", &past),
             Verdict::Alone
         );
         assert_eq!(
-            judge(&mut w, Some(&file("old", T1)), "me", &past, None),
+            judge(&mut w, Some(&file("old", T1)), "me", &past),
+            Verdict::Alone
+        );
+        assert_eq!(judge(&mut w, None, "me", &past), Verdict::Alone);
+        assert_eq!(
+            judge(&mut w, Some(&file("me", T2)), "me", &past),
             Verdict::Alone
         );
         // 0.7.3: no token at all.
         assert_eq!(
-            judge(&mut w, Some(&file("", T1)), "me", &past, None),
+            judge(&mut w, Some(&file("", T3)), "me", &past),
             Verdict::Alone
         );
-        assert_eq!(w, Watch::default());
+        assert!(w.seen.is_empty());
     }
 
     #[test]
     fn one_foreign_write_rewrites_two_move_or_stay() {
         let mut w = Watch::default();
         assert_eq!(
-            judge(&mut w, Some(&file("zzz", T1)), "aaa", &[], None),
+            judge(&mut w, Some(&file("zzz", T1)), "aaa", &[]),
             Verdict::Rewrite
         );
         // The same write read again: nothing new.
         assert_eq!(
-            judge(&mut w, Some(&file("zzz", T1)), "aaa", &[], None),
+            judge(&mut w, Some(&file("zzz", T1)), "aaa", &[]),
             Verdict::Alone
         );
         // A second, different write: "aaa" is the smaller token, so it stays.
         assert_eq!(
-            judge(&mut w, Some(&file("zzz", T2)), "aaa", &[], Some(T1)),
+            judge(&mut w, Some(&file("zzz", T2)), "aaa", &[]),
             Verdict::Stay
         );
-        assert_eq!(w, Watch::default());
+        assert!(w.seen.is_empty());
 
         let mut w = Watch::default();
         assert_eq!(
-            judge(&mut w, Some(&file("aaa", T1)), "zzz", &[], None),
+            judge(&mut w, Some(&file("aaa", T1)), "zzz", &[]),
             Verdict::Rewrite
         );
         assert_eq!(
-            judge(&mut w, Some(&file("aaa", T2)), "zzz", &[], None),
+            judge(&mut w, Some(&file("aaa", T2)), "zzz", &[]),
             Verdict::Move
         );
     }
 
     #[test]
-    fn a_stale_copy_older_than_our_last_write_is_no_evidence() {
+    fn a_stale_foreign_file_read_again_is_no_second_write() {
         let mut w = Watch::default();
-        // We wrote at T3; a sync app brings back foreign files from T1 and T2.
-        assert_eq!(
-            judge(&mut w, Some(&file("zzz", T1)), "aaa", &[], Some(T3)),
-            Verdict::Alone
-        );
-        assert_eq!(
-            judge(&mut w, Some(&file("zzz", T2)), "aaa", &[], Some(T3)),
-            Verdict::Alone
-        );
-        assert_eq!(
-            judge(&mut w, Some(&file("zzz", T3)), "aaa", &[], Some(T3)),
-            Verdict::Alone
-        );
-        assert_eq!(w, Watch::default());
+        for _ in 0..5 {
+            assert_ne!(
+                judge(&mut w, Some(&file("zzz", T1)), "aaa", &[]),
+                Verdict::Move
+            );
+        }
+        assert_eq!(w.seen.len(), 1);
     }
 
     #[test]
-    fn a_time_that_cannot_be_read_is_no_evidence() {
+    fn times_are_never_compared_only_which_write_it_is() {
+        // Unreadable or "earlier" times (another computer's clock) change nothing: two different
+        // writes are evidence, one write is not.
         let mut w = Watch::default();
         assert_eq!(
-            judge(&mut w, Some(&file("zzz", "yesterday")), "aaa", &[], None),
+            judge(&mut w, Some(&file("zzz", "yesterday")), "aaa", &[]),
+            Verdict::Rewrite
+        );
+        assert_eq!(
+            judge(&mut w, Some(&file("zzz", "yesterday")), "aaa", &[]),
             Verdict::Alone
+        );
+        assert_eq!(
+            judge(
+                &mut w,
+                Some(&file("zzz", "2001-01-01T00:00:00Z")),
+                "aaa",
+                &[]
+            ),
+            Verdict::Stay
+        );
+    }
+
+    #[test]
+    fn the_copy_holds_the_originals_running_token() {
+        // Settings copied while the original ran: the copy's past tokens hold the original's
+        // current token. Written by the original after the copy launched, it is foreign.
+        let mut w = Watch::default();
+        let past = vec!["orig".to_string()];
+        assert_eq!(
+            judge(&mut w, Some(&file("orig", T1)), "xcopy", &past),
+            Verdict::Alone // as first seen: before this launch
+        );
+        assert_eq!(
+            judge(&mut w, Some(&file("orig", T2)), "xcopy", &past),
+            Verdict::Rewrite
+        );
+        assert_eq!(
+            judge(&mut w, Some(&file("orig", T3)), "xcopy", &past),
+            Verdict::Move // "xcopy" > "orig"
         );
     }
 

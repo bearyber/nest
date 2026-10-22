@@ -111,6 +111,10 @@
   font-size: var(--text-small);
 }
 
+.warning[hidden] {
+  display: none;
+}
+
 /* A titled group of settings. */
 .section {
   display: grid;

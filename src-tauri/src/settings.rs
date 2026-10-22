@@ -28,6 +28,9 @@ pub struct Settings {
     /// v0.7.4: this computer was found to be a copy and got its own id; the note that asks
     /// for a name is still to be answered.
     pub copied_note: bool,
+    /// v0.7.4: "Keep W" on the same-letter note: which situation (this computer's letter plus
+    /// the computers sharing it) was kept as it is. Quiet until that situation changes.
+    pub letter_clash_kept: String,
     pub last_template: Option<String>,
     /// Spaces whose projects have no client (the Client field is hidden there).
     pub no_client_spaces: Vec<String>,
@@ -134,6 +137,7 @@ impl Default for Settings {
             past_markers: vec![],
             past_tokens: vec![],
             copied_note: false,
+            letter_clash_kept: String::new(),
             last_template: None,
             no_client_spaces: vec!["Personal".into()],
             own_code: "OWN".into(),

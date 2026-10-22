@@ -13,26 +13,31 @@ export function letterNoteText(clash: ComputerLetter[], letter: string, mac: boo
 
 /** Shown when another of your computers makes job codes with the same letter as this one.
  *  Nothing changes by itself: "Change letter…" opens Settings → Job codes with a free letter
- *  suggested; "Later" hides this until the situation changes or Nest restarts. */
+ *  suggested; "Keep W" remembers (in settings) that this is fine until the situation changes;
+ *  "Not now" hides it until Nest restarts. It stays mounted while the situation lasts (the
+ *  parent never re-creates it), and only the sentence is a live region, so it is read out once. */
 export default function LetterNote({
   clash,
   letter,
   mac,
   onChange,
+  onKeep,
   onLater,
 }: {
   clash: ComputerLetter[];
   letter: string;
   mac: boolean;
   onChange: () => void;
+  onKeep: () => void;
   onLater: () => void;
 }) {
   return (
-    <div className={styles.update} role="status">
-      <span>{letterNoteText(clash, letter, mac)}</span>
+    <div className={styles.update} role="group" aria-label="Same job-code letter">
+      <span role="status">{letterNoteText(clash, letter, mac)}</span>
       <span className={styles.noteActions}>
         <Button onClick={onChange}>Change letter…</Button>
-        <Button onClick={onLater}>Later</Button>
+        <Button onClick={onKeep}>Keep {letter}</Button>
+        <Button onClick={onLater}>Not now</Button>
       </span>
     </div>
   );

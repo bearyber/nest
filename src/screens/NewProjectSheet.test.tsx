@@ -214,7 +214,14 @@ describe("NewProjectSheet", () => {
       'VX-W07 uses the letter W, which your computer "Studio PC" uses, so it could clash with a code made there. You can still use it.';
     const restore = planWith({ issues: [{ level: "warning", field: "jobCode", message }] });
     render(<NewProjectSheet onClose={() => {}} onCreated={() => {}} />);
-    expect(await screen.findByText(message)).toBeTruthy();
+    const text = await screen.findByText(message);
+    // A quiet status (not an alert) that starts with "Heads up:" and is tied to the code box.
+    const warning = text.closest("[role]") as HTMLElement;
+    expect(warning.getAttribute("role")).toBe("status");
+    expect(warning.textContent).toContain("Heads up:");
+    fireEvent.click(await screen.findByRole("button", { name: "Change…" }));
+    fireEvent.click(await screen.findByLabelText("Edit job code"));
+    expect(screen.getByLabelText("Job code").getAttribute("aria-describedby")).toBe(warning.id);
     fireEvent.change(await screen.findByLabelText(/^Artist/), { target: { value: "KIRA" } });
     await screen.findAllByText("VX-L01_KIRA");
     const create = screen.getByRole("button", { name: /^Create/ }) as HTMLButtonElement;

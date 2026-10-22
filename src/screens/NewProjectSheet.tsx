@@ -587,11 +587,20 @@ export default function NewProjectSheet({ initialTemplate, example = false, onCl
                     </button>
                   )}
                 </div>
-                {codeIssues.map((i) => (
-                  <div key={i.message} className={styles.whereIssue} role="alert">
-                    {i.message}
-                  </div>
-                ))}
+                {codeIssues.map((i, n) =>
+                  i.level === "error" ? (
+                    <div key={i.message} id={`code-issue-${n}`} className={styles.whereIssue} role="alert">
+                      {i.message}
+                    </div>
+                  ) : (
+                    <div key={i.message} id={`code-issue-${n}`} className={styles.whereWarning} role="status">
+                      <Icon name="warning" />
+                      <span>
+                        <b>Heads up:</b> {i.message}
+                      </span>
+                    </div>
+                  ),
+                )}
                 {showWhere && (
                   <div className={`${styles.card} nest-unfold`}>
                     <div className={styles.row}>
@@ -637,6 +646,7 @@ export default function NewProjectSheet({ initialTemplate, example = false, onCl
                           <>
                             <input
                               aria-label="Job code"
+                              aria-describedby={codeIssues.map((_, n) => `code-issue-${n}`).join(" ") || undefined}
                               className={`${styles.input} ${styles.codeInput}`}
                               value={codeOverride}
                               spellCheck={false}

@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useState, type ReactNode } from "react";
 import { listen } from "@tauri-apps/api/event";
 import { Button } from "../../components/ui";
 import { devicesView, setCodeSettings } from "../../lib/commands";
@@ -34,6 +34,18 @@ export const CODE_STYLES = [
   { pattern: "{clientCode}-{marker}{seq:03}", note: "For 100+ jobs per client" },
   { pattern: "{clientCode}{marker}{seq:02}", note: "No dash" },
 ];
+
+/** A warning with its fix as buttons. The box and its `role="status"` sentence stay in place and
+ *  only the words change (so typing a letter doesn't make a new element each time); the buttons
+ *  are outside the status text so they aren't read out as part of it. */
+function Warning({ text, children }: { text: string | null; children?: ReactNode }) {
+  return (
+    <div className={styles.warning} hidden={!text}>
+      <span role="status">{text}</span>
+      {text && <div className={styles.actions}>{children}</div>}
+    </div>
+  );
+}
 
 /** "your PC", "your PC and your Mac". */
 export function yourComputers(names: string[]): string {
@@ -157,35 +169,27 @@ export default function CodesTab({ view, run }: TabProps) {
         </div>
       </section>
 
-      {noLetter && (
-        <div className={styles.warning} role="alert">
-          <span>
-            This style leaves out the computer's letter, so two of your computers could make the same code (like{" "}
-            {previewCode(pattern, "ACME", letter, 4)} on both). Use {previewCode(CODE_STYLES[0].pattern, "ACME", letter, 4)}{" "}
-            instead?
-          </span>
-          <div className={styles.actions}>
-            <Button onClick={() => void saveOne(CODE_STYLES[0].pattern, s.localMarker).then((r) => r !== undefined && setPattern(CODE_STYLES[0].pattern))}>
-              Use {previewCode(CODE_STYLES[0].pattern, "ACME", letter, 4)}
-            </Button>
-          </div>
-        </div>
-      )}
-      {separator && (
-        <div className={styles.warning} role="alert">
-          <span>{separator}</span>
-          <div className={styles.actions}>
-            <Button
-              onClick={() => {
-                const fixed = withSeparator(pattern);
-                void saveOne(fixed, s.localMarker).then((r) => r !== undefined && setPattern(fixed));
-              }}
-            >
-              Add a dash
-            </Button>
-          </div>
-        </div>
-      )}
+      <Warning
+        text={
+          noLetter
+            ? `This style leaves out the computer's letter, so two of your computers could make the same code (like ${previewCode(pattern, "ACME", letter, 4)} on both). Use ${previewCode(CODE_STYLES[0].pattern, "ACME", letter, 4)} instead?`
+            : null
+        }
+      >
+        <Button onClick={() => void saveOne(CODE_STYLES[0].pattern, s.localMarker).then((r) => r !== undefined && setPattern(CODE_STYLES[0].pattern))}>
+          Use {previewCode(CODE_STYLES[0].pattern, "ACME", letter, 4)}
+        </Button>
+      </Warning>
+      <Warning text={separator}>
+        <Button
+          onClick={() => {
+            const fixed = withSeparator(pattern);
+            void saveOne(fixed, s.localMarker).then((r) => r !== undefined && setPattern(fixed));
+          }}
+        >
+          Add a dash
+        </Button>
+      </Warning>
 
       <section className={styles.section}>
         <h3 className={styles.sectionTitle}>The parts you can change</h3>
@@ -220,26 +224,20 @@ export default function CodesTab({ view, run }: TabProps) {
                 made is renamed.
               </p>
             )}
-            {takenBy.length > 0 && kept !== marker && (
-              <div className={styles.warning} role="alert">
-                <span>
-                  {marker} {takenBy.some((l) => l.guessed) ? "seems to be used" : "is used"} by{" "}
-                  {yourComputers(takenBy.map((l) => l.name))}.{suggested && ` Use ${suggested} instead?`}
-                </span>
-                <div className={styles.actions}>
-                  {suggested && (
-                    <Button
-                      onClick={() =>
-                        void saveOne(s.codePattern, suggested).then((r) => r !== undefined && setMarker(suggested))
-                      }
-                    >
-                      Use {suggested}
-                    </Button>
-                  )}
-                  <Button onClick={() => setKept(marker)}>Keep {marker}</Button>
-                </div>
-              </div>
-            )}
+            <Warning
+              text={
+                takenBy.length > 0 && kept !== marker
+                  ? `${marker} ${takenBy.some((l) => l.guessed) ? "seems to be used" : "is used"} by ${yourComputers(takenBy.map((l) => l.name))}.${suggested ? ` Use ${suggested} instead?` : ""}`
+                  : null
+              }
+            >
+              {suggested && (
+                <Button onClick={() => void saveOne(s.codePattern, suggested).then((r) => r !== undefined && setMarker(suggested))}>
+                  Use {suggested}
+                </Button>
+              )}
+              <Button onClick={() => setKept(marker)}>Keep {marker}</Button>
+            </Warning>
             {!markerProblem && s.localMarker === "L" && marker === "L" && (
               <p className={styles.note}>
                 L was the old default. If another of your computers also uses L, change one of them.

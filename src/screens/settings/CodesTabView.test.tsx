@@ -33,6 +33,7 @@ function dev(extra: Partial<DevicesView> = {}): DevicesView {
     letterClash: [pc],
     suggestedLetter: "P",
     copiedNote: false,
+    letterClashKept: "",
     systemName: "MacBook",
     ...extra,
   };
@@ -67,6 +68,22 @@ describe("Settings → Job codes: the computer's letter", () => {
     fireEvent.change(screen.getByLabelText("Letter for this computer"), { target: { value: "JB" } });
     expect(screen.getByText(/can't start with J/)).toBeTruthy();
     expect((screen.getByRole("button", { name: "Save" }) as HTMLButtonElement).disabled).toBe(true);
+  });
+
+  it("the letter warning is one stable status element whose words change as you type", async () => {
+    devicesView.mockResolvedValue(dev());
+    render(<CodesTab view={view()} run={run} />);
+    const first = await screen.findByText(/W is used by your PC/);
+    expect(first.getAttribute("role")).toBe("status");
+    expect(first.querySelector("button")).toBeNull();
+    // A free letter: the words go, the element stays.
+    fireEvent.change(screen.getByLabelText("Letter for this computer"), { target: { value: "Q" } });
+    expect(first.isConnected).toBe(true);
+    expect(first.textContent).toBe("");
+    // Taken again: the same element has words again.
+    fireEvent.change(screen.getByLabelText("Letter for this computer"), { target: { value: "W" } });
+    expect(first.textContent).toMatch(/W is used by your PC/);
+    expect(screen.queryAllByRole("alert")).toHaveLength(0);
   });
 
   it("a taken letter says who uses it and offers a free one as one button", async () => {

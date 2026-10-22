@@ -1079,7 +1079,11 @@ fn two_computers_with_one_letter_are_noticed_and_a_free_one_is_suggested() {
     pc.marker = "W".into();
     write_own(&dir, &pc, &mut None).unwrap();
     let others = read_others(&dir, MAC, &mut HashMap::new());
-    let letters = letters_of(&others, &CodePattern::parse(DEFAULT_CODE_PATTERN).unwrap());
+    let letters = letters_of(
+        &others,
+        &CodePattern::parse(DEFAULT_CODE_PATTERN).unwrap(),
+        "W",
+    );
     // This Mac also uses W: noticed.
     let clash = clashing("W", &letters);
     assert_eq!(clash.len(), 1);
@@ -1203,6 +1207,9 @@ fn an_install_that_is_alone_never_moves() {
     // Several launches: each makes a new token, the earlier ones are remembered.
     for launch in 0..14u32 {
         x.token = format!("launch{launch:02}");
+        // A new process: nothing is remembered in memory.
+        x.watch = Watch::default();
+        x.last = None;
         for k in 0..5 {
             assert_eq!(x.sync(&dir, launch * 100 + k * 10 + 1), Verdict::Alone);
         }
@@ -1227,8 +1234,9 @@ fn a_stale_file_read_twice_is_no_move() {
     x.sync(&dir, 100);
     // A sync app brings back a foreign file written before ours.
     foreign(&dir, "aaaa", 50);
+    // (One sighting may ask for a rewrite; it never moves anything.)
     for _ in 0..3 {
-        assert_eq!(x.sync(&dir, 101), Verdict::Alone);
+        assert_ne!(x.sync(&dir, 101), Verdict::Move);
         foreign(&dir, "aaaa", 50);
     }
     assert_eq!(x.moved, 0);
@@ -1249,6 +1257,24 @@ fn a_stale_file_read_twice_is_no_move() {
     );
     assert_eq!(y.moved, 0);
     y.moved = 0;
+}
+
+#[test]
+fn the_copy_holds_the_originals_running_token_and_exactly_one_moves() {
+    for (orig_token, copy_token) in [("aaaa", "zzzz"), ("zzzz", "aaaa")] {
+        let (_tmp, dir) = shared();
+        let mut orig = Install::new(orig_token, PC);
+        orig.sync(&dir, 1);
+        // Settings copied while the original was running: its current token is in the copy's
+        // past tokens.
+        let mut copy = Install::new(copy_token, PC);
+        copy.settings.past_tokens.push(orig_token.into());
+        for round in 0..30u32 {
+            orig.sync(&dir, round * 10 + 11);
+            copy.sync(&dir, round * 10 + 12);
+        }
+        assert_eq!(orig.moved + copy.moved, 1, "{orig_token}/{copy_token}");
+    }
 }
 
 #[test]

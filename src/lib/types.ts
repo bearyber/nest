@@ -358,6 +358,14 @@ export interface Settings {
   localMarker: string;
   /** v0.7.4: letters this computer used before (newest last); a changed letter continues the numbers. */
   pastMarkers: string[];
+  /** v0.7.4: this computer's own earlier launch tokens (copied-computer detection); never shown. */
+  pastTokens: string[];
+  /** v0.7.4: this computer was found to be a copy; the note asking for a name is still to answer. */
+  copiedNote: boolean;
+  /** v0.7.4: "Keep W" was chosen for this situation (letter + computers sharing it); "" = none. */
+  letterClashKept: string;
+  /** v0.7.4: template edits kept as a copy after a same-version clash ("id|version|device id"). */
+  templateConflictCopies: string[];
   lastTemplate: string | null;
   noClientSpaces: string[];
   ownCode: string;
@@ -548,6 +556,8 @@ export interface DevicesView {
   suggestedLetter: string;
   /** v0.7.4: this computer was a copy and has its own place in the list now; the note asking for a name is still to answer. */
   copiedNote: boolean;
+  /** "Keep W" was chosen for exactly this situation (the key the note computes); "" = none. */
+  letterClashKept: string;
   /** The computer's name as the system has it: where the note's name box starts. */
   systemName: string;
 }

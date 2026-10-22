@@ -41,7 +41,9 @@ pub struct DeviceFile {
     pub name: String,
     /// "windows" | "macos" | other.
     pub os: String,
-    /// RFC 3339, display only ("updated 3 min ago"); never used to merge anything.
+    /// RFC 3339, display only ("updated 3 min ago"); never used to merge anything. Copied-computer
+    /// detection (copied.rs) also reads it, but only as an opaque "which write is this" label,
+    /// never compared with a clock.
     pub updated_at: String,
     pub projects: Vec<DeviceProject>,
     /// v0.3.2: "mark done / active" requests this computer sends to the computer that owns a

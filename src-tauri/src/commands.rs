@@ -332,7 +332,11 @@ fn build_plan(
         // apart from this computer's own: a changed letter only continues THIS computer's numbers).
         remote_codes: crate::devices_cmd::remote_codes(&state.devices),
         past_markers: settings.past_markers.clone(),
-        other_letters: crate::devices_cmd::other_letters(&state.devices, &settings.code_pattern),
+        other_letters: crate::devices_cmd::other_letters(
+            &state.devices,
+            &settings.code_pattern,
+            &settings.local_marker,
+        ),
         existing_folders: scan.folders.clone(),
         code_override: request.code_override.clone(),
         own_code: (request.no_client || settings.no_client_spaces.contains(&request.space))

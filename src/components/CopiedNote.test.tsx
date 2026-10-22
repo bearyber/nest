@@ -48,6 +48,24 @@ describe("CopiedNote", () => {
     expect(save).not.toHaveBeenCalled();
   });
 
+  it("holds controls in a group, with only the sentence as a live region", () => {
+    setup();
+    expect(screen.getByRole("group", { name: "This computer was copied" })).toBeTruthy();
+    const status = screen.getByRole("status");
+    expect(status.textContent).toBe(copiedNoteText(true));
+    expect(status.querySelector("input,button")).toBeNull();
+    const box = screen.getByLabelText("Name for this computer");
+    expect(box.getAttribute("aria-describedby")).toBe(status.id);
+  });
+
+  it("says what a valid name is when Save is off", () => {
+    setup();
+    fireEvent.change(screen.getByLabelText("Name for this computer"), { target: { value: "" } });
+    const hint = screen.getByText("1 to 40 characters");
+    expect(screen.getByRole("button", { name: "Save" }).getAttribute("aria-describedby")).toBe(hint.id);
+    expect(screen.getByLabelText("Name for this computer").getAttribute("aria-describedby")).toContain(hint.id);
+  });
+
   it("offers a free letter in the same note when the letter is the original's", () => {
     const { use } = setup({ clash: [orig] });
     expect(screen.getByText(/Your Studio Mac and this Mac both use the letter M/)).toBeTruthy();

@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useId, useState } from "react";
 import type { ComputerLetter } from "../lib/types";
 import { Button } from "./ui";
 import styles from "../screens/Main.module.css";
@@ -40,13 +40,19 @@ export default function CopiedNote({
   const [name, setName] = useState(initialName);
   const trimmed = name.trim();
   const ok = trimmed.length > 0 && trimmed.length <= 40;
+  const id = useId();
+  const textId = `${id}-text`;
+  const hintId = `${id}-hint`;
   return (
-    <div className={styles.update} role="status">
+    <div className={styles.update} role="group" aria-label="This computer was copied">
       <div className={styles.noteBody}>
-        <span>{copiedNoteText(mac)}</span>
+        <span id={textId} role="status">
+          {copiedNoteText(mac)}
+        </span>
         <span className={styles.noteActions}>
           <input
             aria-label="Name for this computer"
+            aria-describedby={ok ? textId : `${textId} ${hintId}`}
             value={name}
             maxLength={40}
             onChange={(e) => setName(e.target.value)}
@@ -54,13 +60,14 @@ export default function CopiedNote({
               if (e.key === "Enter" && ok) onSave(trimmed);
             }}
           />
-          <Button disabled={!ok} onClick={() => onSave(trimmed)}>
+          <Button disabled={!ok} onClick={() => onSave(trimmed)} aria-describedby={ok ? undefined : hintId}>
             Save
           </Button>
+          {!ok && <span id={hintId}>1 to 40 characters</span>}
         </span>
         {clash.length > 0 && suggested && (
           <span className={styles.noteActions}>
-            <span>{copiedLetterText(clash, letter, mac)}</span>
+            <span role="status">{copiedLetterText(clash, letter, mac)}</span>
             <Button onClick={() => onUseLetter(suggested)}>Use {suggested}</Button>
           </span>
         )}

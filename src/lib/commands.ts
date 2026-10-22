@@ -200,6 +200,8 @@ export const devicesEnable = (name: string, folder: string) => s<DevicesView>("d
 export const devicesDisable = () => s<DevicesView>("devices_disable");
 export const devicesForget = (deviceId: string, forget: boolean) =>
   s<DevicesView>("devices_forget", { deviceId, forget });
+/** "Keep W": the same-letter note stays quiet until that situation (this letter + these computers) changes. */
+export const keepLetterClash = (key: string) => s<DevicesView>("keep_letter_clash", { key });
 export const devicesNameCopied = (name: string) => s<DevicesView>("devices_name_copied", { name });
 export const devicesClaim = (deviceId: string) => s<DevicesView>("devices_claim", { deviceId });
 export const devicesRefresh = () => invoke<void>("devices_refresh");
