@@ -14,6 +14,7 @@ import {
   recordedCombo,
   setCustomKeys,
   installBrowserKeyGuard,
+  installHelpKey,
   isBrowserKey,
   matchesCombo,
   type Combo,
@@ -461,5 +462,19 @@ describe("changed keys", () => {
         }),
       ).toEqual({ kind: "save", overrides: {} });
     });
+  });
+});
+
+describe("macOS: a menu bar key is left for the menu bar", () => {
+  afterEach(() => setCustomKeys({}));
+
+  // In the webview, preventDefault on a key stops it reaching the menu bar: ⌘N did nothing (0.7.2).
+  it("the page doesn't swallow a key the Help menu item owns", () => {
+    setCustomKeys({ "keyboard-shortcuts": { key: "k", mod: true, shift: true } });
+    const stop = installHelpKey(window, "mac");
+    const e = new KeyboardEvent("keydown", { key: "k", code: "KeyK", metaKey: true, shiftKey: true, cancelable: true });
+    window.dispatchEvent(e);
+    stop();
+    expect(e.defaultPrevented).toBe(false);
   });
 });

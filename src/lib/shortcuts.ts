@@ -632,8 +632,9 @@ export function installHelpKey(target: Window = window, platform: Platform = cur
     const hit = findShortcut(e, ["keyboard-shortcuts"], platform);
     if (!hit || e.repeat) return;
     if (typesText(hit.combo) && isTypingTarget(e.target)) return;
-    e.preventDefault();
+    // macOS: the Help menu item owns the key; preventDefault would stop it reaching the menu.
     if (platform === "mac" && hit.combo.menu) return;
+    e.preventDefault();
     void openSettings("shortcuts").catch(() => {});
   };
   target.addEventListener("keydown", onKey);

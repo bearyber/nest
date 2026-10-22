@@ -615,9 +615,10 @@ export default function Main() {
       const hit = findShortcut(e, MAIN_SHORTCUTS);
       if (hit) {
         if (typing && hit.shortcut.whileTyping === false) return;
-        e.preventDefault();
-        // macOS: the menu bar item ran it already (lib.rs sends it here as a menu command).
+        // macOS: the menu bar item owns this key and runs it (lib.rs sends it here as a menu
+        // command). Leave the key alone: in the webview, preventDefault stops it reaching the menu.
         if (isMac() && hit.combo.menu) return;
+        e.preventDefault();
         runMenu(hit.shortcut.id);
         return;
       }
