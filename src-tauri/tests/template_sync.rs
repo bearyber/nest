@@ -152,6 +152,7 @@ impl Pc {
             shared: &w.shared,
             dev_build: false,
             device_id: self.device_id,
+            own_name: names.get(self.device_id).map(String::as_str).unwrap_or(""),
             user_dir: &self.user,
             bundled_dir: &bundled_dir(),
             built_in_ids: BUILT_IN_IDS,
@@ -284,26 +285,146 @@ fn half_synced_packages_are_skipped() {
     assert_eq!(mac.get("promo").unwrap().version, 2);
 }
 
+/// Both computers edited the same template to the same version while apart (the Mac's save is
+/// later). The Mac's edit keeps the id on both; the PC, whose edit lost, keeps it as one copy.
 #[test]
-fn a_tie_resolves_the_same_way_on_both_sides() {
+fn a_tie_keeps_both_edits_and_the_loser_makes_one_copy() {
     let w = World::new();
     let mut pc = w.computer(PC);
     let mut mac = w.computer(MAC);
-    // Both had v1, then both saved v2 while offline: the Mac's save is later.
     pc.save("promo", 2, "Promo", "pc edit", T1);
     mac.save("promo", 2, "Promo", "mac edit", T2);
     pc.sync(&w, true);
     mac.sync(&w, true);
     let on_pc = pc.sync(&w, true);
-    assert_eq!(on_pc.got.len(), 1, "the PC takes the later save");
-    assert!(mac.sync(&w, true).got.is_empty(), "the Mac keeps its own");
+    assert_eq!(on_pc.got.len(), 1, "the PC takes the winner");
+    assert_eq!(
+        on_pc.got[0].kept_both,
+        Some(("Promo".to_string(), "Promo (PC)".to_string()))
+    );
     assert_eq!(pc.get("promo").unwrap().description, "mac edit");
+    let copy = pc
+        .mine()
+        .into_iter()
+        .find(|t| t.loaded.template.name == "Promo (PC)")
+        .expect("the PC's edit is kept as a copy")
+        .loaded
+        .template;
+    assert_eq!(copy.description, "pc edit");
+    assert_ne!(copy.id, "promo");
+    assert_eq!(copy.version, 1);
+    assert_eq!(pc.mine().len(), 2);
+    assert_eq!(pc.bin_count(), 1, "only the PC's old file is in the bin");
+    assert_eq!(pc.book.copied.len(), 1);
+    // The Mac keeps its own and gets the copy too (a template from your other computer).
     assert_eq!(mac.get("promo").unwrap().description, "mac edit");
-    assert_eq!(pc.bin_count(), 1, "the PC's own edit is in the bin");
-    for _ in 0..2 {
+    mac.sync(&w, true);
+    assert_eq!(mac.mine().len(), 2);
+    assert!(mac
+        .mine()
+        .iter()
+        .any(|t| t.loaded.template.name == "Promo (PC)"));
+    // No loop: more rounds change nothing, nobody makes another copy.
+    for _ in 0..4 {
         assert!(pc.sync(&w, true).got.is_empty());
         assert!(mac.sync(&w, true).got.is_empty());
+        assert_eq!(pc.mine().len(), 2);
+        assert_eq!(mac.mine().len(), 2);
     }
+}
+
+/// The other way round: the PC's save is later, so the Mac keeps the copy.
+#[test]
+fn a_tie_the_other_way_round_makes_the_copy_on_the_mac() {
+    let w = World::new();
+    let mut pc = w.computer(PC);
+    let mut mac = w.computer(MAC);
+    pc.save("promo", 2, "Promo", "pc edit", T2);
+    mac.save("promo", 2, "Promo", "mac edit", T1);
+    pc.sync(&w, true);
+    let on_mac = mac.sync(&w, true);
+    assert_eq!(
+        on_mac.got[0].kept_both,
+        Some(("Promo".to_string(), "Promo (MacBook)".to_string()))
+    );
+    assert_eq!(mac.get("promo").unwrap().description, "pc edit");
+    // The PC wins: it only receives the Mac's copy, never a clash of its own.
+    let on_pc = pc.sync(&w, true);
+    assert!(on_pc.got.iter().all(|g| g.kept_both.is_none()));
+    assert_eq!(pc.get("promo").unwrap().description, "pc edit");
+    assert!(pc.book.copied.is_empty());
+    for _ in 0..3 {
+        pc.sync(&w, true);
+        mac.sync(&w, true);
+    }
+    assert_eq!(pc.mine().len(), 2);
+    assert_eq!(mac.mine().len(), 2);
+    assert_eq!(pc.get("promo").unwrap().description, "pc edit");
+}
+
+/// Deleting the copy doesn't bring it back, however many times we sync.
+#[test]
+fn a_deleted_copy_is_not_made_again() {
+    let w = World::new();
+    let mut pc = w.computer(PC);
+    let mut mac = w.computer(MAC);
+    pc.save("promo", 2, "Promo", "pc edit", T1);
+    mac.save("promo", 2, "Promo", "mac edit", T2);
+    for _ in 0..3 {
+        pc.sync(&w, true);
+        mac.sync(&w, true);
+    }
+    let copy_id = pc
+        .mine()
+        .into_iter()
+        .find(|t| t.loaded.template.name == "Promo (PC)")
+        .unwrap()
+        .loaded
+        .template
+        .id;
+    pc.delete(&copy_id);
+    for _ in 0..3 {
+        pc.sync(&w, true);
+        mac.sync(&w, true);
+    }
+    assert_eq!(pc.mine().len(), 1, "stays deleted on the PC");
+    assert_eq!(pc.get("promo").unwrap().description, "mac edit");
+    assert_eq!(pc.book.copied.len(), 1);
+}
+
+/// An older computer (0.7.3) has no copy step: its edit just goes to the bin. Modelled by a
+/// computer that never copies; the winner and everything else stays quiet, no loop.
+#[test]
+fn an_older_computer_that_makes_no_copy_does_not_cause_a_loop() {
+    let w = World::new();
+    let mut pc = w.computer(PC);
+    let mut mac = w.computer(MAC);
+    pc.save("promo", 2, "Promo", "pc edit", T1);
+    mac.save("promo", 2, "Promo", "mac edit", T2);
+    // The PC "already has" its record: it installs the winner without a copy (like 0.7.3).
+    pc.book
+        .copied
+        .insert(nest_lib::template_sync::copy_key("promo", 2, PC));
+    for _ in 0..4 {
+        pc.sync(&w, true);
+        mac.sync(&w, true);
+    }
+    assert_eq!(pc.mine().len(), 1);
+    assert_eq!(mac.mine().len(), 1);
+    assert_eq!(pc.get("promo").unwrap().description, "mac edit");
+    assert_eq!(pc.bin_count(), 1, "its own edit is in the bin, restorable");
+    // And the other way: a 0.7.4 computer that loses to an older one's later save.
+    let w = World::new();
+    let mut pc = w.computer(PC);
+    let mut mac = w.computer(MAC);
+    pc.save("promo", 2, "Promo", "pc edit", T2);
+    mac.save("promo", 2, "Promo", "mac edit", T1);
+    for _ in 0..4 {
+        pc.sync(&w, true);
+        mac.sync(&w, true);
+    }
+    assert_eq!(pc.mine().len(), 2);
+    assert_eq!(mac.mine().len(), 2);
 }
 
 #[test]

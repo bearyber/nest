@@ -272,6 +272,10 @@ pub struct EditorSession {
     /// The template's folder, or the project folder a draft was read from.
     pub dir: PathBuf,
     pub staged: Staged,
+    /// The highest version this computer has ever had of each template id (sync bookkeeping,
+    /// filled in by the app just before a save). A save is always higher than that, so a
+    /// version number is never used twice, even after a delete or "go back to original".
+    pub seen: BTreeMap<String, u32>,
 }
 
 impl EditorSession {
@@ -280,6 +284,7 @@ impl EditorSession {
             source: Some(t.clone()),
             dir: t.loaded.dir.clone(),
             staged: Staged::default(),
+            seen: BTreeMap::new(),
         }
     }
 
@@ -288,6 +293,7 @@ impl EditorSession {
             source: None,
             dir: f.dir.clone(),
             staged: f.staged.clone(),
+            seen: BTreeMap::new(),
         }
     }
 
@@ -427,7 +433,9 @@ pub fn save_session(
 ) -> Result<LoadedTemplate, String> {
     let (id, version) = match (&session.source, mode) {
         (None, _) | (Some(_), SaveMode::New) => {
-            (new_template_id(draft, installed, user_dir, built_in_ids), 1)
+            let id = new_template_id(draft, installed, user_dir, built_in_ids, &session.seen);
+            let version = above(&session.seen, &id, 1);
+            (id, version)
         }
         (Some(source), SaveMode::Edit) => {
             let source_id = source.loaded.template.id.clone();
@@ -435,6 +443,7 @@ pub fn save_session(
                 return Err("Built-in templates can't be edited. Customize it instead.".into());
             }
             let next = yours_max(installed, &source_id).unwrap_or(0) + 1;
+            let next = above(&session.seen, &source_id, next);
             (source_id, next)
         }
         (Some(source), SaveMode::Customize) => {
@@ -448,7 +457,13 @@ pub fn save_session(
                     source.loaded.template.name
                 ));
             }
-            (source_id, source.loaded.template.version + 1)
+            // Never a number this computer has already had (a version you went back from).
+            let next = above(
+                &session.seen,
+                &source_id,
+                source.loaded.template.version + 1,
+            );
+            (source_id, next)
         }
     };
     let starters = session.starters();
@@ -538,6 +553,7 @@ pub fn save_kit_folder(
     user_dir: &Path,
     built_in_ids: &[&str],
     ex: &Example,
+    seen: &BTreeMap<String, u32>,
 ) -> Result<LoadedTemplate, String> {
     let draft = with_kit_folder(&source.loaded.template, folder)?;
     let mode = if source.built_in {
@@ -545,7 +561,17 @@ pub fn save_kit_folder(
     } else {
         SaveMode::Edit
     };
-    save(&draft, mode, source, installed, user_dir, built_in_ids, ex)
+    let mut session = EditorSession::from_template(source);
+    session.seen = seen.clone();
+    save_session(
+        &draft,
+        mode,
+        &session,
+        installed,
+        user_dir,
+        built_in_ids,
+        ex,
+    )
 }
 
 fn yours_max(installed: &[Installed], id: &str) -> Option<u32> {
@@ -556,17 +582,26 @@ fn yours_max(installed: &[Installed], id: &str) -> Option<u32> {
         .max()
 }
 
+/// `wanted`, or one above the highest version of `id` this computer has ever had.
+fn above(seen: &BTreeMap<String, u32>, id: &str, wanted: u32) -> u32 {
+    wanted.max(seen.get(id).map_or(1, |v| v.saturating_add(1)))
+}
+
 fn new_template_id(
     draft: &Template,
     installed: &[Installed],
     user_dir: &Path,
     built_in_ids: &[&str],
+    seen: &BTreeMap<String, u32>,
 ) -> String {
     let mut taken: HashSet<String> = installed
         .iter()
         .map(|t| t.loaded.template.id.clone())
         .collect();
     taken.extend(built_in_ids.iter().map(|s| s.to_string()));
+    // An id this computer has had before (deleted since) isn't reused: sync would take the new
+    // template for the old one.
+    taken.extend(seen.keys().cloned());
     new_id(&draft.name, &taken, user_dir)
 }
 

@@ -92,6 +92,10 @@ pub struct Settings {
     /// v0.5 template sync: per template id, when it was saved (RFC 3339, the saving computer's
     /// clock, kept as received) and its lineage (random, made at first sync).
     pub template_sync_meta: std::collections::BTreeMap<String, TemplateSyncMeta>,
+    /// v0.7.4 template sync: edits of this computer's that lost a same-version clash and were
+    /// kept as a copy ("id|version|device id"), so the copy is made once, and deleting it
+    /// doesn't bring it back.
+    pub template_conflict_copies: std::collections::BTreeSet<String>,
     /// v0.5 client kits: a folder holding one folder per client (named by code or name).
     pub kits_folder: Option<PathBuf>,
     /// v0.5 client kits: a kit folder chosen for one client, by client code. Wins over
@@ -158,6 +162,7 @@ impl Default for Settings {
             sync_templates: false,
             template_versions_seen: Default::default(),
             template_sync_meta: Default::default(),
+            template_conflict_copies: Default::default(),
             kits_folder: None,
             client_kits: Default::default(),
             first_project_tip_seen: false,

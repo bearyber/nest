@@ -24,14 +24,25 @@ pub fn note_saved(state: &AppState, id: &str, version: u32, fresh: bool) {
         let mut book = Book {
             seen: std::mem::take(&mut s.template_versions_seen),
             meta: std::mem::take(&mut s.template_sync_meta),
+            copied: std::mem::take(&mut s.template_conflict_copies),
         };
         template_sync::note_local_save(&mut book, id, version, fresh, &at);
         s.template_versions_seen = book.seen;
         s.template_sync_meta = book.meta;
+        s.template_conflict_copies = book.copied;
         Ok(())
     }) {
         log::warn!("couldn't note a template save for sync: {}", e.message);
     }
+}
+
+/// The highest version this computer has had of each template id (for the editor's save).
+pub fn versions_seen(state: &AppState) -> std::collections::BTreeMap<String, u32> {
+    state
+        .settings
+        .lock()
+        .map(|s| s.template_versions_seen.clone())
+        .unwrap_or_default()
 }
 
 /// One template sync: read and install (unless `read` is false: quitting), then write.
@@ -82,11 +93,18 @@ pub fn tick(app: &AppHandle, read: bool) {
         })
         .unwrap_or_default();
     let at = now();
+    let own_name = settings
+        .device_name
+        .clone()
+        .filter(|n| !n.trim().is_empty())
+        .or_else(|| names.get(&device_id).cloned())
+        .unwrap_or_else(crate::devices_cmd::default_name);
     let ctx = Ctx {
         enabled: true,
         shared: &shared,
         dev_build: cfg!(debug_assertions),
         device_id: &device_id,
+        own_name: &own_name,
         user_dir: &state.user_templates,
         bundled_dir: &state.bundled_templates,
         built_in_ids: BUILT_IN_IDS,
@@ -98,12 +116,14 @@ pub fn tick(app: &AppHandle, read: bool) {
     let mut book = Book {
         seen: settings.template_versions_seen.clone(),
         meta: settings.template_sync_meta.clone(),
+        copied: settings.template_conflict_copies.clone(),
     };
     let bin = |t: &template_io::Installed| template_io::delete(t, &state.user_templates);
     let mut save = |b: &Book| {
         crate::settings_cmd::edit_settings_quietly(&state, |s| {
             s.template_versions_seen = b.seen.clone();
             s.template_sync_meta = b.meta.clone();
+            s.template_conflict_copies = b.copied.clone();
             Ok(())
         })
         .map_err(|e| e.message)
@@ -138,8 +158,28 @@ fn set_problem(app: &AppHandle, state: &AppState, problem: Option<String>) {
     }
 }
 
-/// The main window's note: "Got “Video” from MacBook. Your older copy is in the Bin."
+/// The main window's note: "Got “Video” from MacBook. Your older copy is in the Bin." When the
+/// same template was changed on both computers: "“Wedding” was changed on both computers. Kept
+/// both: “Wedding (MacBook)” is the one from this computer."
 pub fn notice(got: &[Got]) -> String {
+    let both: Vec<String> = got
+        .iter()
+        .filter_map(|g| g.kept_both.as_ref())
+        .map(|(name, copy)| {
+            format!(
+                "\u{201c}{name}\u{201d} was changed on both computers. Kept both: \u{201c}{copy}\u{201d} is the one from this computer."
+            )
+        })
+        .collect();
+    let rest: Vec<&Got> = got.iter().filter(|g| g.kept_both.is_none()).collect();
+    let mut parts = both;
+    if !rest.is_empty() {
+        parts.push(notice_got(&rest));
+    }
+    parts.join(" ")
+}
+
+fn notice_got(got: &[&Got]) -> String {
     let bin = bin_name();
     let binned: usize = got.iter().map(|g| g.binned).sum();
     let older = match binned {
@@ -154,7 +194,10 @@ pub fn notice(got: &[Got]) -> String {
             } else {
                 ""
             };
-            format!("Got “{}” from {}.{copy}{older}", one.name, one.from)
+            format!(
+                "Got \u{201c}{}\u{201d} from {}.{copy}{older}",
+                one.name, one.from
+            )
         }
         many => format!(
             "Got {} templates from your other computers.{older}",

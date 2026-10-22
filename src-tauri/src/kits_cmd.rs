@@ -268,6 +268,7 @@ pub fn set_template_kit_folder(
         &state.user_templates,
         BUILT_IN_IDS,
         &example(&state)?,
+        &crate::template_sync_cmd::versions_seen(&state),
     )
     .map_err(AppError::new)?;
     crate::template_sync_cmd::note_saved(&state, &saved.template.id, saved.template.version, false);

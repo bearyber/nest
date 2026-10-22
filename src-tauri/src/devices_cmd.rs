@@ -599,7 +599,7 @@ fn summary(d: &OtherDevice) -> OtherSummary {
     }
 }
 
-fn default_name() -> String {
+pub(crate) fn default_name() -> String {
     let host = std::env::var("COMPUTERNAME")
         .or_else(|_| std::env::var("HOSTNAME"))
         .unwrap_or_default();

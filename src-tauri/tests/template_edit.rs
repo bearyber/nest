@@ -497,6 +497,7 @@ fn put_client_files_in_a_folder_saves_a_new_version() {
         &s.user,
         BUILT_IN_IDS,
         &Example::new(TODAY),
+        &Default::default(),
     )
     .unwrap();
     assert_eq!(mine.template.id, "video");
@@ -518,6 +519,7 @@ fn put_client_files_in_a_folder_saves_a_new_version() {
         &s.user,
         BUILT_IN_IDS,
         &Example::new(TODAY),
+        &Default::default(),
     )
     .unwrap();
     assert_eq!(v2.template.version, mine.template.version + 1);
@@ -559,6 +561,7 @@ fn put_client_files_refuses_folders_made_only_sometimes_or_not_there() {
             &s.user,
             BUILT_IN_IDS,
             &Example::new(TODAY),
+            &Default::default(),
         )
         .unwrap_err();
         assert!(err.contains(says), "{folder}: {err}");
@@ -741,4 +744,83 @@ fn a_dropped_drp_is_checked_and_staged() {
     assert!(session.add_dropped_drp(&dir.join("notes.txt")).is_err());
     let entries: Vec<_> = std::fs::read_dir(&dir).unwrap().collect();
     assert_eq!(entries.len(), 3, "nothing written next to the drop");
+}
+
+/// A saved version is always higher than any this computer has had of that id, even after
+/// "go back to original" or a delete (sync would otherwise call the new save "the same version").
+#[test]
+fn a_new_save_is_always_above_every_version_this_computer_has_had() {
+    use nest_lib::template_edit::{save_session, EditorSession};
+    use std::collections::BTreeMap;
+
+    let s = Setup::new();
+    let video = s.get("video", true);
+    let draft = video.loaded.template.clone();
+    let customize = |seen: &BTreeMap<String, u32>| {
+        let mut session = EditorSession::from_template(&s.get("video", true));
+        session.seen = seen.clone();
+        save_session(
+            &draft,
+            SaveMode::Customize,
+            &session,
+            &s.installed(),
+            &s.user,
+            BUILT_IN_IDS,
+            &Example::new(TODAY),
+        )
+        .unwrap()
+    };
+    let first = customize(&BTreeMap::new()).template.version;
+    assert_eq!(first, video.loaded.template.version + 1);
+
+    // Edit twice more, then "go back to original" (your folders removed; the bin isn't used in
+    // tests). The built-in is all that's left.
+    let mut seen: BTreeMap<String, u32> = [("video".to_string(), first + 5)].into();
+    for t in s.installed().into_iter().filter(|t| !t.built_in) {
+        std::fs::remove_dir_all(&t.loaded.dir).unwrap();
+    }
+    assert!(s.installed().iter().all(|t| t.built_in));
+    // Without the bookkeeping the old number would come back (the bug); with it, it can't.
+    assert_eq!(customize(&BTreeMap::new()).template.version, first);
+    for t in s.installed().into_iter().filter(|t| !t.built_in) {
+        std::fs::remove_dir_all(&t.loaded.dir).unwrap();
+    }
+    let again = customize(&seen).template.version;
+    assert_eq!(again, first + 6);
+
+    // Editing one of yours also goes above everything seen.
+    seen.insert("video".to_string(), again + 3);
+    let mine = s.get("video", false);
+    let mut session = EditorSession::from_template(&mine);
+    session.seen = seen.clone();
+    let edited = save_session(
+        &mine.loaded.template,
+        SaveMode::Edit,
+        &session,
+        &s.installed(),
+        &s.user,
+        BUILT_IN_IDS,
+        &Example::new(TODAY),
+    )
+    .unwrap();
+    assert_eq!(edited.template.version, again + 4);
+
+    // A new template never takes an id this computer has had before (deleted since).
+    let general = s.get("general", true);
+    let mut t = general.loaded.template.clone();
+    t.name = "Old Wedding".into();
+    let mut session = EditorSession::from_template(&general);
+    session.seen = [("old-wedding".to_string(), 4)].into();
+    let made = save_session(
+        &t,
+        SaveMode::New,
+        &session,
+        &s.installed(),
+        &s.user,
+        BUILT_IN_IDS,
+        &Example::new(TODAY),
+    )
+    .unwrap();
+    assert_eq!(made.template.id, "old-wedding-2");
+    assert_eq!(made.template.version, 1);
 }

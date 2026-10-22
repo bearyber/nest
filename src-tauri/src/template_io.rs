@@ -676,7 +676,6 @@ pub fn duplicate(
     user_dir: &Path,
     installed: &[Installed],
 ) -> Result<LoadedTemplate, String> {
-    fs::create_dir_all(user_dir).map_err(|e| e.to_string())?;
     let ids: HashSet<&str> = installed
         .iter()
         .map(|i| i.loaded.template.id.as_str())
@@ -692,14 +691,26 @@ pub fn duplicate(
         })
         .find(|id| !ids.contains(id.as_str()) && !user_dir.join(id).exists())
         .expect("a free id");
+    copy_as(t, user_dir, &new_id, &format!("{} (copy)", t.template.name))
+}
 
+/// A copy of `t` in `user_dir` as a template of its own: `new_id` (the caller picked a free one)
+/// and `new_name`, version 1, starter files along. Nothing existing is overwritten.
+pub fn copy_as(
+    t: &LoadedTemplate,
+    user_dir: &Path,
+    new_id: &str,
+    new_name: &str,
+) -> Result<LoadedTemplate, String> {
+    fs::create_dir_all(user_dir).map_err(|e| e.to_string())?;
+    let new_id = new_id.to_string();
     let tmp = user_dir.join(format!(".duplicate-{}", uuid::Uuid::new_v4().simple()));
     let result = (|| -> Result<LoadedTemplate, String> {
         fs::create_dir(&tmp).map_err(|e| e.to_string())?;
         copy_starters(&t.dir, &tmp)?;
         let mut json = serde_json::to_value(&t.template).map_err(|e| e.to_string())?;
         json["id"] = serde_json::Value::String(new_id.clone());
-        json["name"] = serde_json::Value::String(format!("{} (copy)", t.template.name));
+        json["name"] = serde_json::Value::String(new_name.to_string());
         json["version"] = serde_json::Value::from(1);
         let text = serde_json::to_string_pretty(&json).map_err(|e| e.to_string())? + "\n";
         write_new(
@@ -707,7 +718,7 @@ pub fn duplicate(
             text.as_bytes(),
         )?;
         load_dir(&tmp).map_err(|e| e.to_string())?;
-        let folder = user_dir.join(&new_id);
+        let folder = free_folder(user_dir, &new_id);
         fs::rename(&tmp, &folder).map_err(|e| e.to_string())?;
         load_dir(&folder).map_err(|e| e.to_string())
     })();

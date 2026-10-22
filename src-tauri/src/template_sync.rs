@@ -12,9 +12,13 @@
 //!   skipped; the synced folder itself is never created; every file is capped;
 //! - a template comes in only if its version is higher than the highest this computer has ever
 //!   had of that id (`template_versions_seen`), so a delete or "go back to original" sticks until
-//!   a newer version is saved elsewhere. Same version: the later save wins (then the higher device
-//!   id), so every computer picks the same one. The installed copy keeps the sender's `savedAt`
-//!   and lineage, so it's never sent back as newer;
+//!   a newer version is saved elsewhere. Same version saved on two computers (two edits): `rank()`
+//!   (later save, then higher device id) picks one, the same on every computer. It keeps the id.
+//!   Only the computer whose own edit lost saves that edit as ONE copy (new id, new lineage,
+//!   "<Name> (<this computer>)"), recorded in `Book::copied` so it's never made twice, then
+//!   installs the winner. (A 0.7.3 computer just takes the later save; its older copy goes to
+//!   the bin.) The installed copy keeps the sender's `savedAt` and lineage, so it's never sent
+//!   back as newer;
 //! - a package is opened only to install it, and only if its own id and version (and size) match
 //!   the index: anything else is still syncing and is tried next time;
 //! - a different lineage for the same id is an unrelated template: it comes in once, as a copy
@@ -22,7 +26,7 @@
 //! - installing a newer copy bins the older one (decision T-A, restorable).
 
 use std::cmp::Ordering;
-use std::collections::{BTreeMap, HashMap, HashSet};
+use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 use std::fs;
 use std::io::Read;
 use std::path::{Path, PathBuf};
@@ -62,6 +66,15 @@ pub struct Book {
     /// The highest version this computer has had of each id.
     pub seen: BTreeMap<String, u32>,
     pub meta: BTreeMap<String, TemplateSyncMeta>,
+    /// Edits of this computer's kept as a copy after losing a same-version clash:
+    /// `id|version|device id` (see `copy_key`). Never forgotten, so no second copy is made and
+    /// deleting the copy doesn't bring it back.
+    pub copied: BTreeSet<String>,
+}
+
+/// The record of one clash resolved on this computer.
+pub fn copy_key(id: &str, version: u32, device_id: &str) -> String {
+    format!("{id}|{version}|{device_id}")
 }
 
 /// `<synced>/Nest/templates` (or `templates-dev`).
@@ -210,10 +223,12 @@ pub enum Action {
 pub struct Install {
     pub from: Candidate,
     pub action: Action,
+    /// Two edits of the same version, and this computer's lost: save mine as a copy first.
+    pub keep_mine: bool,
 }
 
-/// What to install from the other computers' lists (pure).
-pub fn decide(locals: &[Local], book: &Book, candidates: &[Candidate]) -> Vec<Install> {
+/// What to install from the other computers' lists (pure). `own` is this computer's device id.
+pub fn decide(own: &str, locals: &[Local], book: &Book, candidates: &[Candidate]) -> Vec<Install> {
     // The best offer of each (id, lineage).
     let mut best: BTreeMap<(String, String), Candidate> = BTreeMap::new();
     for c in candidates {
@@ -243,16 +258,40 @@ pub fn decide(locals: &[Local], book: &Book, candidates: &[Candidate]) -> Vec<In
             Some(m) if m.lineage == w.entry.lineage => {
                 let mine = local.map(|l| l.version).unwrap_or(0);
                 let newer = w.entry.version > seen.max(mine);
-                // Same version saved on two computers: the later save wins. An equal time is
-                // the same save (the copy this computer installed from there).
-                let tie = local.is_some_and(|l| {
-                    l.version == w.entry.version && later(&w.entry.saved_at, &m.saved_at)
-                });
-                if newer || tie {
+                if newer {
                     out.push(Install {
                         from: w,
                         action: Action::Update,
+                        keep_mine: false,
                     });
+                    continue;
+                }
+                // Same version saved on two computers: two edits. An equal time is the same
+                // save (the copy this computer installed from there). Otherwise `rank()` picks
+                // the winner, the same on every computer; if mine loses, it's kept as a copy.
+                let clash = local.filter(|l| {
+                    l.version == w.entry.version
+                        && instant(&w.entry.saved_at) != instant(&m.saved_at)
+                });
+                if let Some(l) = clash {
+                    let mine = Candidate {
+                        device_id: own.to_string(),
+                        id: l.id.clone(),
+                        entry: IndexEntry {
+                            version: l.version,
+                            saved_at: m.saved_at.clone(),
+                            lineage: m.lineage.clone(),
+                            size: 0,
+                        },
+                    };
+                    if rank(&w, &mine) == Ordering::Greater {
+                        let keep_mine = !book.copied.contains(&copy_key(&l.id, l.version, own));
+                        out.push(Install {
+                            from: w,
+                            action: Action::Update,
+                            keep_mine,
+                        });
+                    }
                 }
             }
             meta => {
@@ -269,12 +308,14 @@ pub fn decide(locals: &[Local], book: &Book, candidates: &[Candidate]) -> Vec<In
                         out.push(Install {
                             from: w,
                             action: Action::Update,
+                            keep_mine: false,
                         });
                     }
                 } else {
                     out.push(Install {
                         from: w,
                         action: Action::Copy,
+                        keep_mine: false,
                     });
                 }
             }
@@ -383,6 +424,8 @@ pub struct Ctx<'a> {
     pub shared: &'a Path,
     pub dev_build: bool,
     pub device_id: &'a str,
+    /// This computer's own name, for "Wedding (MacBook)".
+    pub own_name: &'a str,
     pub user_dir: &'a Path,
     pub bundled_dir: &'a Path,
     pub built_in_ids: &'a [&'a str],
@@ -402,6 +445,9 @@ pub struct Got {
     pub action: Action,
     /// Older copies of yours moved to the bin.
     pub binned: usize,
+    /// Two edits of the same version: (name of the template, name of the copy of this
+    /// computer's edit that was kept next to it).
+    pub kept_both: Option<(String, String)>,
 }
 
 #[derive(Debug, Default)]
@@ -476,7 +522,7 @@ fn bring_in(
             })
         })
         .collect();
-    for inst in decide(&locals(installed), book, &candidates) {
+    for inst in decide(ctx.device_id, &locals(installed), book, &candidates) {
         let c = &inst.from;
         if inst.action == Action::Update && ctx.busy.contains(&c.id) {
             continue; // open in the editor: next time
@@ -497,6 +543,17 @@ fn bring_in(
             .cloned()
             .filter(|n| !n.trim().is_empty())
             .unwrap_or_else(|| "another computer".into());
+        let mut kept_both = None;
+        if inst.keep_mine {
+            match keep_my_edit(ctx, book, installed, &c.id, save) {
+                Ok(k) => kept_both = k,
+                Err(e) => {
+                    log::info!("couldn't keep my edit of {} as a copy yet: {e}", c.id);
+                    continue; // nothing is replaced until my edit is safe: next time
+                }
+            }
+            *installed = load();
+        }
         let result = match inst.action {
             Action::Update => template_io::install_synced(
                 &package,
@@ -563,9 +620,63 @@ fn bring_in(
             from,
             action: inst.action,
             binned,
+            kept_both,
         });
     }
     Ok(())
+}
+
+/// This computer's own edit lost a same-version clash: save it as one copy of its own (new id,
+/// new lineage, "<Name> (<this computer>)"). Recorded before anything is replaced. `Ok(None)`
+/// = there's nothing of mine to keep. The caller then installs the winner as usual.
+fn keep_my_edit(
+    ctx: &Ctx,
+    book: &mut Book,
+    installed: &[Installed],
+    id: &str,
+    save: &mut dyn FnMut(&Book) -> Result<(), String>,
+) -> Result<Option<(String, String)>, String> {
+    let Some(mine) = installed
+        .iter()
+        .find(|t| !t.built_in && !t.superseded && t.loaded.template.id == id)
+    else {
+        return Ok(None);
+    };
+    let version = mine.loaded.template.version;
+    let name = copy_name(&mine.loaded.template.name, ctx.own_name);
+    let mut taken: HashSet<String> = installed
+        .iter()
+        .map(|t| t.loaded.template.id.clone())
+        .collect();
+    taken.extend(ctx.built_in_ids.iter().map(|s| s.to_string()));
+    taken.extend(book.meta.keys().cloned());
+    taken.extend(book.seen.keys().cloned());
+    let new = new_id(&name, &taken, ctx.user_dir);
+    let copy = template_io::copy_as(&mine.loaded, ctx.user_dir, &new, &name)?;
+    note_local_save(
+        book,
+        &copy.template.id,
+        copy.template.version,
+        true,
+        ctx.now,
+    );
+    book.copied.insert(copy_key(id, version, ctx.device_id));
+    save(book)?;
+    Ok(Some((
+        mine.loaded.template.name.clone(),
+        copy.template.name,
+    )))
+}
+
+/// "Wedding (MacBook)": the computer's name is cleaned like any name we make (no slashes or
+/// control characters), at most 40 characters, and only ever shown, never used in a path.
+pub fn copy_name(template_name: &str, computer: &str) -> String {
+    let computer: String = sanitize_segment(computer)
+        .unwrap_or_else(|_| "this computer".into())
+        .chars()
+        .take(40)
+        .collect();
+    format!("{} ({})", template_name.trim(), computer.trim())
 }
 
 fn write_own(
@@ -712,11 +823,11 @@ mod tests {
     fn newer_version_installs_older_and_same_are_ignored() {
         let b = book(&[("video", 2, T1, "id:video")]);
         let locals = [local("video", 2)];
-        let newer = decide(&locals, &b, &[cand(B, "video", 3, T1, "id:video")]);
+        let newer = decide(A, &locals, &b, &[cand(B, "video", 3, T1, "id:video")]);
         assert_eq!(newer.len(), 1);
         assert_eq!(newer[0].action, Action::Update);
-        assert!(decide(&locals, &b, &[cand(B, "video", 1, T2, "id:video")]).is_empty());
-        assert!(decide(&locals, &b, &[cand(B, "video", 2, T1, "id:video")]).is_empty());
+        assert!(decide(A, &locals, &b, &[cand(B, "video", 1, T2, "id:video")]).is_empty());
+        assert!(decide(A, &locals, &b, &[cand(B, "video", 2, T1, "id:video")]).is_empty());
     }
 
     #[test]
@@ -726,11 +837,13 @@ mod tests {
         let a_book = book(&[("video", 3, T1, "id:video")]);
         let b_book = book(&[("video", 3, T2, "id:video")]);
         let on_a = decide(
+            A,
             &[local("video", 3)],
             &a_book,
             &[cand(B, "video", 3, T2, "id:video")],
         );
         let on_b = decide(
+            B,
             &[local("video", 3)],
             &b_book,
             &[cand(A, "video", 3, T1, "id:video")],
@@ -743,12 +856,12 @@ mod tests {
             cand(A, "video", 3, T1, "id:video"),
             cand(B, "video", 3, T2, "id:video"),
         ];
-        assert_eq!(decide(&[], &none, &both)[0].from.device_id, B);
+        assert_eq!(decide(A, &[], &none, &both)[0].from.device_id, B);
         let same_time = [
             cand(B, "video", 3, T1, "id:video"),
             cand(A, "video", 3, T1, "id:video"),
         ];
-        assert_eq!(decide(&[], &none, &same_time)[0].from.device_id, B);
+        assert_eq!(decide(A, &[], &none, &same_time)[0].from.device_id, B);
     }
 
     #[test]
@@ -756,6 +869,7 @@ mod tests {
         // A installed B's v3 (keeping B's time): B sees A's identical entry and does nothing.
         let b_book = book(&[("video", 3, T2, "id:video")]);
         assert!(decide(
+            A,
             &[local("video", 3)],
             &b_book,
             &[cand(A, "video", 3, T2, "id:video")]
@@ -766,9 +880,9 @@ mod tests {
     #[test]
     fn deleted_stays_deleted_until_newer() {
         let b = book(&[("video", 3, T1, "id:video")]);
-        assert!(decide(&[], &b, &[cand(B, "video", 3, T2, "id:video")]).is_empty());
+        assert!(decide(A, &[], &b, &[cand(B, "video", 3, T2, "id:video")]).is_empty());
         assert_eq!(
-            decide(&[], &b, &[cand(B, "video", 4, T2, "id:video")]).len(),
+            decide(A, &[], &b, &[cand(B, "video", 4, T2, "id:video")]).len(),
             1
         );
     }
@@ -777,7 +891,7 @@ mod tests {
     fn unrelated_same_id_comes_in_once_as_a_copy() {
         let b = book(&[("wedding", 1, T1, "mine")]);
         let theirs = [cand(B, "wedding", 1, T2, "theirs")];
-        let d = decide(&[local("wedding", 1)], &b, &theirs);
+        let d = decide(A, &[local("wedding", 1)], &b, &theirs);
         assert_eq!(d.len(), 1);
         assert_eq!(d[0].action, Action::Copy);
         // Once the copy is here (under another id, same lineage), it isn't copied again, and
@@ -793,6 +907,7 @@ mod tests {
         let mut both = theirs.to_vec();
         both.push(cand(B, "wedding-pc", 1, T1, "mine"));
         assert!(decide(
+            A,
             &[local("wedding", 1), local("wedding-macbook", 1)],
             &after,
             &both
@@ -802,7 +917,7 @@ mod tests {
 
     #[test]
     fn new_template_from_elsewhere_installs() {
-        let d = decide(&[], &Book::default(), &[cand(B, "promo", 1, T1, "x")]);
+        let d = decide(A, &[], &Book::default(), &[cand(B, "promo", 1, T1, "x")]);
         assert_eq!(d.len(), 1);
         assert_eq!(d[0].action, Action::Update);
     }
@@ -858,5 +973,74 @@ mod tests {
         );
         assert!(!needs_write(&local("a", 1), &m, &own));
         assert!(needs_write(&local("a", 2), &m, &own));
+    }
+
+    #[test]
+    fn same_version_two_edits_only_the_lower_computer_keeps_a_copy() {
+        // A saved v3 at T1, B saved v3 at T2 (later): B ranks higher, on both computers.
+        let a_book = book(&[("wedding", 3, T1, "id:wedding")]);
+        let b_book = book(&[("wedding", 3, T2, "id:wedding")]);
+        let on_a = decide(
+            A,
+            &[local("wedding", 3)],
+            &a_book,
+            &[cand(B, "wedding", 3, T2, "id:wedding")],
+        );
+        assert_eq!(on_a.len(), 1);
+        assert_eq!(on_a[0].action, Action::Update);
+        assert!(on_a[0].keep_mine, "A's edit lost: A keeps one copy");
+        let on_b = decide(
+            B,
+            &[local("wedding", 3)],
+            &b_book,
+            &[cand(A, "wedding", 3, T1, "id:wedding")],
+        );
+        assert!(on_b.is_empty(), "the higher computer does nothing special");
+    }
+
+    #[test]
+    fn equal_save_times_go_by_device_id_and_same_save_is_no_clash() {
+        // Same instant written two ways = the same save (what was installed from there).
+        let same_instant = "2026-10-15T08:00:00.000+00:00";
+        let a_book = book(&[("w", 3, T1, "id:w")]);
+        assert!(decide(
+            A,
+            &[local("w", 3)],
+            &a_book,
+            &[cand(B, "w", 3, same_instant, "id:w")]
+        )
+        .is_empty());
+        // The record stops a second copy but the winner still installs.
+        let mut with_record = book(&[("w", 3, T1, "id:w")]);
+        with_record.copied.insert(copy_key("w", 3, A));
+        let d = decide(
+            A,
+            &[local("w", 3)],
+            &with_record,
+            &[cand(B, "w", 3, T2, "id:w")],
+        );
+        assert_eq!(d.len(), 1);
+        assert!(!d[0].keep_mine);
+    }
+
+    #[test]
+    fn a_newer_version_never_makes_a_copy() {
+        let b = book(&[("w", 2, T1, "id:w")]);
+        let d = decide(A, &[local("w", 2)], &b, &[cand(B, "w", 3, T2, "id:w")]);
+        assert_eq!(d.len(), 1);
+        assert!(!d[0].keep_mine);
+    }
+
+    #[test]
+    fn copy_names_are_clean_and_short() {
+        assert_eq!(copy_name("Wedding", "MacBook"), "Wedding (MacBook)");
+        let long = "x".repeat(100);
+        assert_eq!(
+            copy_name("Wedding", &long),
+            format!("Wedding ({})", "x".repeat(40))
+        );
+        assert_eq!(copy_name("Wedding", "../Bad:/Name"), "Wedding (..BadName)");
+        assert_eq!(copy_name("Wedding", "  "), "Wedding (this computer)");
+        assert_eq!(copy_name(" Wedding ", "CON"), "Wedding (this computer)");
     }
 }

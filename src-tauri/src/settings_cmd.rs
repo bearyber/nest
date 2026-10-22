@@ -995,6 +995,8 @@ pub fn save_template(
         Some(s) => s,
         None => EditorSession::from_template(&find_template(&state, &key)?),
     };
+    let mut session = session;
+    session.seen = crate::template_sync_cmd::versions_seen(&state);
     let saved = template_edit::save_session(
         &draft,
         mode,
