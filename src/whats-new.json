@@ -1,4 +1,12 @@
 {
+  "0.7.4": [
+    "Settings opens instantly",
+    "Settings → Computers: this computer's name and its job-code letter, together in one place",
+    "A computer's letter can now be one or two letters (for example MB), and job numbers carry on when you change it",
+    "Two computers using the same letter? Nest tells you and suggests a free one",
+    "A Mac copied from another Mac (Migration Assistant or a backup) gets its own place in your list",
+    "A template changed on both computers at once keeps both versions instead of losing one"
+  ],
   "0.7.3": [
     "Fixed: on a Mac, shortcuts like ⌘N and ⌘, now work, and File → Open and Show in Finder always respond",
     "Fixed: right-click menus work every time (Open, Mark done, Copy job code, and the template menus)",
